@@ -10,6 +10,9 @@ cbuffer LightCB : register(b1)
     float4 u_dirDir;
     float4 u_dirColor;
     float4 u_lightCounts;
+    float4 u_cameraPos;
+    float4 u_iblParams;
+    float4 u_debugParams;
 }
 
 struct VSInput
@@ -32,7 +35,9 @@ struct HSInput
 HSInput VSMain(VSInput i)
 {
     HSInput o;
-    // Keep data in object space; DS will transform by u_mvp/u_lightVP
+    // Keep data in object space.
+    // Tessellation happens before final transform so DS can interpolate first,
+    // then apply object/world/clip transforms on tessellated vertices.
     o.position = i.position;
     o.normal   = i.normal;
     o.color    = i.color;

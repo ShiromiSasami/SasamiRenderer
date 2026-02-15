@@ -1,32 +1,45 @@
 #pragma once
 #include <array>
+#include <cassert>
 #include <windows.h>
 #include "Object/SObject.h"
 #include "AppFramework/Component/TransformComponent.h"
-#include "Renderer/RenderCameraProxy.h"
+#include "Renderer/Scene/RenderCameraProxy.h"
 
 namespace SasamiRenderer
 {
     class Camera : public SObject {
     public:
+        Camera() { AddComponent<TransformComponent>(); }
+
         void SetYawPitch(float yaw, float pitch) {
             m_yaw = yaw; 
             m_pitch = ClampPitch(pitch);
-            m_transform.rotation[0] = m_pitch;
-            m_transform.rotation[1] = m_yaw;
+            Transform().rotation.pitch = m_pitch;
+            Transform().rotation.yaw = m_yaw;
         }
         void AddYawPitch(float dyaw, float dpitch) {
             m_yaw += dyaw; 
             m_pitch = ClampPitch(m_pitch + dpitch);
-            m_transform.rotation[0] = m_pitch;
-            m_transform.rotation[1] = m_yaw;
+            Transform().rotation.pitch = m_pitch;
+            Transform().rotation.yaw = m_yaw;
         }
         void SetDistance(float d) { m_distance = ClampDistance(d); }
         void AddDistance(float dd) { m_distance = ClampDistance(m_distance + dd); }
-        void SetTarget(float x, float y, float z) { m_transform.position[0] = x; m_transform.position[1] = y; m_transform.position[2] = z; }
-        void AddTarget(float dx, float dy, float dz) { m_transform.position[0] += dx; m_transform.position[1] += dy; m_transform.position[2] += dz; }
-        TransformComponent& Transform() { return m_transform; }
-        const TransformComponent& Transform() const { return m_transform; }
+        void SetTarget(float x, float y, float z) { Transform().position = Vector3(x, y, z); }
+        void AddTarget(float dx, float dy, float dz) { Transform().position += Vector3(dx, dy, dz); }
+        TransformComponent& Transform()
+        {
+            TransformComponent* component = GetComponent<TransformComponent>();
+            assert(component && "Camera requires TransformComponent.");
+            return *component;
+        }
+        const TransformComponent& Transform() const
+        {
+            const TransformComponent* component = GetComponent<TransformComponent>();
+            assert(component && "Camera requires TransformComponent.");
+            return *component;
+        }
 
         float Yaw() const { return m_yaw; }
         float Pitch() const { return m_pitch; }
@@ -79,7 +92,6 @@ namespace SasamiRenderer
         float m_yaw = 0.0f;
         float m_pitch = 0.0f;
         float m_distance = 2.5f;
-        TransformComponent m_transform;
         bool m_rotating = false;
         bool m_moveForward = false;
         bool m_moveBackward = false;

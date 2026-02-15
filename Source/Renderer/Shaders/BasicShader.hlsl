@@ -72,7 +72,8 @@ float4 PSMain(PSInput input) : SV_TARGET
         ? float4(texColor.rgb * texColor.a, texColor.a)
         : float4(1.0f, 1.0f, 1.0f, 1.0f);
 
-    // Shadow sampling (manual PCF-like average of 2x2 taps)
+    // Shadow sampling (manual 2x2 PCF):
+    // visibility = (1 / 4) * sum_{kernel} step(shadowDepth >= receiverDepth - bias)
     float3 sc = input.lightPos.xyz / max(input.lightPos.w, 1e-6);
     float2 suv = sc.xy * 0.5 + 0.5;   // NDC->UV
     float  sdepth = sc.z * 0.5 + 0.5; // map from [-1,1] to [0,1]
@@ -95,28 +96,32 @@ float4 PSMain(PSInput input) : SV_TARGET
 
     float3 N = normalize(input.normal);
     float3 L = normalize(-u_dirDir.xyz); // direction to light
+    // Lambert diffuse:
+    // L_o = max(N.L, 0) * lightIntensity * visibility
     float diffuse = saturate(dot(N, L)) * visibility * u_dirDir.w;
 
-    float point = 0.0;
+    float pointLightTerm = 0.0;
     int pointCount = (int)u_lightCounts.x;
-    for (int i = 0; i < pointCount; ++i) {
-        PointLight pl = u_pointLights[i];
+    for (int pointIndex = 0; pointIndex < pointCount; ++pointIndex) {
+        PointLight pl = u_pointLights[pointIndex];
         float4 posRange = pl.posRange;
         float4 colInt = pl.colorIntensity;
         float3 toL = posRange.xyz - input.worldPos;
         float dist = length(toL);
         if (dist < posRange.w && dist > 1e-4 && colInt.w > 0.0) {
             float3 Lp = toL / dist;
+            // Distance attenuation:
+            // atten = saturate(1 - d / range)^2
             float atten = saturate(1.0 - dist / max(posRange.w, 1e-3));
             atten *= atten;
-            point += saturate(dot(N, Lp)) * colInt.w * atten;
+            pointLightTerm += saturate(dot(N, Lp)) * colInt.w * atten;
         }
     }
 
-    float spot = 0.0;
+    float spotLightTerm = 0.0;
     int spotCount = (int)u_lightCounts.y;
-    for (int i = 0; i < spotCount; ++i) {
-        SpotLight sl = u_spotLights[i];
+    for (int spotIndex = 0; spotIndex < spotCount; ++spotIndex) {
+        SpotLight sl = u_spotLights[spotIndex];
         float4 posRange = sl.posRange;
         float4 dirInner = sl.dirCosInner;
         float4 colInt = sl.colorIntensity;
@@ -126,14 +131,18 @@ float4 PSMain(PSInput input) : SV_TARGET
         if (dist < posRange.w && dist > 1e-4 && colInt.w > 0.0) {
             float3 Ls = toL / dist;
             float cosTheta = dot(normalize(-Ls), normalize(dirInner.xyz));
+            // Spot cone falloff:
+            // spotFactor = smoothstep(cosOuter, cosInner, cosTheta)
             float spotFactor = smoothstep(params.x, dirInner.w, cosTheta);
             float atten = saturate(1.0 - dist / max(posRange.w, 1e-3));
             atten *= atten;
-            spot += saturate(dot(N, Ls)) * colInt.w * atten * spotFactor;
+            spotLightTerm += saturate(dot(N, Ls)) * colInt.w * atten * spotFactor;
         }
     }
 
     float ambient = 0.2;
-    float shade = saturate(ambient + diffuse + point + spot);
+    // Final non-PBR shading sum:
+    // shade = saturate(ambient + directional + point + spot)
+    float shade = saturate(ambient + diffuse + pointLightTerm + spotLightTerm);
     return base * input.color * shade;
 }

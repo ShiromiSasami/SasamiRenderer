@@ -23,24 +23,32 @@
     <None Include="Libraries\packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Source\Renderer\GraphicsDevice.h" />
     <ClInclude Include="Source\Foundation\Math\MathUtil.h" />
-    <ClInclude Include="Source\Renderer\Vertex.h" />
-    <ClInclude Include="Source\Renderer\Mesh.h" />
-    <ClInclude Include="Source\Renderer\RenderCameraProxy.h" />
-    <ClInclude Include="Source\Renderer\RenderProxy.h" />
-    <ClInclude Include="Source\Renderer\Renderer.h" />
-    <ClInclude Include="Source\Renderer\RenderLayerConfigurator.h" />
-    <ClInclude Include="Source\Renderer\RenderTargetResourceBinder.h" />
-    <ClInclude Include="Source\Renderer\Texture.h" />
-    <ClInclude Include="Source\Renderer\Material.h" />  </ItemGroup>
+    <ClInclude Include="Source\Renderer\Core\Dx12GraphicsDevice.h" />
+    <ClInclude Include="Source\Renderer\Core\GraphicsDevice.h" />
+    <ClInclude Include="Source\Renderer\Core\RenderLayerConfigurator.h" />
+    <ClInclude Include="Source\Renderer\Core\Renderer.h" />
+    <ClInclude Include="Source\Renderer\Core\RenderTargetResourceBinder.h" />
+    <ClInclude Include="Source\Renderer\Scene\DrawCommandBuilder.h" />
+    <ClInclude Include="Source\Renderer\Scene\Material.h" />
+    <ClInclude Include="Source\Renderer\Scene\MeshBuffer.h" />
+    <ClInclude Include="Source\Renderer\Scene\RenderCameraProxy.h" />
+    <ClInclude Include="Source\Renderer\Scene\RenderLightProxy.h" />
+    <ClInclude Include="Source\Renderer\Scene\RenderProxy.h" />
+    <ClInclude Include="Source\Renderer\Structures\Float3.h" />
+    <ClInclude Include="Source\Renderer\Structures\Mesh.h" />
+    <ClInclude Include="Source\Renderer\Structures\Texture.h" />
+    <ClInclude Include="Source\Renderer\Structures\Vertex.h" />
+    <ClInclude Include="Source\Renderer\Utilities\RendererMathUtility.h" />
+  </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Source\Renderer\MeshBuffer.cpp" />
-    <ClCompile Include="Source\Renderer\DrawCommandBuilder.cpp" />
-    <ClCompile Include="Source\Renderer\Renderer.cpp" />
-    <ClCompile Include="Source\Renderer\RenderLayerConfigurator.cpp" />
-    <ClCompile Include="Source\Renderer\RenderTargetResourceBinder.cpp" />
-    <ClCompile Include="Source\Renderer\Dx12GraphicsDevice.cpp" />
+    <ClCompile Include="Source\Renderer\Scene\MeshBuffer.cpp" />
+    <ClCompile Include="Source\Renderer\Scene\DrawCommandBuilder.cpp" />
+    <ClCompile Include="Source\Renderer\Utilities\RendererMathUtility.cpp" />
+    <ClCompile Include="Source\Renderer\Core\Renderer.cpp" />
+    <ClCompile Include="Source\Renderer\Core\RenderLayerConfigurator.cpp" />
+    <ClCompile Include="Source\Renderer\Core\RenderTargetResourceBinder.cpp" />
+    <ClCompile Include="Source\Renderer\Core\Dx12GraphicsDevice.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>15.0</VCProjectVersion>

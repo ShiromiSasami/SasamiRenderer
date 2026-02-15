@@ -10,6 +10,9 @@ cbuffer LightCB : register(b1)
     float4 u_dirDir;
     float4 u_dirColor;
     float4 u_lightCounts;
+    float4 u_cameraPos;
+    float4 u_iblParams;
+    float4 u_debugParams;
 }
 
 struct HSInput
@@ -43,7 +46,9 @@ PSInput DSMain(
     float3 bary : SV_DomainLocation,
     const OutputPatch<HSInput, 3> patch)
 {
-    // Barycentric interpolation of object-space attributes
+    // Barycentric interpolation on triangle:
+    // value = v0*bary.x + v1*bary.y + v2*bary.z
+    // where bary.x + bary.y + bary.z = 1.
     float3 p0 = patch[0].position;
     float3 p1 = patch[1].position;
     float3 p2 = patch[2].position;
@@ -58,11 +63,13 @@ PSInput DSMain(
     float4 c2 = patch[2].color;
 
     float3 pos = p0 * bary.x + p1 * bary.y + p2 * bary.z;
+    // Normalized interpolated normal to keep unit length after interpolation.
     float3 nor = normalize(n0 * bary.x + n1 * bary.y + n2 * bary.z);
     float2 uv  = uv0 * bary.x + uv1 * bary.y + uv2 * bary.z;
     float4 col = c0 * bary.x + c1 * bary.y + c2 * bary.z;
 
     PSInput o;
+    // Object -> world/clip/light-clip transforms after tessellation.
     float4 worldPos = mul(float4(pos, 1.0), u_world);
     o.position = mul(float4(pos, 1.0), u_mvp);
     o.worldN   = normalize(mul(float4(nor, 0.0), u_world).xyz);

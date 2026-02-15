@@ -11,11 +11,30 @@ namespace SasamiRenderer
 {
     namespace
     {
+        bool IsCameraMovementKey(WPARAM key)
+        {
+            switch (key) {
+            case 'W':
+            case 'A':
+            case 'S':
+            case 'D':
+            case VK_UP:
+            case VK_DOWN:
+            case VK_LEFT:
+            case VK_RIGHT:
+                return true;
+            default:
+                return false;
+            }
+        }
+
         float NormalizeTrigger(BYTE value)
         {
             if (value <= XINPUT_GAMEPAD_TRIGGER_THRESHOLD) {
                 return 0.0f;
             }
+            // Map trigger [threshold..255] -> [0..1]:
+            // normalized = clamp((value - threshold) / (255 - threshold), 0, 1)
             const float num = static_cast<float>(value - XINPUT_GAMEPAD_TRIGGER_THRESHOLD);
             const float den = static_cast<float>(255 - XINPUT_GAMEPAD_TRIGGER_THRESHOLD);
             return std::clamp(num / den, 0.0f, 1.0f);
@@ -30,11 +49,15 @@ namespace SasamiRenderer
             }
 
             if (v > 0) {
+                // Positive side mapping:
+                // [deadZone..32767] -> [0..1]
                 const float num = static_cast<float>(v - dz);
                 const float den = static_cast<float>(32767 - dz);
                 return std::clamp(num / den, 0.0f, 1.0f);
             }
 
+            // Negative side mapping:
+            // [-32768..-deadZone] -> [-1..0]
             const float num = static_cast<float>(v + dz);
             const float den = static_cast<float>(32768 - dz);
             return std::clamp(num / den, -1.0f, 0.0f);
@@ -181,7 +204,9 @@ namespace SasamiRenderer
                 ImGuiKey key = VirtualKeyToImGuiKey(kb.VKey);
                 if (key != ImGuiKey_None)
                     io.AddKeyEvent(key, down);
-                if (!io.WantCaptureKeyboard) {
+                const bool movementKey = IsCameraMovementKey(kb.VKey);
+                const bool allowMovementThroughUi = movementKey && !io.WantTextInput;
+                if (!io.WantCaptureKeyboard || allowMovementThroughUi) {
                     if (down) OnKeyDown(kb.VKey);
                     else OnKeyUp(kb.VKey);
                 }
@@ -239,6 +264,8 @@ namespace SasamiRenderer
             switch (msg) {
             case WM_KEYDOWN:
             case WM_KEYUP:
+            case WM_SYSKEYDOWN:
+            case WM_SYSKEYUP:
             case WM_RBUTTONDOWN:
             case WM_RBUTTONUP:
             case WM_MOUSEMOVE:
@@ -250,13 +277,25 @@ namespace SasamiRenderer
         switch (msg)
         {
         case WM_KEYDOWN:
-            if (!ImGuiCoordinator::Instance().WantsKeyboardCapture())
+        case WM_SYSKEYDOWN:
+        {
+            const bool movementKey = IsCameraMovementKey(wParam);
+            const ImGuiIO& io = ImGui::GetIO();
+            const bool allowMovementThroughUi = movementKey && !io.WantTextInput;
+            if (!ImGuiCoordinator::Instance().WantsKeyboardCapture() || allowMovementThroughUi)
                 OnKeyDown(wParam);
             return true;
+        }
         case WM_KEYUP:
-            if (!ImGuiCoordinator::Instance().WantsKeyboardCapture())
+        case WM_SYSKEYUP:
+        {
+            const bool movementKey = IsCameraMovementKey(wParam);
+            const ImGuiIO& io = ImGui::GetIO();
+            const bool allowMovementThroughUi = movementKey && !io.WantTextInput;
+            if (!ImGuiCoordinator::Instance().WantsKeyboardCapture() || allowMovementThroughUi)
                 OnKeyUp(wParam);
             return true;
+        }
         case WM_RBUTTONDOWN:
             m_rightButtonDown = true;
             if (!ImGuiCoordinator::Instance().WantsMouseCapture())

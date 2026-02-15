@@ -9,7 +9,7 @@ namespace SasamiRenderer
 {
 	using namespace boost::signals2;
 
-    class Application;
+    class ApplicationCore;
 
     class InputSystem {
     public:
@@ -49,7 +49,7 @@ namespace SasamiRenderer
         bool IsGamepadConnected(int index = 0) const;
 
     private:
-        friend class Application;
+        friend class ApplicationCore;
         static constexpr int kMaxGamepads = 4;
 
         void OnKeyDown(WPARAM key);

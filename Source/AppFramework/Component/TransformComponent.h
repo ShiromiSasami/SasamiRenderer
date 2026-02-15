@@ -1,11 +1,15 @@
 #pragma once
 
+#include "AppFramework/Component/IComponent.h"
+#include "Foundation/Math/Rotation3.h"
+#include "Foundation/Math/Vector3.h"
+
 namespace SasamiRenderer
 {
-    struct TransformComponent
+    struct TransformComponent : public IComponent
     {
-        float position[3] = { 0.0f, 0.0f, 0.0f };
-        float rotation[3] = { 0.0f, 0.0f, 0.0f }; // pitch, yaw, roll
-        float scale[3] = { 1.0f, 1.0f, 1.0f };
+        Vector3 position = Vector3(0.0f, 0.0f, 0.0f);
+        Rotation3 rotation = Rotation3(0.0f, 0.0f, 0.0f); // pitch, yaw, roll
+        Vector3 scale = Vector3(1.0f, 1.0f, 1.0f);
     };
 }

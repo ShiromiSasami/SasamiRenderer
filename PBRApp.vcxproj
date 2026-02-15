@@ -27,7 +27,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Samples\PBRApp\RenderingApp.cpp" />
-    <ClCompile Include="Samples\PBRApp\main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="SasamiRenderer.vcxproj">

@@ -48,10 +48,17 @@ msbuild PBRApp.vcxproj /p:Configuration=Release /p:Platform=x64
 - Camera: 移動速度、Near/Far Clip
 - Lighting: Directional/Point/Spot ライト
 - Render: Tessellation + Geometry Shader 切り替え
+- Render: `GBuffer Debug` 表示切り替え（`Final Lit / Albedo / Normal / Roughness / Metallic / AO / Shadow`）
+  - ショートカット: `F2` で循環切り替え
 
 ## Repository Layout
 
-- `Source/Renderer/`: renderer core, RHI abstraction, shaders
+- `Source/Renderer/Core/`: renderer本体、RHI抽象、DX12デバイス実装、パイプライン設定
+- `Source/Renderer/Scene/`: `RenderProxy`、`MeshBuffer`、描画コマンド構築
+- `Source/Renderer/Assets/`: テクスチャ/HDR/キューブマップ読み込み・GPUテクスチャ生成
+- `Source/Renderer/Utilities/`: ライティング計算、IBL生成などのレンダリング補助計算
+- `Source/Renderer/Structures/`: renderer専用の軽量データ構造（`Float3` など）
+- `Source/Renderer/Shaders/`: HLSL
 - `Source/AppFramework/`: app loop, input, camera, model loading, ImGui
 - `Samples/PBRApp/`: sample app implementation
 - `Assets/`: models/textures
@@ -61,4 +68,6 @@ msbuild PBRApp.vcxproj /p:Configuration=Release /p:Platform=x64
 ## Notes
 
 - 現在の実装バックエンドは DX12 のみです（Vulkan/DX11/OpenGL は未実装スタブ）。
+- アイコン/空/IBL の探索パスは、`Renderer` 内の既定値として `Assets/` 配下の固定パスを使用します。
+- サンプルアプリのエントリポイントは `SASAMI_IMPLEMENT_APPLICATION(...)` マクロで定義しています。
 - 実行時デバッグは Visual Studio Output の D3D12 メッセージを参照してください。

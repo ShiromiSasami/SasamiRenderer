@@ -13,61 +13,92 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Header Files\Struct">
+      <UniqueIdentifier>{c68b2a46-faa0-4118-b703-b15f7acf391f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Struct\Proxy">
+      <UniqueIdentifier>{0baf39b1-216b-4cfb-bf75-3dde43f46cce}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Tool">
+      <UniqueIdentifier>{c8aff3b3-f7c9-45e2-9d0b-1c79d6271b58}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="packages.config" />
+    <None Include="Libraries\packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Source\Renderer\GraphicsDevice.h">
+    <ClInclude Include="Source\Renderer\Core\Dx12GraphicsDevice.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\GraphicsDevice.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\RenderLayerConfigurator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\Renderer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\RenderTargetResourceBinder.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\DrawCommandBuilder.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\MeshBuffer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Structures\Mesh.h">
+      <Filter>Header Files\Struct</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Structures\Float3.h">
+      <Filter>Header Files\Struct</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\Material.h">
+      <Filter>Header Files\Struct</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Structures\Texture.h">
+      <Filter>Header Files\Struct</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Structures\Vertex.h">
+      <Filter>Header Files\Struct</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\RenderLightProxy.h">
+      <Filter>Header Files\Struct\Proxy</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\RenderProxy.h">
+      <Filter>Header Files\Struct\Proxy</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\RenderCameraProxy.h">
+      <Filter>Header Files\Struct\Proxy</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Utilities\RendererMathUtility.h">
+      <Filter>Header Files\Tool</Filter>
     </ClInclude>
     <ClInclude Include="Source\Foundation\Math\MathUtil.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\Tool</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Vertex.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Renderer\Mesh.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Renderer\RenderCameraProxy.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Renderer\RenderProxy.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Renderer\Renderer.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Renderer\RenderLayerConfigurator.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Renderer\RenderTargetResourceBinder.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Renderer\Texture.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Renderer\Material.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>  </ItemGroup>
+  </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Source\Renderer\MeshBuffer.cpp">
+    <ClCompile Include="Source\Renderer\Scene\MeshBuffer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\DrawCommandBuilder.cpp">
+    <ClCompile Include="Source\Renderer\Scene\DrawCommandBuilder.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Renderer.cpp">
+    <ClCompile Include="Source\Renderer\Utilities\RendererMathUtility.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\RenderLayerConfigurator.cpp">
+    <ClCompile Include="Source\Renderer\Core\Renderer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\RenderTargetResourceBinder.cpp">
+    <ClCompile Include="Source\Renderer\Core\RenderLayerConfigurator.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Dx12GraphicsDevice.cpp">
+    <ClCompile Include="Source\Renderer\Core\RenderTargetResourceBinder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Core\Dx12GraphicsDevice.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

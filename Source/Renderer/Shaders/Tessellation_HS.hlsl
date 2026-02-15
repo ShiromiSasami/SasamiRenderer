@@ -10,6 +10,9 @@ cbuffer LightCB : register(b1)
     float4 u_dirDir;
     float4 u_dirColor;
     float4 u_lightCounts;
+    float4 u_cameraPos;
+    float4 u_iblParams;
+    float4 u_debugParams;
 }
 
 struct HSInput
@@ -36,12 +39,14 @@ HSInput HSMain(InputPatch<HSInput, 3> patch, uint i : SV_OutputControlPointID)
     return patch[i];
 }
 
-// Simple constant tess factors; tweak for quality/perf
+// Constant tessellation factor per edge/inside.
+// Larger value => more generated triangles (higher quality, higher cost).
 static const float kTess = 4.0f;
 
 HSConst PatchConstants(InputPatch<HSInput, 3> patch, uint patchId : SV_PrimitiveID)
 {
     HSConst pc;
+    // Isotropic tessellation: all three edges and inside share same factor.
     pc.edges[0] = kTess;
     pc.edges[1] = kTess;
     pc.edges[2] = kTess;

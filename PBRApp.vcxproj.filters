@@ -19,8 +19,5 @@
     <ClCompile Include="Samples\PBRApp\RenderingApp.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Samples\PBRApp\main.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
   </ItemGroup>
 </Project>

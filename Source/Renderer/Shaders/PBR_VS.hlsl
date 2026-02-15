@@ -10,6 +10,9 @@ cbuffer LightCB : register(b1)
     float4 u_dirDir;    // xyz: forward dir, w: intensity
     float4 u_dirColor;  // rgb: color
     float4 u_lightCounts; // x: pointCount, y: spotCount
+    float4 u_cameraPos;
+    float4 u_iblParams;
+    float4 u_debugParams;
 }
 
 struct VSInput
@@ -33,11 +36,15 @@ struct PSInput
 PSInput VSMain(VSInput input)
 {
     PSInput o;
+    // Object -> world transform for position.
     float4 worldPos = mul(float4(input.position, 1.0), u_world);
+    // Object -> clip transform.
     o.position = mul(float4(input.position, 1.0), u_mvp);
+    // Normal uses w=0 so translation component in u_world is ignored.
     o.worldN   = normalize(mul(float4(input.normal, 0.0), u_world).xyz);
     o.uv       = input.uv;
     o.color    = input.color;
+    // World -> light clip transform for shadow lookup.
     o.lightPos = mul(worldPos, u_lightVP);
     o.worldPos = worldPos.xyz;
     return o;

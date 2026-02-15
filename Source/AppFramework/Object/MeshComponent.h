@@ -2,13 +2,15 @@
 
 #include <string>
 #include <vector>
+#include <memory>
 
-#include "Renderer/Mesh.h"
-#include "Renderer/RenderProxy.h"
+#include "AppFramework/Component/IComponent.h"
+#include "Renderer/Structures/Mesh.h"
+#include "Renderer/Scene/RenderProxy.h"
 
 namespace SasamiRenderer
 {
-    class MeshComponent
+    class MeshComponent : public IComponent
     {
     public:
         enum class ModelFormat
@@ -18,8 +20,8 @@ namespace SasamiRenderer
             GltfStatic = Gltf, // Backward compatibility alias
         };
 
-        bool LoadModel(const std::wstring& assetPath, ModelFormat format, float uniformScale = 1.0f);
-        void AddStaticMesh(Mesh mesh, const std::wstring& texturePath = L"");
+        bool LoadModel(const std::string& assetPath, ModelFormat format, float uniformScale = 1.0f);
+        void AddStaticMesh(Mesh mesh, const std::string& texturePath = "");
         std::vector<RenderProxy> BuildRenderProxies() const;
 
         void Clear();
@@ -29,7 +31,7 @@ namespace SasamiRenderer
         struct StaticMeshSource
         {
             Mesh mesh;
-            std::wstring texturePath;
+            std::shared_ptr<const CpuTextureRgba8> albedoTexture;
             float localTransform[16] = {
                 1,0,0,0,
                 0,1,0,0,

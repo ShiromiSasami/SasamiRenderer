@@ -1,14 +1,14 @@
 #pragma once
 #include <string>
 #include <vector>
-#include "Renderer/Vertex.h"
-#include "Renderer/Mesh.h"
+#include "Renderer/Structures/Vertex.h"
+#include "Renderer/Structures/Mesh.h"
 
 namespace SasamiRenderer
 {
 	// Minimal OBJ loader: supports v / vt / f (triangulated or polygons -> fan)
 	// Ignores materials and normals. Generates a vertex per index (non-indexed).
-	bool LoadOBJ(const std::wstring& path, std::vector<SasamiRenderer::Vertex>& outVertices);
+	bool LoadOBJ(const std::string& path, std::vector<SasamiRenderer::Vertex>& outVertices);
 
     enum class StaticModelFormat
     {
@@ -20,7 +20,7 @@ namespace SasamiRenderer
     struct LoadedStaticMesh
     {
         Mesh mesh;
-        std::wstring texturePath;
+        std::string texturePath;
         float localTransform[16] = {
             1,0,0,0,
             0,1,0,0,
@@ -30,7 +30,7 @@ namespace SasamiRenderer
     };
 
     struct GltfImage {
-        std::wstring uri;
+        std::string uri;
     };
 
     struct GltfMaterial {
@@ -61,8 +61,8 @@ namespace SasamiRenderer
     };
 
     // Minimal glTF 2.0 loader for static meshes with baseColor textures.
-    bool LoadGLTFStatic(const std::wstring& path, GltfScene& outScene);
-    bool LoadStaticModel(const std::wstring& path,
+    bool LoadGLTFStatic(const std::string& path, GltfScene& outScene);
+    bool LoadStaticModel(const std::string& path,
                          StaticModelFormat format,
                          float uniformScale,
                          std::vector<LoadedStaticMesh>& outMeshes);

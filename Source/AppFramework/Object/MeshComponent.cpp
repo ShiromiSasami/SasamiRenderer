@@ -1,9 +1,12 @@
 #include "Object/MeshComponent.h"
 
+#include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <windows.h>
 
 #include "Foundation/Math/MathUtil.h"
+#include "Loader/AssetLoader.h"
 #include "Loader/ModelLoader.h"
 
 namespace SasamiRenderer
@@ -12,6 +15,8 @@ namespace SasamiRenderer
 
     namespace
     {
+        static std::atomic<uint64_t> g_cpuTextureIdCounter{ 1 };
+
         static std::filesystem::path GetExecutableDir()
         {
             wchar_t exePath[MAX_PATH] = {};
@@ -47,7 +52,7 @@ namespace SasamiRenderer
             return {};
         }
 
-        static std::filesystem::path ResolveAssetPath(const std::wstring& relative)
+        static std::filesystem::path ResolveAssetPath(const std::string& relative)
         {
             const std::filesystem::path relativePath(relative);
             if (relativePath.is_absolute()) {
@@ -64,10 +69,10 @@ namespace SasamiRenderer
 
     }
 
-    bool MeshComponent::LoadModel(const std::wstring& assetPath, ModelFormat format, float uniformScale)
+    bool MeshComponent::LoadModel(const std::string& assetPath, ModelFormat format, float uniformScale)
     {
         Clear();
-        const std::wstring fullPath = ResolveAssetPath(assetPath).wstring();
+        const std::string fullPath = ResolveAssetPath(assetPath).string();
 
         StaticModelFormat loaderFormat = StaticModelFormat::Obj;
         switch (format) {
@@ -90,7 +95,20 @@ namespace SasamiRenderer
         for (auto& loaded : loadedMeshes) {
             StaticMeshSource src;
             src.mesh = std::move(loaded.mesh);
-            src.texturePath = std::move(loaded.texturePath);
+            if (!loaded.texturePath.empty()) {
+                UINT textureWidth = 0;
+                UINT textureHeight = 0;
+                std::vector<uint8_t> pixels;
+                const std::filesystem::path texturePath(loaded.texturePath);
+                if (AssetLoader::LoadRgba8ViaWIC(texturePath.wstring(), pixels, textureWidth, textureHeight)) {
+                    auto textureData = std::make_shared<CpuTextureRgba8>();
+                    textureData->id = g_cpuTextureIdCounter.fetch_add(1, std::memory_order_relaxed);
+                    textureData->pixels = std::move(pixels);
+                    textureData->width = textureWidth;
+                    textureData->height = textureHeight;
+                    src.albedoTexture = textureData;
+                }
+            }
             for (int i = 0; i < 16; ++i) {
                 src.localTransform[i] = loaded.localTransform[i];
             }
@@ -99,11 +117,24 @@ namespace SasamiRenderer
         return !m_staticMeshes.empty();
     }
 
-    void MeshComponent::AddStaticMesh(Mesh mesh, const std::wstring& texturePath)
+    void MeshComponent::AddStaticMesh(Mesh mesh, const std::string& texturePath)
     {
         StaticMeshSource src;
         src.mesh = std::move(mesh);
-        src.texturePath = texturePath;
+        if (!texturePath.empty()) {
+            UINT textureWidth = 0;
+            UINT textureHeight = 0;
+            std::vector<uint8_t> pixels;
+            const std::filesystem::path resolvedPath = ResolveAssetPath(texturePath);
+            if (AssetLoader::LoadRgba8ViaWIC(resolvedPath.wstring(), pixels, textureWidth, textureHeight)) {
+                auto textureData = std::make_shared<CpuTextureRgba8>();
+                textureData->id = g_cpuTextureIdCounter.fetch_add(1, std::memory_order_relaxed);
+                textureData->pixels = std::move(pixels);
+                textureData->width = textureWidth;
+                textureData->height = textureHeight;
+                src.albedoTexture = textureData;
+            }
+        }
         m_staticMeshes.push_back(std::move(src));
     }
 
@@ -115,7 +146,8 @@ namespace SasamiRenderer
         for (const auto& src : m_staticMeshes) {
             RenderProxy proxy;
             proxy.mesh = src.mesh;
-            proxy.texturePath = src.texturePath;
+            proxy.albedoTexture = src.albedoTexture;
+            // Final model matrix for draw = local mesh transform * component transform.
             Mul4x4(src.localTransform, m_model, proxy.model);
             proxies.push_back(std::move(proxy));
         }
@@ -133,6 +165,7 @@ namespace SasamiRenderer
 
     void MeshComponent::SetTranslation(float x, float y, float z)
     {
+        // Row-major affine translation slots (row-vector convention).
         m_model[12] = x;
         m_model[13] = y;
         m_model[14] = z;

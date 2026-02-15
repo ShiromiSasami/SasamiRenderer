@@ -23,25 +23,35 @@
     <None Include="Libraries\packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Source\AppFramework\Application.h" />
+    <ClInclude Include="Source\AppFramework\ApplicationEntryPoint.h" />
+    <ClInclude Include="Source\AppFramework\ApplicationCore.h" />
     <ClInclude Include="Source\AppFramework\IApplication.h" />
+    <ClInclude Include="Source\AppFramework\Light\DirectionalLight.h" />
     <ClInclude Include="Source\AppFramework\Object\MeshComponent.h" />
     <ClInclude Include="Source\AppFramework\Object\Camera.h" />
+    <ClInclude Include="Source\AppFramework\Object\PointLight.h" />
+    <ClInclude Include="Source\AppFramework\Object\SpotLight.h" />
+    <ClInclude Include="Source\AppFramework\Loader\AssetLoader.h" />
     <ClInclude Include="Source\AppFramework\Loader\ModelLoader.h" />
     <ClInclude Include="Source\AppFramework\Object\SObject.h" />
-    <ClInclude Include="Source\AppFramework\Object\SModelObject.h" />
+    <ClInclude Include="Source\AppFramework\Object\StaticModel.h" />
+    <ClInclude Include="Source\AppFramework\Component\IComponent.h" />
     <ClInclude Include="Source\AppFramework\Component\TransformComponent.h" />
     <ClInclude Include="Source\AppFramework\UI\ImGuiCoordinator.h" />
     <ClInclude Include="Source\AppFramework\Input\InputSystem.h" />
+    <ClInclude Include="Source\Foundation\Math\Color.h" />
+    <ClInclude Include="Source\Foundation\Math\Rotation3.h" />
+    <ClInclude Include="Source\Foundation\Math\Vector3.h" />
     <ClInclude Include="Source\Foundation\Math\MathUtil.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Source\AppFramework\Application.cpp" />
+    <ClCompile Include="Source\AppFramework\ApplicationCore.cpp" />
     <ClCompile Include="Source\AppFramework\Object\MeshComponent.cpp" />
     <ClCompile Include="Source\AppFramework\Object\Camera.cpp" />
+    <ClCompile Include="Source\AppFramework\Loader\AssetLoader.cpp" />
     <ClCompile Include="Source\AppFramework\Loader\ModelLoader.cpp" />
     <ClCompile Include="Source\AppFramework\Object\SObject.cpp" />
-    <ClCompile Include="Source\AppFramework\Object\SModelObject.cpp" />
+    <ClCompile Include="Source\AppFramework\Object\StaticModel.cpp" />
     <ClCompile Include="Source\AppFramework\UI\ImGuiCoordinator.cpp" />
     <ClCompile Include="Source\AppFramework\Input\InputSystem.cpp" />
     <!-- ImGui core and backends -->

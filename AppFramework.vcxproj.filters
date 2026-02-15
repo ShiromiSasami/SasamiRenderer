@@ -13,87 +13,147 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Header Files\Light">
+      <UniqueIdentifier>{88e5c557-428a-4935-99aa-fa77575a5dd7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Object">
+      <UniqueIdentifier>{ce3adebd-5174-41d7-869f-8762c8939375}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Component">
+      <UniqueIdentifier>{7f069f05-d77e-4d92-99e5-91c6a3d5590e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Object">
+      <UniqueIdentifier>{41566b2e-fb23-435b-863d-d911a817cc51}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Component">
+      <UniqueIdentifier>{599db59e-8c09-45f8-a04e-f1590e05d083}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Input">
+      <UniqueIdentifier>{4968c094-f367-432d-b0b4-3e1277a5fc44}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Tool">
+      <UniqueIdentifier>{b684eb6f-c312-4374-8067-e5c9b28277e6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Input">
+      <UniqueIdentifier>{a8ef5c5c-2ec3-4159-a303-c7cf96b3f4e2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Input\Imgui">
+      <UniqueIdentifier>{61518edc-0606-43d9-8f04-362464cf13fc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Tool">
+      <UniqueIdentifier>{d86c89f8-e975-4725-8305-f86085b9c9e6}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="packages.config" />
+    <None Include="Libraries\packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Source\AppFramework\Application.h">
+    <ClInclude Include="Source\AppFramework\ApplicationEntryPoint.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\ApplicationCore.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\AppFramework\IApplication.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\AppFramework\Object\MeshComponent.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Source\AppFramework\Light\DirectionalLight.h">
+      <Filter>Header Files\Light</Filter>
     </ClInclude>
     <ClInclude Include="Source\AppFramework\Object\Camera.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\Object</Filter>
     </ClInclude>
-    <ClInclude Include="Source\AppFramework\Loader\ModelLoader.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Source\AppFramework\Object\PointLight.h">
+      <Filter>Header Files\Object</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Object\SpotLight.h">
+      <Filter>Header Files\Object</Filter>
     </ClInclude>
     <ClInclude Include="Source\AppFramework\Object\SObject.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\Object</Filter>
     </ClInclude>
-    <ClInclude Include="Source\AppFramework\Object\SModelObject.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Source\AppFramework\Object\StaticModel.h">
+      <Filter>Header Files\Object</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Object\MeshComponent.h">
+      <Filter>Header Files\Component</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Component\IComponent.h">
+      <Filter>Header Files\Component</Filter>
     </ClInclude>
     <ClInclude Include="Source\AppFramework\Component\TransformComponent.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\AppFramework\UI\ImGuiCoordinator.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\AppFramework\Input\InputSystem.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\Component</Filter>
     </ClInclude>
     <ClInclude Include="Source\Foundation\Math\MathUtil.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Loader\ModelLoader.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Loader\AssetLoader.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\ImGuiCoordinator.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Input\InputSystem.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Foundation\Math\Color.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Foundation\Math\Rotation3.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Foundation\Math\Vector3.h">
+      <Filter>Header Files\Tool</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Source\AppFramework\Application.cpp">
+    <ClCompile Include="Source\AppFramework\ApplicationCore.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\AppFramework\Object\MeshComponent.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\AppFramework\Object\Camera.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\AppFramework\Loader\ModelLoader.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Source\AppFramework\Object\StaticModel.cpp">
+      <Filter>Source Files\Object</Filter>
     </ClCompile>
     <ClCompile Include="Source\AppFramework\Object\SObject.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\Object</Filter>
     </ClCompile>
-    <ClCompile Include="Source\AppFramework\Object\SModelObject.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\AppFramework\UI\ImGuiCoordinator.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\AppFramework\Input\InputSystem.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Source\AppFramework\Object\Camera.cpp">
+      <Filter>Source Files\Object</Filter>
     </ClCompile>
     <ClCompile Include="Libraries\imgui-master\imgui.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\Input\Imgui</Filter>
     </ClCompile>
     <ClCompile Include="Libraries\imgui-master\imgui_draw.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Libraries\imgui-master\imgui_tables.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Libraries\imgui-master\imgui_widgets.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Libraries\imgui-master\backends\imgui_impl_win32.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\Input\Imgui</Filter>
     </ClCompile>
     <ClCompile Include="Libraries\imgui-master\backends\imgui_impl_dx12.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\imgui-master\backends\imgui_impl_win32.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\imgui-master\imgui_tables.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\imgui-master\imgui_widgets.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\ImGuiCoordinator.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Object\MeshComponent.cpp">
+      <Filter>Source Files\Component</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Input\InputSystem.cpp">
+      <Filter>Source Files\Input</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Loader\ModelLoader.cpp">
+      <Filter>Source Files\Tool</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Loader\AssetLoader.cpp">
+      <Filter>Source Files\Tool</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>
