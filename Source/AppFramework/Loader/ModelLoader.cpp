@@ -487,6 +487,15 @@ namespace SasamiRenderer
                         ReadVec(pbr["baseColorFactor"], mat.baseColorFactor, 4);
                     }
                 }
+                if (m.HasMember("occlusionTexture") && m["occlusionTexture"].IsObject()) {
+                    const auto& occ = m["occlusionTexture"];
+                    if (occ.HasMember("index")) {
+                        mat.occlusionTexture = occ["index"].GetInt();
+                    }
+                    if (occ.HasMember("strength")) {
+                        mat.occlusionStrength = occ["strength"].GetFloat();
+                    }
+                }
                 outScene.materials[i] = mat;
             }
         }
@@ -686,11 +695,21 @@ namespace SasamiRenderer
             // Final local transform = uniformScale * sourcePrimitiveTransform.
             Mul4x4(scaleM, prim.transform, out.localTransform);
             if (prim.materialIndex >= 0 && prim.materialIndex < static_cast<int>(scene.materials.size())) {
-                const int texIndex = scene.materials[prim.materialIndex].baseColorTexture;
-                if (texIndex >= 0 && texIndex < static_cast<int>(scene.textures.size())) {
-                    const int imageIndex = scene.textures[texIndex].imageIndex;
+                const GltfMaterial& material = scene.materials[prim.materialIndex];
+
+                const int baseColorIndex = material.baseColorTexture;
+                if (baseColorIndex >= 0 && baseColorIndex < static_cast<int>(scene.textures.size())) {
+                    const int imageIndex = scene.textures[baseColorIndex].imageIndex;
                     if (imageIndex >= 0 && imageIndex < static_cast<int>(scene.images.size())) {
                         out.texturePath = scene.images[imageIndex].uri;
+                    }
+                }
+
+                const int occlusionIndex = material.occlusionTexture;
+                if (occlusionIndex >= 0 && occlusionIndex < static_cast<int>(scene.textures.size())) {
+                    const int imageIndex = scene.textures[occlusionIndex].imageIndex;
+                    if (imageIndex >= 0 && imageIndex < static_cast<int>(scene.images.size())) {
+                        out.occlusionTexturePath = scene.images[imageIndex].uri;
                     }
                 }
             }

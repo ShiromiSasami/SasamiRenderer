@@ -363,3 +363,19 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Local workflow docs
+AGENTS.md
+ARCHITECTURE.md
+
+# IDE settings (JetBrains / Rider)
+.idea/
+.Rider*/
+*.iml
+*.sln.iml
+*.sln.DotSettings
+*.sln.DotSettings.user
+
+# Local IA/IDA work folders
+.ida/
+ia/

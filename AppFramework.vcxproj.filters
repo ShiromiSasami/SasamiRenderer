@@ -43,6 +43,9 @@
     <Filter Include="Source Files\Tool">
       <UniqueIdentifier>{d86c89f8-e975-4725-8305-f86085b9c9e6}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\ECS">
+      <UniqueIdentifier>{767e82f1-e8d7-4bf1-a29f-7d79f2465713}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="Libraries\packages.config" />
@@ -68,6 +71,9 @@
     </ClInclude>
     <ClInclude Include="Source\AppFramework\Object\SpotLight.h">
       <Filter>Header Files\Object</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\ECS\EcsRegistry.h">
+      <Filter>Header Files\ECS</Filter>
     </ClInclude>
     <ClInclude Include="Source\AppFramework\Object\SObject.h">
       <Filter>Header Files\Object</Filter>

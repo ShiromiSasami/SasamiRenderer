@@ -3,7 +3,7 @@
 #include <debugapi.h>
 #include <cstdio>
 
-#include "Foundation/Diagnostics/DebugOutput.h"
+#include "Foundation/Tools/DebugOutput.h"
 
 namespace SasamiRenderer
 {
@@ -34,7 +34,7 @@ namespace SasamiRenderer
         ComPtr<IDXGIFactory6> factory;
         HRESULT result = CreateDXGIFactory(IID_PPV_ARGS(&factory));
         if (FAILED(result)) {
-            DebugLog("Dx12GraphicsDevice::Initialize: CreateDXGIFactory failed.\n");
+            DebugLogDialog("Dx12GraphicsDevice::Initialize: CreateDXGIFactory failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             cleanup();
             return false;
         }
@@ -54,7 +54,7 @@ namespace SasamiRenderer
             }
         }
         if (!m_device) {
-            DebugLog("Dx12GraphicsDevice::Initialize: D3D12CreateDevice failed for FL 12_1/12_0/11_1/11_0.\n");
+            DebugLogDialog("Dx12GraphicsDevice::Initialize: D3D12CreateDevice failed for FL 12_1/12_0/11_1/11_0.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             cleanup();
             return false;
         }
@@ -70,7 +70,7 @@ namespace SasamiRenderer
         cqDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
         result = m_device->CreateCommandQueue(&cqDesc, IID_PPV_ARGS(&m_commandQueue.m_queue));
         if (FAILED(result)) {
-            DebugLog("Dx12GraphicsDevice::Initialize: CreateCommandQueue failed.\n");
+            DebugLogDialog("Dx12GraphicsDevice::Initialize: CreateCommandQueue failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             cleanup();
             return false;
         }
@@ -89,7 +89,7 @@ namespace SasamiRenderer
 
         result = factory->CreateSwapChainForHwnd(m_commandQueue.m_queue.Get(), hWnd, &scDesc, nullptr, nullptr, &swapChain1);
         if (FAILED(result)) {
-            DebugLog("Dx12GraphicsDevice::Initialize: CreateSwapChainForHwnd failed.\n");
+            DebugLogDialog("Dx12GraphicsDevice::Initialize: CreateSwapChainForHwnd failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             swapChain1.Reset();
             cleanup();
             return false;
@@ -98,14 +98,14 @@ namespace SasamiRenderer
 
         result = m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence));
         if (FAILED(result)) {
-            DebugLog("Dx12GraphicsDevice::Initialize: CreateFence failed.\n");
+            DebugLogDialog("Dx12GraphicsDevice::Initialize: CreateFence failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             cleanup();
             return false;
         }
         m_fenceValue = 0;
         m_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
         if (!m_fenceEvent) {
-            DebugLog("Dx12GraphicsDevice::Initialize: CreateEvent failed.\n");
+            DebugLogDialog("Dx12GraphicsDevice::Initialize: CreateEvent failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             cleanup();
             return false;
         }

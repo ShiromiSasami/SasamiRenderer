@@ -20,6 +20,8 @@ namespace SasamiRenderer
     {
         Mesh mesh;
         std::shared_ptr<const CpuTextureRgba8> albedoTexture;
+        std::shared_ptr<const CpuTextureRgba8> occlusionTexture;
+        bool transparent = false;
         float model[16] = {
             1,0,0,0,
             0,1,0,0,

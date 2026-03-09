@@ -67,6 +67,28 @@ namespace SasamiRenderer
             return std::filesystem::current_path() / L"Assets" / relativePath;
         }
 
+        static std::shared_ptr<const CpuTextureRgba8> LoadCpuTextureFromPath(const std::string& path)
+        {
+            if (path.empty()) {
+                return nullptr;
+            }
+
+            UINT textureWidth = 0;
+            UINT textureHeight = 0;
+            std::vector<uint8_t> pixels;
+            const std::filesystem::path resolvedPath = ResolveAssetPath(path);
+            if (!AssetLoader::LoadRgba8ViaWIC(resolvedPath.wstring(), pixels, textureWidth, textureHeight)) {
+                return nullptr;
+            }
+
+            auto textureData = std::make_shared<CpuTextureRgba8>();
+            textureData->id = g_cpuTextureIdCounter.fetch_add(1, std::memory_order_relaxed);
+            textureData->pixels = std::move(pixels);
+            textureData->width = textureWidth;
+            textureData->height = textureHeight;
+            return textureData;
+        }
+
     }
 
     bool MeshComponent::LoadModel(const std::string& assetPath, ModelFormat format, float uniformScale)
@@ -95,20 +117,8 @@ namespace SasamiRenderer
         for (auto& loaded : loadedMeshes) {
             StaticMeshSource src;
             src.mesh = std::move(loaded.mesh);
-            if (!loaded.texturePath.empty()) {
-                UINT textureWidth = 0;
-                UINT textureHeight = 0;
-                std::vector<uint8_t> pixels;
-                const std::filesystem::path texturePath(loaded.texturePath);
-                if (AssetLoader::LoadRgba8ViaWIC(texturePath.wstring(), pixels, textureWidth, textureHeight)) {
-                    auto textureData = std::make_shared<CpuTextureRgba8>();
-                    textureData->id = g_cpuTextureIdCounter.fetch_add(1, std::memory_order_relaxed);
-                    textureData->pixels = std::move(pixels);
-                    textureData->width = textureWidth;
-                    textureData->height = textureHeight;
-                    src.albedoTexture = textureData;
-                }
-            }
+            src.albedoTexture = LoadCpuTextureFromPath(loaded.texturePath);
+            src.occlusionTexture = LoadCpuTextureFromPath(loaded.occlusionTexturePath);
             for (int i = 0; i < 16; ++i) {
                 src.localTransform[i] = loaded.localTransform[i];
             }
@@ -117,24 +127,14 @@ namespace SasamiRenderer
         return !m_staticMeshes.empty();
     }
 
-    void MeshComponent::AddStaticMesh(Mesh mesh, const std::string& texturePath)
+    void MeshComponent::AddStaticMesh(Mesh mesh,
+                                      const std::string& albedoTexturePath,
+                                      const std::string& occlusionTexturePath)
     {
         StaticMeshSource src;
         src.mesh = std::move(mesh);
-        if (!texturePath.empty()) {
-            UINT textureWidth = 0;
-            UINT textureHeight = 0;
-            std::vector<uint8_t> pixels;
-            const std::filesystem::path resolvedPath = ResolveAssetPath(texturePath);
-            if (AssetLoader::LoadRgba8ViaWIC(resolvedPath.wstring(), pixels, textureWidth, textureHeight)) {
-                auto textureData = std::make_shared<CpuTextureRgba8>();
-                textureData->id = g_cpuTextureIdCounter.fetch_add(1, std::memory_order_relaxed);
-                textureData->pixels = std::move(pixels);
-                textureData->width = textureWidth;
-                textureData->height = textureHeight;
-                src.albedoTexture = textureData;
-            }
-        }
+        src.albedoTexture = LoadCpuTextureFromPath(albedoTexturePath);
+        src.occlusionTexture = LoadCpuTextureFromPath(occlusionTexturePath);
         m_staticMeshes.push_back(std::move(src));
     }
 
@@ -147,6 +147,7 @@ namespace SasamiRenderer
             RenderProxy proxy;
             proxy.mesh = src.mesh;
             proxy.albedoTexture = src.albedoTexture;
+            proxy.occlusionTexture = src.occlusionTexture;
             // Final model matrix for draw = local mesh transform * component transform.
             Mul4x4(src.localTransform, m_model, proxy.model);
             proxies.push_back(std::move(proxy));

@@ -21,7 +21,9 @@ namespace SasamiRenderer
         };
 
         bool LoadModel(const std::string& assetPath, ModelFormat format, float uniformScale = 1.0f);
-        void AddStaticMesh(Mesh mesh, const std::string& texturePath = "");
+        void AddStaticMesh(Mesh mesh,
+                           const std::string& albedoTexturePath = "",
+                           const std::string& occlusionTexturePath = "");
         std::vector<RenderProxy> BuildRenderProxies() const;
 
         void Clear();
@@ -32,6 +34,7 @@ namespace SasamiRenderer
         {
             Mesh mesh;
             std::shared_ptr<const CpuTextureRgba8> albedoTexture;
+            std::shared_ptr<const CpuTextureRgba8> occlusionTexture;
             float localTransform[16] = {
                 1,0,0,0,
                 0,1,0,0,

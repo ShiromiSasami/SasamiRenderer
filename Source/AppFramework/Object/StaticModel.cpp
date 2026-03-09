@@ -13,9 +13,11 @@ namespace SasamiRenderer
         return MeshComponentRef().BuildRenderProxies();
     }
 
-    void StaticModel::AddStaticMesh(Mesh mesh, const std::string& texturePath)
+    void StaticModel::AddStaticMesh(Mesh mesh,
+                                    const std::string& albedoTexturePath,
+                                    const std::string& occlusionTexturePath)
     {
-        MeshComponentRef().AddStaticMesh(std::move(mesh), texturePath);
+        MeshComponentRef().AddStaticMesh(std::move(mesh), albedoTexturePath, occlusionTexturePath);
     }
 
     void StaticModel::ClearModel()

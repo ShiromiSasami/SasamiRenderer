@@ -133,6 +133,15 @@ namespace
         return { x, y, z };
     }
 
+    static Float3 ConcentratedCosineSampleHemisphere(float u1, float u2, float concentrationPower)
+    {
+        // Concentrate diffuse samples toward the normal direction:
+        // u1' = pow(u1, p), p>1 -> more samples around hemisphere center.
+        // This intentionally reduces grazing-direction contribution in irradiance precompute.
+        const float focusedU1 = std::pow(ClampFloat(u1, 0.0f, 1.0f), MaxFloat(concentrationPower, 1.0f));
+        return CosineSampleHemisphere(focusedU1, u2);
+    }
+
     static void BuildOrthonormalBasis(const Float3& n, Float3& t, Float3& b)
     {
         // Build tangent-space basis (t, b, n).
@@ -211,6 +220,24 @@ namespace
         }
         return { a / static_cast<float>(sampleCount), b / static_cast<float>(sampleCount) };
     }
+
+    static void EvaluateRealShBasisL2(const Float3& dir, float outBasis[9])
+    {
+        // Real SH basis (L2, 9 coeffs) with standard normalization.
+        const float x = dir.x;
+        const float y = dir.y;
+        const float z = dir.z;
+
+        outBasis[0] = 0.282095f;                       // Y00
+        outBasis[1] = 0.488603f * y;                   // Y1-1
+        outBasis[2] = 0.488603f * z;                   // Y10
+        outBasis[3] = 0.488603f * x;                   // Y11
+        outBasis[4] = 1.092548f * x * y;               // Y2-2
+        outBasis[5] = 1.092548f * y * z;               // Y2-1
+        outBasis[6] = 0.315392f * (3.0f * z * z - 1.0f); // Y20
+        outBasis[7] = 1.092548f * x * z;               // Y21
+        outBasis[8] = 0.546274f * (x * x - y * y);     // Y22
+    }
 }
 
 namespace SasamiRenderer
@@ -249,9 +276,13 @@ namespace SasamiRenderer
                                                    std::vector<std::vector<float>>& outFaces)
         {
             const std::uint32_t sampleCount = 64;
+            const float diffuseConcentrationPower = 2.0f;
+            const float minCosineForDiffuseSample = 0.2f;
             // Diffuse irradiance approximation:
-            // E(N) ~= (1 / sampleCount) * sum L(wi), wi sampled with cosine-weighted hemisphere about N.
-            // (The cosine term is baked by the sampling PDF.)
+            // E(N) ~= average L(wi), wi sampled around hemisphere about N.
+            // For this renderer, diffuse IBL is intentionally center-focused:
+            // - use concentrated cosine sampling
+            // - skip grazing samples (near hemisphere edge)
             outFaces.assign(6, std::vector<float>(static_cast<std::size_t>(faceSize) * faceSize * 4u, 0.0f));
             for (std::uint32_t face = 0; face < 6; ++face) {
                 auto& dst = outFaces[face];
@@ -259,19 +290,82 @@ namespace SasamiRenderer
                     for (std::uint32_t x = 0; x < faceSize; ++x) {
                         const Float3 n = CubemapTexelDirection(face, x, y, faceSize);
                         Float3 acc = { 0.0f, 0.0f, 0.0f };
+                        std::uint32_t usedSampleCount = 0;
                         for (std::uint32_t i = 0; i < sampleCount; ++i) {
                             const auto xi = Hammersley(i, sampleCount);
-                            const Float3 lLocal = CosineSampleHemisphere(xi[0], xi[1]);
+                            const Float3 lLocal =
+                                ConcentratedCosineSampleHemisphere(xi[0], xi[1], diffuseConcentrationPower);
+                            if (lLocal.z < minCosineForDiffuseSample) {
+                                continue;
+                            }
                             const Float3 lWorld = ToWorldFromLocal(lLocal, n);
                             const Float3 s = SampleEquirect(hdrPixels, hdrWidth, hdrHeight, lWorld);
                             acc += s;
+                            ++usedSampleCount;
                         }
-                        acc *= 1.0f / static_cast<float>(sampleCount);
+                        if (usedSampleCount == 0u) {
+                            const Float3 fallback = SampleEquirect(hdrPixels, hdrWidth, hdrHeight, n);
+                            acc = fallback;
+                        } else {
+                            acc *= 1.0f / static_cast<float>(usedSampleCount);
+                        }
                         const std::size_t idx = (static_cast<std::size_t>(y) * faceSize + static_cast<std::size_t>(x)) * 4u;
                         dst[idx + 0] = acc.x;
                         dst[idx + 1] = acc.y;
                         dst[idx + 2] = acc.z;
                         dst[idx + 3] = 1.0f;
+                    }
+                }
+            }
+        }
+
+        void GenerateDiffuseShCoefficientsFromEquirect(const std::vector<float>& hdrPixels,
+                                                       std::uint32_t hdrWidth,
+                                                       std::uint32_t hdrHeight,
+                                                       float outCoefficients[9][3])
+        {
+            for (int i = 0; i < 9; ++i) {
+                outCoefficients[i][0] = 0.0f;
+                outCoefficients[i][1] = 0.0f;
+                outCoefficients[i][2] = 0.0f;
+            }
+
+            if (hdrWidth == 0 || hdrHeight == 0 ||
+                hdrPixels.size() != static_cast<size_t>(hdrWidth) * hdrHeight * 3u) {
+                return;
+            }
+
+            const float pi = 3.1415926535f;
+            const float dTheta = pi / static_cast<float>(hdrHeight);
+            const float dPhi = (2.0f * pi) / static_cast<float>(hdrWidth);
+
+            for (std::uint32_t y = 0; y < hdrHeight; ++y) {
+                const float theta = (static_cast<float>(y) + 0.5f) * dTheta;
+                const float sinTheta = std::sin(theta);
+                const float cosTheta = std::cos(theta);
+
+                for (std::uint32_t x = 0; x < hdrWidth; ++x) {
+                    const float phi = (static_cast<float>(x) + 0.5f) * dPhi - pi;
+                    const Float3 dir = {
+                        std::cos(phi) * sinTheta,
+                        cosTheta,
+                        std::sin(phi) * sinTheta
+                    };
+
+                    float shBasis[9];
+                    EvaluateRealShBasisL2(dir, shBasis);
+
+                    const size_t src = (static_cast<size_t>(y) * hdrWidth + static_cast<size_t>(x)) * 3u;
+                    const float c0 = hdrPixels[src + 0];
+                    const float c1 = hdrPixels[src + 1];
+                    const float c2 = hdrPixels[src + 2];
+                    const float dOmega = sinTheta * dTheta * dPhi;
+
+                    for (int i = 0; i < 9; ++i) {
+                        const float w = shBasis[i] * dOmega;
+                        outCoefficients[i][0] += c0 * w;
+                        outCoefficients[i][1] += c1 * w;
+                        outCoefficients[i][2] += c2 * w;
                     }
                 }
             }

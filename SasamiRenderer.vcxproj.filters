@@ -22,6 +22,21 @@
     <Filter Include="Header Files\Tool">
       <UniqueIdentifier>{c8aff3b3-f7c9-45e2-9d0b-1c79d6271b58}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\RenderNode">
+      <UniqueIdentifier>{c9fa0440-879d-43ab-a838-02979f67a3f3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\RenderNode">
+      <UniqueIdentifier>{92d28e41-5700-42f3-b79c-3aac016f4e41}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files">
+      <UniqueIdentifier>{17e92507-9455-49a5-990c-1c4d5d9f3c4d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Skybox">
+      <UniqueIdentifier>{0fe97ee0-0f8c-4ff0-8f5f-d6284a96e4ea}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Tools">
+      <UniqueIdentifier>{eb75eba7-f5ba-4126-aaa5-00245943bcd9}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="Libraries\packages.config" />
@@ -33,19 +48,31 @@
     <ClInclude Include="Source\Renderer\Core\GraphicsDevice.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\RenderLayerConfigurator.h">
+    <ClInclude Include="Source\Renderer\Core\RenderGraph.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\RenderPipelineStateCache.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\RendererFrameCoordinator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Core\Renderer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\RenderTargetResourceBinder.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Renderer\Scene\DrawCommandBuilder.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\LightCBData.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Renderer\Scene\MeshBuffer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\LightSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\Skybox.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Structures\Mesh.h">
@@ -75,8 +102,38 @@
     <ClInclude Include="Source\Renderer\Utilities\RendererMathUtility.h">
       <Filter>Header Files\Tool</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Renderer\Utilities\ResourceUploadUtility.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Foundation\Math\MathUtil.h">
       <Filter>Header Files\Tool</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\OpaqueRenderNode.h">
+      <Filter>Header Files\RenderNode</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\LightingRenderNode.h">
+      <Filter>Header Files\RenderNode</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\TransparentRenderNode.h">
+      <Filter>Header Files\RenderNode</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\TransparentLightingRenderNode.h">
+      <Filter>Header Files\RenderNode</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\IRenderNode.h">
+      <Filter>Header Files\RenderNode</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\RenderNodeSetupContext.h">
+      <Filter>Header Files\RenderNode</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\PostProcessRenderNode.h">
+      <Filter>Header Files\RenderNode</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\ShadowRenderNode.h">
+      <Filter>Header Files\RenderNode</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\SkyboxRenderNode.h">
+      <Filter>Header Files\RenderNode</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -86,20 +143,88 @@
     <ClCompile Include="Source\Renderer\Scene\DrawCommandBuilder.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Utilities\RendererMathUtility.cpp">
+    <ClCompile Include="Source\Renderer\Core\RenderGraph.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Core\Renderer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Core\RenderLayerConfigurator.cpp">
+    <ClCompile Include="Source\Renderer\Core\RendererFrameCoordinator.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Core\RenderTargetResourceBinder.cpp">
+    <ClCompile Include="Source\Renderer\Core\RenderPipelineStateCache.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Core\Dx12GraphicsDevice.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Renderer\Scene\LightSystem.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Scene\Skybox.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\SkyboxRenderNode.cpp">
+      <Filter>Source Files\RenderNode</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\ShadowRenderNode.cpp">
+      <Filter>Source Files\RenderNode</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\OpaqueRenderNode.cpp">
+      <Filter>Source Files\RenderNode</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\LightingRenderNode.cpp">
+      <Filter>Source Files\RenderNode</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\TransparentRenderNode.cpp">
+      <Filter>Source Files\RenderNode</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\TransparentLightingRenderNode.cpp">
+      <Filter>Source Files\RenderNode</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\PostProcessRenderNode.cpp">
+      <Filter>Source Files\RenderNode</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Utilities\ResourceUploadUtility.cpp">
+      <Filter>Source Files\Tools</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Utilities\RendererMathUtility.cpp">
+      <Filter>Source Files\Tools</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="Source\Renderer\Shaders\PBR_VS.hlsl">
+      <Filter>Shader Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\PBR_PS.hlsl">
+      <Filter>Shader Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Opaque_VS.hlsl">
+      <Filter>Shader Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Opaque_PS.hlsl">
+      <Filter>Shader Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Skybox\Skybox_VS.hlsl">
+      <Filter>Shader Files\Skybox</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Skybox\Skybox_HDR_PS.hlsl">
+      <Filter>Shader Files\Skybox</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Skybox\Skybox_PS.hlsl">
+      <Filter>Shader Files\Skybox</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Tessellation_VS.hlsl">
+      <Filter>Shader Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Tessellation_HS.hlsl">
+      <Filter>Shader Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Tessellation_DS.hlsl">
+      <Filter>Shader Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Tessellation_GS.hlsl">
+      <Filter>Shader Files</Filter>
+    </CustomBuild>
   </ItemGroup>
 </Project>

@@ -4,16 +4,7 @@ cbuffer CameraCB : register(b0)
     row_major float4x4 u_world; // used in DS
 }
 
-cbuffer LightCB : register(b1)
-{
-    row_major float4x4 u_lightVP; // used in DS
-    float4 u_dirDir;
-    float4 u_dirColor;
-    float4 u_lightCounts;
-    float4 u_cameraPos;
-    float4 u_iblParams;
-    float4 u_debugParams;
-}
+#include "Common/LightCB.hlsli"
 
 struct VSInput
 {

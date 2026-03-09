@@ -6,8 +6,12 @@ namespace SasamiRenderer
     {
         enum class RasterShaderMode
         {
-            PBR = 0,
-            Basic = 1,
+            Lighting = 0,
+            Opaque = 1,
+
+            // Backward compatibility aliases.
+            PBR = Lighting,
+            Basic = Opaque,
         };
 
         enum class GBufferDebugView
@@ -28,6 +32,17 @@ namespace SasamiRenderer
             HdrEquirect = 1,
             LdrEquirect = 2,
             CubemapFaces = 3,
+        };
+
+        enum class RenderNodeType
+        {
+            Shadow = 0,
+            Opaque = 1,
+            Lighting = 2,
+            Transparent = 3,
+            TransparentLighting = 4,
+            Skybox = 5,
+            PostProcess = 6,
         };
     }
 }

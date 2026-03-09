@@ -26,28 +26,53 @@
     <ClInclude Include="Source\Foundation\Math\MathUtil.h" />
     <ClInclude Include="Source\Renderer\Core\Dx12GraphicsDevice.h" />
     <ClInclude Include="Source\Renderer\Core\GraphicsDevice.h" />
-    <ClInclude Include="Source\Renderer\Core\RenderLayerConfigurator.h" />
+    <ClInclude Include="Source\Renderer\Core\RenderGraph.h" />
+    <ClInclude Include="Source\Renderer\Core\RenderPipelineStateCache.h" />
+    <ClInclude Include="Source\Renderer\Core\RendererFrameCoordinator.h" />
     <ClInclude Include="Source\Renderer\Core\Renderer.h" />
-    <ClInclude Include="Source\Renderer\Core\RenderTargetResourceBinder.h" />
     <ClInclude Include="Source\Renderer\Scene\DrawCommandBuilder.h" />
+    <ClInclude Include="Source\Renderer\Scene\LightCBData.h" />
+    <ClInclude Include="Source\Renderer\Passes\OpaqueRenderNode.h" />
+    <ClInclude Include="Source\Renderer\Passes\LightingRenderNode.h" />
+    <ClInclude Include="Source\Renderer\Passes\TransparentRenderNode.h" />
+    <ClInclude Include="Source\Renderer\Passes\TransparentLightingRenderNode.h" />
+    <ClInclude Include="Source\Renderer\Passes\IRenderNode.h" />
+    <ClInclude Include="Source\Renderer\Passes\RenderNodeSetupContext.h" />
+    <ClInclude Include="Source\Renderer\Passes\PostProcessRenderNode.h" />
+    <ClInclude Include="Source\Renderer\Passes\ShadowRenderNode.h" />
+    <ClInclude Include="Source\Renderer\Passes\SkyboxRenderNode.h" />
     <ClInclude Include="Source\Renderer\Scene\Material.h" />
+    <ClInclude Include="Source\Renderer\Scene\LightSystem.h" />
     <ClInclude Include="Source\Renderer\Scene\MeshBuffer.h" />
     <ClInclude Include="Source\Renderer\Scene\RenderCameraProxy.h" />
     <ClInclude Include="Source\Renderer\Scene\RenderLightProxy.h" />
     <ClInclude Include="Source\Renderer\Scene\RenderProxy.h" />
+    <ClInclude Include="Source\Renderer\Scene\Skybox.h" />
     <ClInclude Include="Source\Renderer\Structures\Float3.h" />
     <ClInclude Include="Source\Renderer\Structures\Mesh.h" />
     <ClInclude Include="Source\Renderer\Structures\Texture.h" />
     <ClInclude Include="Source\Renderer\Structures\Vertex.h" />
+    <ClInclude Include="Source\Renderer\Utilities\ResourceUploadUtility.h" />
     <ClInclude Include="Source\Renderer\Utilities\RendererMathUtility.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Renderer\Scene\MeshBuffer.cpp" />
     <ClCompile Include="Source\Renderer\Scene\DrawCommandBuilder.cpp" />
+    <ClCompile Include="Source\Renderer\Passes\OpaqueRenderNode.cpp" />
+    <ClCompile Include="Source\Renderer\Passes\LightingRenderNode.cpp" />
+    <ClCompile Include="Source\Renderer\Passes\TransparentRenderNode.cpp" />
+    <ClCompile Include="Source\Renderer\Passes\TransparentLightingRenderNode.cpp" />
+    <ClCompile Include="Source\Renderer\Passes\PostProcessRenderNode.cpp" />
+    <ClCompile Include="Source\Renderer\Passes\ShadowRenderNode.cpp" />
+    <ClCompile Include="Source\Renderer\Passes\SkyboxRenderNode.cpp" />
+    <ClCompile Include="Source\Renderer\Scene\LightSystem.cpp" />
+    <ClCompile Include="Source\Renderer\Scene\Skybox.cpp" />
+    <ClCompile Include="Source\Renderer\Utilities\ResourceUploadUtility.cpp" />
     <ClCompile Include="Source\Renderer\Utilities\RendererMathUtility.cpp" />
+    <ClCompile Include="Source\Renderer\Core\RenderGraph.cpp" />
     <ClCompile Include="Source\Renderer\Core\Renderer.cpp" />
-    <ClCompile Include="Source\Renderer\Core\RenderLayerConfigurator.cpp" />
-    <ClCompile Include="Source\Renderer\Core\RenderTargetResourceBinder.cpp" />
+    <ClCompile Include="Source\Renderer\Core\RendererFrameCoordinator.cpp" />
+    <ClCompile Include="Source\Renderer\Core\RenderPipelineStateCache.cpp" />
     <ClCompile Include="Source\Renderer\Core\Dx12GraphicsDevice.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
@@ -110,8 +135,108 @@
     <IntDir>$(MSBuildThisFileDirectory)Build\obj\$(MSBuildProjectName)\$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <PropertyGroup>
+    <BundledDxcRoot>$(ProjectDir)Tools\DXC\bin\x64</BundledDxcRoot>
+    <ShaderSourceRoot>$(ProjectDir)Source\Renderer\Shaders</ShaderSourceRoot>
+    <RendererShaderModel>6_9</RendererShaderModel>
+    <RendererShaderModel Condition="'$(RENDERER_SHADER_MODEL)'!=''">$(RENDERER_SHADER_MODEL)</RendererShaderModel>
+    <DxcExecutable Condition="'$(DXC_EXECUTABLE)'!=''">$(DXC_EXECUTABLE)</DxcExecutable>
+    <DxcExecutable Condition="'$(DxcExecutable)'=='' and Exists('$(BundledDxcRoot)\dxc.exe')">$(BundledDxcRoot)\dxc.exe</DxcExecutable>
+    <DxcExecutable Condition="'$(DxcExecutable)'=='' and Exists('$(WindowsSdkDir)bin\$(WindowsTargetPlatformVersion)\x64\dxc.exe')">$(WindowsSdkDir)bin\$(WindowsTargetPlatformVersion)\x64\dxc.exe</DxcExecutable>
+    <DxcExecutable Condition="'$(DxcExecutable)'==''">dxc.exe</DxcExecutable>
+  </PropertyGroup>
+  <PropertyGroup>
     <TargetName>SasamiRenderer</TargetName>
   </PropertyGroup>
+  <ItemGroup>
+    <CustomBuild Include="Source\Renderer\Shaders\PBR_VS.hlsl">
+      <FileType>Document</FileType>
+      <Message>DXC %(Filename)%(Extension)</Message>
+      <Command>if not exist "$(OutDir)Shaders" mkdir "$(OutDir)Shaders"
+"$(DxcExecutable)" -E VSMain -T vs_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\PBR_VS.VSMain.vs_$(RendererShaderModel).cso" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Shaders\PBR_VS.VSMain.vs_$(RendererShaderModel).cso</Outputs>
+      <AdditionalInputs>%(FullPath);$(ProjectDir)Source\Renderer\Shaders\Common\LightCB.hlsli</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\PBR_PS.hlsl">
+      <FileType>Document</FileType>
+      <Message>DXC %(Filename)%(Extension)</Message>
+      <Command>if not exist "$(OutDir)Shaders" mkdir "$(OutDir)Shaders"
+"$(DxcExecutable)" -E PSMain -T ps_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\PBR_PS.PSMain.ps_$(RendererShaderModel).cso" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Shaders\PBR_PS.PSMain.ps_$(RendererShaderModel).cso</Outputs>
+      <AdditionalInputs>%(FullPath);$(ProjectDir)Source\Renderer\Shaders\Common\LightCB.hlsli</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Opaque_VS.hlsl">
+      <FileType>Document</FileType>
+      <Message>DXC %(Filename)%(Extension)</Message>
+      <Command>if not exist "$(OutDir)Shaders" mkdir "$(OutDir)Shaders"
+"$(DxcExecutable)" -E VSMain -T vs_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\Opaque_VS.VSMain.vs_$(RendererShaderModel).cso" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Shaders\Opaque_VS.VSMain.vs_$(RendererShaderModel).cso</Outputs>
+      <AdditionalInputs>%(FullPath)</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Opaque_PS.hlsl">
+      <FileType>Document</FileType>
+      <Message>DXC %(Filename)%(Extension)</Message>
+      <Command>if not exist "$(OutDir)Shaders" mkdir "$(OutDir)Shaders"
+"$(DxcExecutable)" -E PSMain -T ps_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\Opaque_PS.PSMain.ps_$(RendererShaderModel).cso" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Shaders\Opaque_PS.PSMain.ps_$(RendererShaderModel).cso</Outputs>
+      <AdditionalInputs>%(FullPath)</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Skybox\Skybox_VS.hlsl">
+      <FileType>Document</FileType>
+      <Message>DXC %(Filename)%(Extension)</Message>
+      <Command>if not exist "$(OutDir)Shaders\Skybox" mkdir "$(OutDir)Shaders\Skybox"
+"$(DxcExecutable)" -E VSMain -T vs_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\Skybox\Skybox_VS.VSMain.vs_$(RendererShaderModel).cso" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Shaders\Skybox\Skybox_VS.VSMain.vs_$(RendererShaderModel).cso</Outputs>
+      <AdditionalInputs>%(FullPath)</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Skybox\Skybox_HDR_PS.hlsl">
+      <FileType>Document</FileType>
+      <Message>DXC %(Filename)%(Extension)</Message>
+      <Command>if not exist "$(OutDir)Shaders\Skybox" mkdir "$(OutDir)Shaders\Skybox"
+"$(DxcExecutable)" -E PSMain -T ps_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\Skybox\Skybox_HDR_PS.PSMain.ps_$(RendererShaderModel).cso" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Shaders\Skybox\Skybox_HDR_PS.PSMain.ps_$(RendererShaderModel).cso</Outputs>
+      <AdditionalInputs>%(FullPath)</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Skybox\Skybox_PS.hlsl">
+      <FileType>Document</FileType>
+      <Message>DXC %(Filename)%(Extension)</Message>
+      <Command>if not exist "$(OutDir)Shaders\Skybox" mkdir "$(OutDir)Shaders\Skybox"
+"$(DxcExecutable)" -E PSMain -T ps_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\Skybox\Skybox_PS.PSMain.ps_$(RendererShaderModel).cso" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Shaders\Skybox\Skybox_PS.PSMain.ps_$(RendererShaderModel).cso</Outputs>
+      <AdditionalInputs>%(FullPath)</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Tessellation_VS.hlsl">
+      <FileType>Document</FileType>
+      <Message>DXC %(Filename)%(Extension)</Message>
+      <Command>if not exist "$(OutDir)Shaders" mkdir "$(OutDir)Shaders"
+"$(DxcExecutable)" -E VSMain -T vs_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\Tessellation_VS.VSMain.vs_$(RendererShaderModel).cso" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Shaders\Tessellation_VS.VSMain.vs_$(RendererShaderModel).cso</Outputs>
+      <AdditionalInputs>%(FullPath);$(ProjectDir)Source\Renderer\Shaders\Common\LightCB.hlsli</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Tessellation_HS.hlsl">
+      <FileType>Document</FileType>
+      <Message>DXC %(Filename)%(Extension)</Message>
+      <Command>if not exist "$(OutDir)Shaders" mkdir "$(OutDir)Shaders"
+"$(DxcExecutable)" -E HSMain -T hs_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\Tessellation_HS.HSMain.hs_$(RendererShaderModel).cso" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Shaders\Tessellation_HS.HSMain.hs_$(RendererShaderModel).cso</Outputs>
+      <AdditionalInputs>%(FullPath);$(ProjectDir)Source\Renderer\Shaders\Common\LightCB.hlsli</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Tessellation_DS.hlsl">
+      <FileType>Document</FileType>
+      <Message>DXC %(Filename)%(Extension)</Message>
+      <Command>if not exist "$(OutDir)Shaders" mkdir "$(OutDir)Shaders"
+"$(DxcExecutable)" -E DSMain -T ds_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\Tessellation_DS.DSMain.ds_$(RendererShaderModel).cso" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Shaders\Tessellation_DS.DSMain.ds_$(RendererShaderModel).cso</Outputs>
+      <AdditionalInputs>%(FullPath);$(ProjectDir)Source\Renderer\Shaders\Common\LightCB.hlsli</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Tessellation_GS.hlsl">
+      <FileType>Document</FileType>
+      <Message>DXC %(Filename)%(Extension)</Message>
+      <Command>if not exist "$(OutDir)Shaders" mkdir "$(OutDir)Shaders"
+"$(DxcExecutable)" -E GSMain -T gs_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\Tessellation_GS.GSMain.gs_$(RendererShaderModel).cso" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Shaders\Tessellation_GS.GSMain.gs_$(RendererShaderModel).cso</Outputs>
+      <AdditionalInputs>%(FullPath)</AdditionalInputs>
+    </CustomBuild>
+  </ItemGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
   </PropertyGroup>
@@ -135,7 +260,7 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Renderer;$(ProjectDir)Libraries;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;$(BOOST_ROOT);$(BOOST_INCLUDEDIR)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Renderer;$(ProjectDir)Tools\DXC\inc;$(ProjectDir)Libraries;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;$(BOOST_ROOT);$(BOOST_INCLUDEDIR)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -153,7 +278,7 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Renderer;$(ProjectDir)Libraries;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;C:\local\boost_1_89_0</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Renderer;$(ProjectDir)Tools\DXC\inc;$(ProjectDir)Libraries;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;C:\local\boost_1_89_0</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -175,7 +300,7 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Renderer;$(ProjectDir)Libraries;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;$(BOOST_ROOT);$(BOOST_INCLUDEDIR)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Renderer;$(ProjectDir)Tools\DXC\inc;$(ProjectDir)Libraries;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;$(BOOST_ROOT);$(BOOST_INCLUDEDIR)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -197,7 +322,7 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Renderer;$(ProjectDir)Libraries;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;C:\local\boost_1_89_0</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Renderer;$(ProjectDir)Tools\DXC\inc;$(ProjectDir)Libraries;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;C:\local\boost_1_89_0</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -209,6 +334,13 @@
     </Link>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ItemGroup>
+    <BundledDxcRuntime Include="$(BundledDxcRoot)\dxcompiler.dll" Condition="Exists('$(BundledDxcRoot)\dxcompiler.dll')" />
+    <BundledDxcRuntime Include="$(BundledDxcRoot)\dxil.dll" Condition="Exists('$(BundledDxcRoot)\dxil.dll')" />
+  </ItemGroup>
+  <Target Name="CopyBundledDxcRuntime" AfterTargets="Build" Condition="'@(BundledDxcRuntime)'!=''">
+    <Copy SourceFiles="@(BundledDxcRuntime)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
   <ImportGroup Label="ExtensionTargets">
     <Import Project="Libraries\packages\Microsoft.Direct3D.D3D12.1.616.1\build\native\Microsoft.Direct3D.D3D12.targets" Condition="Exists('Libraries\packages\Microsoft.Direct3D.D3D12.1.616.1\build\native\Microsoft.Direct3D.D3D12.targets')" />
   </ImportGroup>

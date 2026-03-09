@@ -21,6 +21,7 @@ namespace SasamiRenderer
     {
         Mesh mesh;
         std::string texturePath;
+        std::string occlusionTexturePath;
         float localTransform[16] = {
             1,0,0,0,
             0,1,0,0,
@@ -35,7 +36,9 @@ namespace SasamiRenderer
 
     struct GltfMaterial {
         int baseColorTexture = -1; // index into textures array
+        int occlusionTexture = -1; // index into textures array
         float baseColorFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        float occlusionStrength = 1.0f;
     };
 
     struct GltfPrimitiveInstance {
@@ -60,7 +63,7 @@ namespace SasamiRenderer
         std::vector<GltfTexture> textures;
     };
 
-    // Minimal glTF 2.0 loader for static meshes with baseColor textures.
+    // Minimal glTF 2.0 loader for static meshes with baseColor/occlusion textures.
     bool LoadGLTFStatic(const std::string& path, GltfScene& outScene);
     bool LoadStaticModel(const std::string& path,
                          StaticModelFormat format,

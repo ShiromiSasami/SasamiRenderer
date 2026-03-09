@@ -3,7 +3,10 @@ Texture2D ShadowMapTex : register(t1);
 TextureCube IrradianceTex : register(t4);
 TextureCube PrefilterTex  : register(t5);
 Texture2D BrdfLutTex      : register(t6);
+Texture2D OcclusionTex    : register(t7);
 SamplerState LinearWrap : register(s0);
+
+#include "Common/LightCB.hlsli"
 
 struct PointLight
 {
@@ -21,17 +24,6 @@ struct SpotLight
 
 StructuredBuffer<PointLight> u_pointLights : register(t2);
 StructuredBuffer<SpotLight> u_spotLights : register(t3);
-
-cbuffer LightCB : register(b1)
-{
-    row_major float4x4 u_lightVP;
-    float4 u_dirDir;     // xyz: forward dir, w: intensity
-    float4 u_dirColor;   // rgb: color
-    float4 u_lightCounts; // x: pointCount, y: spotCount
-    float4 u_cameraPos;   // xyz: camera world position
-    float4 u_iblParams;   // x: IBL enable, y: intensity, z: prefilter max mip
-    float4 u_debugParams; // x: gbuffer debug view mode
-}
 
 struct PSInput
 {
@@ -73,6 +65,46 @@ float3 FresnelSchlick(float cosTheta, float3 F0)
     return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
 }
 
+// Specular occlusion approximation for image-based specular term.
+// One practical form used in real-time renderers:
+// SO = saturate((N.V + AO)^(2^(-16*roughness - 1)) - 1 + AO)
+float SpecularOcclusion(float ao, float NdotV, float roughness)
+{
+    const float exponent = exp2(-16.0 * roughness - 1.0);
+    return saturate(pow(saturate(NdotV + ao), exponent) - 1.0 + ao);
+}
+
+float3 EvaluateDiffuseIrradianceFromSh(float3 n)
+{
+    const float x = n.x;
+    const float y = n.y;
+    const float z = n.z;
+
+    // Real SH basis (L2), multiplied by cosine-kernel convolution factor per band.
+    const float b0 = 0.282095 * 3.14159265;
+    const float b1 = (0.488603 * y) * 2.09439510;
+    const float b2 = (0.488603 * z) * 2.09439510;
+    const float b3 = (0.488603 * x) * 2.09439510;
+    const float b4 = (1.092548 * x * y) * 0.78539816;
+    const float b5 = (1.092548 * y * z) * 0.78539816;
+    const float b6 = (0.315392 * (3.0 * z * z - 1.0)) * 0.78539816;
+    const float b7 = (1.092548 * x * z) * 0.78539816;
+    const float b8 = (0.546274 * (x * x - y * y)) * 0.78539816;
+
+    float3 irradiance =
+        u_diffuseSh[0].rgb * b0 +
+        u_diffuseSh[1].rgb * b1 +
+        u_diffuseSh[2].rgb * b2 +
+        u_diffuseSh[3].rgb * b3 +
+        u_diffuseSh[4].rgb * b4 +
+        u_diffuseSh[5].rgb * b5 +
+        u_diffuseSh[6].rgb * b6 +
+        u_diffuseSh[7].rgb * b7 +
+        u_diffuseSh[8].rgb * b8;
+
+    return max(irradiance, 0.0);
+}
+
 float ShadowVisibility(float4 lightPos)
 {
     float3 sc = lightPos.xyz / max(lightPos.w, 1e-6);
@@ -100,6 +132,10 @@ float4 PSMain(PSInput i) : SV_TARGET
 {
     // Albedo in sRGB assumed; if not sRGB-corrected by sampler state, apply manual gamma.
     float3 albedo = AlbedoTex.Sample(LinearWrap, i.uv).rgb;
+
+    // Material ambient occlusion (glTF occlusionTexture uses R channel).
+    // AO in [0,1]: 0=fully occluded, 1=no occlusion.
+    float ao = saturate(OcclusionTex.Sample(LinearWrap, i.uv).r);
 
     // Minimal PBR params (constants for now)
     float metallic = 0.0;
@@ -201,13 +237,15 @@ float4 PSMain(PSInput i) : SV_TARGET
         }
     }
 
-    float3 ambient = 0.03 * albedo;
+    float3 ambient = 0.03 * albedo * ao;
     if (u_iblParams.x > 0.5) {
         // Split-sum approximation for specular IBL:
         // L_ibl = kD * (irradiance * albedo) + prefilteredEnv(R, roughness) * (F0 * brdf.x + brdf.y)
         float3 Fibl = FresnelSchlick(saturate(dot(N, V)), F0);
         float3 kdIbl = (1.0 - Fibl) * (1.0 - metallic);
-        float3 irradiance = IrradianceTex.Sample(LinearWrap, N).rgb;
+        float3 irradiance = (u_iblParams.w > 0.5)
+            ? EvaluateDiffuseIrradianceFromSh(N)
+            : IrradianceTex.Sample(LinearWrap, N).rgb;
         float3 diffuseIBL = irradiance * albedo;
 
         float3 R = reflect(-V, N);
@@ -215,7 +253,14 @@ float4 PSMain(PSInput i) : SV_TARGET
         float2 envBrdf = BrdfLutTex.SampleLevel(LinearWrap, float2(saturate(dot(N, V)), roughness), 0).rg;
         float3 specIBL = prefiltered * (F0 * envBrdf.x + envBrdf.y);
 
-        ambient = (kdIbl * diffuseIBL + specIBL) * u_iblParams.y;
+        // AO-driven occlusion for indirect light:
+        // - Diffuse IBL uses AO directly.
+        // - Specular IBL uses specular-occlusion to avoid over-darkening at grazing angles.
+        float diffuseOcclusion = ao;
+        float specularOcclusion = SpecularOcclusion(ao, NdotV, roughness);
+
+        ambient = (kdIbl * diffuseIBL * diffuseOcclusion +
+                   specIBL * specularOcclusion) * u_iblParams.y;
     }
     float3 color = ambient + Lo;
 
@@ -232,8 +277,8 @@ float4 PSMain(PSInput i) : SV_TARGET
     if (debugMode == 4) { // Metallic
         return float4(metallic.xxx, 1.0);
     }
-    if (debugMode == 5) { // Ambient occlusion (placeholder: constant 1.0)
-        return float4(1.0, 1.0, 1.0, 1.0);
+    if (debugMode == 5) { // Ambient occlusion
+        return float4(ao.xxx, 1.0);
     }
     if (debugMode == 6) { // Shadow visibility
         return float4(vis.xxx, 1.0);

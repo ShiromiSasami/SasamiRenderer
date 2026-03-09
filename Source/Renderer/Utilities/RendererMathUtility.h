@@ -19,6 +19,11 @@ namespace SasamiRenderer
                                                    std::uint32_t faceSize,
                                                    std::vector<std::vector<float>>& outFaces);
 
+        void GenerateDiffuseShCoefficientsFromEquirect(const std::vector<float>& hdrPixels,
+                                                       std::uint32_t hdrWidth,
+                                                       std::uint32_t hdrHeight,
+                                                       float outCoefficients[9][3]);
+
         void GeneratePrefilterCubemapFromEquirect(const std::vector<float>& hdrPixels,
                                                   std::uint32_t hdrWidth,
                                                   std::uint32_t hdrHeight,

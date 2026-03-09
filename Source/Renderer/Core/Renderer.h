@@ -1,17 +1,29 @@
 #pragma once
 #include "Renderer/Core/GraphicsDevice.h"
-#include "Renderer/Core/RenderTargetResourceBinder.h"
-#include "Renderer/Core/RenderLayerConfigurator.h"
+#include "Renderer/Core/RenderGraph.h"
+#include "Renderer/Core/RendererFrameCoordinator.h"
+#include "Renderer/Core/RenderPipelineStateCache.h"
+#include "Renderer/Core/RenderNodeConstants.h"
 #include "Renderer/Scene/RenderCameraProxy.h"
-#include "Renderer/Scene/RenderLightProxy.h"
 #include "Renderer/Scene/RenderProxy.h"
 #include "Renderer/Scene/MeshBuffer.h"
 #include "Renderer/Scene/DrawCommandBuilder.h"
-#include "Renderer/Scene/Material.h"
+#include "Renderer/Passes/ShadowRenderNode.h"
+#include "Renderer/Passes/OpaqueRenderNode.h"
+#include "Renderer/Passes/LightingRenderNode.h"
+#include "Renderer/Passes/TransparentRenderNode.h"
+#include "Renderer/Passes/TransparentLightingRenderNode.h"
+#include "Renderer/Passes/SkyboxRenderNode.h"
+#include "Renderer/Passes/PostProcessRenderNode.h"
+#include "Renderer/Passes/RenderNodeSetupContext.h"
+#include "Renderer/Scene/Skybox.h"
+#include "Renderer/Scene/LightSystem.h"
 #include "Renderer/Structures/RendererEnums.h"
 #include <functional>
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -20,19 +32,33 @@ namespace SasamiRenderer
     class Renderer
     {
     public:
+
+#pragma region using define
+
         using RasterShaderMode = RendererEnums::RasterShaderMode;
         using GBufferDebugView = RendererEnums::GBufferDebugView;
         using SkyboxLoadFormat = RendererEnums::SkyboxLoadFormat;
+        using RenderNodeType = RendererEnums::RenderNodeType;
 
-        using DirectionalLightSettings = RenderDirectionalLight;
-        using PointLight = RenderPointLight;
-        using SpotLight = RenderSpotLight;
+        using DirectionalLightSettings = LightSystem::DirectionalLightSettings;
+        using PointLight = LightSystem::PointLight;
+        using SpotLight = LightSystem::SpotLight;
 
         using RenderProxy = SasamiRenderer::RenderProxy;
 
         using OverlayRenderCallback = std::function<void(CommandList&, CpuDescriptorHandle)>;
+        using PhaseCompletionMode = RenderGraph::PhaseCompletionMode;
+        using PhaseCompletionCallback = std::function<bool(const RenderNodeContextView&)>;
 
-        Renderer() = default;
+        struct PassHandle
+        {
+            size_t index = static_cast<size_t>(-1);
+            bool IsValid() const { return index != static_cast<size_t>(-1); }
+        };
+
+#pragma endregion
+
+        Renderer();
         ~Renderer();
 
         bool Initialize(HWND hWnd, UINT width, UINT height);
@@ -44,7 +70,20 @@ namespace SasamiRenderer
         void SetDeltaTime(float dt) { m_deltaTime = dt; }
         void SetSkyboxHdrEquirectData(std::vector<float> pixels, UINT width, UINT height);
         void SetSkyboxLdrEquirectData(std::vector<uint8_t> pixels, UINT width, UINT height);
-        void SetSkyboxLoadFormat(SkyboxLoadFormat format) { m_skyboxLoadFormat = format; }
+        void SetSkyboxLoadFormat(SkyboxLoadFormat format);
+        PassHandle AddPass(const std::shared_ptr<IRenderNode>& renderPass);
+        PassHandle AddPassBefore(std::string_view targetTag, const std::shared_ptr<IRenderNode>& renderPass);
+        PassHandle AddPassAfter(std::string_view targetTag, const std::shared_ptr<IRenderNode>& renderPass);
+        bool ReplacePass(std::string_view targetTag, const std::shared_ptr<IRenderNode>& renderPass);
+        bool AddPhaseCompletionNode(std::string_view phaseTag,
+                                    std::string_view nodeName,
+                                    const PhaseCompletionCallback& execute,
+                                    PhaseCompletionMode mode = PhaseCompletionMode::Deterministic,
+                                    const RenderNodeRequirements& requirements = {});
+        void ClearPhaseCompletionNodes();
+        void ClearPasses();
+        const std::vector<RenderNodeType>& GetRenderNodeSequence() const { return m_renderNodeQueueTypes; }
+        void SetRenderNodeSequence(const std::vector<RenderNodeType>& sequence);
         void RefreshEnvironmentAssets();
         void SetGraphicsRuntime(GraphicsRuntime runtime) { m_graphicsRuntime = runtime; }
         GraphicsRuntime GetGraphicsRuntime() const { return m_graphicsRuntime; }
@@ -89,10 +128,10 @@ namespace SasamiRenderer
         float GetDeltaTime() const { return m_deltaTime; }
         DirectionalLightSettings GetDirectionalLightSettings() const;
         void SetDirectionalLightSettings(const DirectionalLightSettings& settings);
-        std::vector<PointLight>& GetPointLights() { return m_pointLights; }
-        const std::vector<PointLight>& GetPointLights() const { return m_pointLights; }
-        std::vector<SpotLight>& GetSpotLights() { return m_spotLights; }
-        const std::vector<SpotLight>& GetSpotLights() const { return m_spotLights; }
+        std::vector<PointLight>& GetPointLights() { return m_lightSystem.GetPointLights(); }
+        const std::vector<PointLight>& GetPointLights() const { return m_lightSystem.GetPointLights(); }
+        std::vector<SpotLight>& GetSpotLights() { return m_lightSystem.GetSpotLights(); }
+        const std::vector<SpotLight>& GetSpotLights() const { return m_lightSystem.GetSpotLights(); }
         void* GetNativeDeviceHandle() const { return m_device ? m_device->GetNativeDeviceHandle() : nullptr; }
         void* GetNativeGraphicsQueueHandle() const { return m_device ? m_device->GetNativeGraphicsQueueHandle() : nullptr; }
         ID3D12Device* GetNativeDevice() const { return m_device ? m_device->GetDevice() : nullptr; }
@@ -106,6 +145,8 @@ namespace SasamiRenderer
         {
             size_t meshIndex = 0;
             Texture* texture = nullptr;
+            Texture* occlusionTexture = nullptr;
+            bool transparent = false;
             float model[16] = {
                 1,0,0,0,
                 0,1,0,0,
@@ -114,119 +155,81 @@ namespace SasamiRenderer
             };
         };
 
-        struct FrameContext
+        using DrawSceneItemsCallback = std::function<void(bool drawTransparent)>;
+        using DrawShadowItemsCallback = std::function<void(const LightSystem::ShadowPassContext&)>;
+        struct PhaseCompletionNodeEntry
         {
-            CommandAllocator cmdAllocator;
-            Resource cameraCB;
-            uint8_t* cameraCBPtr = nullptr;
-            UINT cameraCbCapacity = 0;
-            UINT cameraCbCount = 0;
-            Resource lightCB;
-            void* lightCBPtr = nullptr;
-
-            Resource pointLightBuffer;
-            Resource spotLightBuffer;
-            void* pointLightBufferPtr = nullptr;
-            void* spotLightBufferPtr = nullptr;
-            UINT pointLightCapacity = 0;
-            UINT spotLightCapacity = 0;
-
-            CpuDescriptorHandle pointSrvCpu{};
-            CpuDescriptorHandle spotSrvCpu{};
-            GpuDescriptorHandle lightSrvTable{};
-            UINT64 fenceValue = 0;
+            std::string phaseTag;
+            std::string nodeName;
+            PhaseCompletionMode mode = PhaseCompletionMode::Deterministic;
+            RenderNodeRequirements requirements{};
+            PhaseCompletionCallback execute;
         };
 
-        bool InitializeFrameContexts(UINT frameCount);
-        bool ResetCommandListForFrame(UINT frameIndex, CommandList*& outCmdList);
-        void WaitForFrameFence(UINT frameIndex);
-        void SignalFrameFence(UINT frameIndex);
-        bool AllocateSrvRange(UINT count, CpuDescriptorHandle& outCpu, GpuDescriptorHandle& outGpu);
+        struct DeferredUploadBatch
+        {
+            CommandAllocator allocator;
+            CommandList commandList;
+            std::vector<Resource> uploadResources;
+            UINT64 retireFenceValue = 0;
+        };
 
-        void ShadowPass(CommandList* cmdList, FrameContext& frame);
+        bool AllocateSrvRange(UINT count, CpuDescriptorHandle& outCpu, GpuDescriptorHandle& outGpu);
+        bool InitializeBackBufferTargets(SwapChain& swapChain, UINT bufferCount);
+        void ReleaseBackBufferTargets();
+        CpuDescriptorHandle GetBackBufferRtv(UINT backIndex) const;
+        const Resource* GetBackBufferResource(UINT backIndex) const;
+        void RetireDeferredUploadBatches();
+        void EnsureEnvironmentTexturesUploaded(CommandList* cmdList);
+        PassHandle InsertPassAt(size_t insertIndex, const std::shared_ptr<IRenderNode>& renderPass);
+        size_t FindPassIndexByTag(std::string_view targetTag) const;
+        bool RegisterPassesToRenderGraph(const RenderGraphExecuteContext& executeContext);
+        void RegisterPhaseCompletionNodesToRenderGraph(const RenderGraphExecuteContext& executeContext);
+        RenderNodeExecutionPolicy BuildRenderNodeExecutionPolicy(bool executeOpaqueFamilyPasses,
+                                                                 bool executeLightingFamilyPasses,
+                                                                 bool useShadowTessPath);
+        RenderNodeFrameInputs BuildRenderNodeFrameInputs(CommandList* cmdList,
+                                                         RendererFrameCoordinator::FrameContext* frame,
+                                                         D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu,
+                                                         GpuDescriptorHandle defaultAoSrv);
+        RenderNodeExecutionServices BuildRenderNodeExecutionServices(const DrawSceneItemsCallback& drawItems,
+                                                                     const DrawShadowItemsCallback& drawShadowItems);
+
         void TransitionBackBufferToRenderTarget(CommandList* cmdList, UINT backIndex);
         void ClearAndBindMainTargets(CommandList* cmdList, UINT backIndex);
-        void EnsureIconTextureUploaded(CommandList* cmdList);
-        void EnsureSkyboxTextureUploaded(CommandList* cmdList);
-        void EnsureIblTexturesUploaded(CommandList* cmdList);
-        bool EnsureHdrEnvironmentLoaded();
-        bool InitializeSkyboxGeometry();
-        void MainPass(CommandList* cmdList, FrameContext& frame);
-        void SkyboxPass(CommandList* cmdList, FrameContext& frame);
+        void BindMainTargets(CommandList* cmdList, UINT backIndex);
         void TransitionBackBufferToPresent(CommandList* cmdList, UINT backIndex);
         void SubmitAndPresent(CommandList* cmdList, UINT frameIndex);
         Texture* CreateTextureFromRgba8Data(const CpuTextureRgba8& src, CommandList* cmdList,
                                             std::vector<Resource>& uploads);
         Texture* ResolveSceneTexture(const std::shared_ptr<const CpuTextureRgba8>& textureData);
-        void EnsureCameraBuffers(FrameContext& frame, UINT requiredCount);
-        D3D12_GPU_VIRTUAL_ADDRESS PushCameraCB(FrameContext& frame, const float mvp[16], const float world[16]);
-        void EnsureLightBuffers(FrameContext& frame, size_t pointCount, size_t spotCount);
-
         std::unique_ptr<IRHIDevice> m_device;
-        RenderTargetResourceBinder m_rtBinder;
-        RenderLayerConfigurator m_rlConfig;
+        RenderPipelineStateCache m_pipelineStateCache;
+        RendererFrameCoordinator m_frameCoordinator;
         std::vector<Mesh> m_meshes;
         MeshBuffer m_meshBuffer;
         DrawCommandBuilder m_drawCommandBuilder;
-        Material m_material;
-        Texture m_iconTex;
-        bool m_iconLoaded = false;
         std::vector<std::unique_ptr<Texture>> m_sceneTextures;
-        enum class SkyboxSourceType
-        {
-            None = 0,
-            HdrRgbFloat = 1,
-            LdrRgba8 = 2,
-        };
-        SkyboxSourceType m_skyboxSourceType = SkyboxSourceType::None;
-        UINT m_skyboxSourceWidth = 0;
-        UINT m_skyboxSourceHeight = 0;
-        std::vector<float> m_skyboxSourceHdrRgb;
-        std::vector<uint8_t> m_skyboxSourceLdrRgba8;
-
-        std::vector<FrameContext> m_frames;
-        CommandList m_mainCommandList;
-        bool m_mainCommandListReady = false;
-        ComPtr<ID3D12Fence> m_frameFence;
-        HANDLE m_frameFenceEvent = nullptr;
-        UINT64 m_nextFenceValue = 1;
+        Skybox m_skybox;
+        LightSystem m_lightSystem;
+        RenderGraph m_renderGraph;
+        std::shared_ptr<ShadowRenderNode> m_shadowRenderNode;
+        std::shared_ptr<OpaqueRenderNode> m_opaqueRenderNode;
+        std::shared_ptr<LightingRenderNode> m_lightingRenderNode;
+        std::shared_ptr<TransparentRenderNode> m_transparentRenderNode;
+        std::shared_ptr<TransparentLightingRenderNode> m_transparentLightingRenderNode;
+        std::shared_ptr<SkyboxRenderNode> m_skyboxRenderNode;
+        std::shared_ptr<PostProcessRenderNode> m_postProcessRenderNode;
 
         DescriptorHeap m_srvHeap;
+        DescriptorHeap m_rtvHeap;
         UINT m_srvCapacity = 0;
         UINT m_srvNext = 0;
-        CpuDescriptorHandle m_iconSrvCpu{};
-        CpuDescriptorHandle m_skyboxSrvCpu{};
-        GpuDescriptorHandle m_skyboxSrv{};
-        CpuDescriptorHandle m_iblSrvCpu{};
-        GpuDescriptorHandle m_iblSrv{};
-
-        Resource m_texture;
-        Resource m_textureUpload;
-        bool m_textureUploaded = false;
-        Resource m_skyboxTexture;
-        Resource m_skyboxTextureUpload;
-        bool m_skyboxTextureUploaded = false;
-        bool m_skyboxUploadAttempted = false;
-        bool m_skyboxTextureIsHdr = false;
-        SkyboxLoadFormat m_skyboxLoadFormat = SkyboxLoadFormat::Auto;
-        Resource m_iblIrradianceTexture;
-        Resource m_iblIrradianceUpload;
-        Resource m_iblPrefilterTexture;
-        Resource m_iblPrefilterUpload;
-        Resource m_iblBrdfLutTexture;
-        Resource m_iblBrdfLutUpload;
-        bool m_iblUploaded = false;
-        bool m_iblUploadAttempted = false;
-        bool m_iblEnabled = false;
+        std::vector<Resource> m_backBuffers;
+        std::vector<CpuDescriptorHandle> m_backBufferRtvs;
+        GpuDescriptorHandle m_nullTextureSrv{};
+        Texture* m_defaultOcclusionTexture = nullptr;
         float m_iblIntensity = 0.25f;
-        float m_iblPrefilterMaxMip = 0.0f;
-        bool m_hdrEquirectLoaded = false;
-        bool m_hdrEquirectTried = false;
-        UINT m_hdrEquirectWidth = 0;
-        UINT m_hdrEquirectHeight = 0;
-        std::vector<float> m_hdrEquirectPixels;
-        Resource m_skyboxVB;
-        VertexBufferView m_skyboxVBV{};
         Viewport m_viewport{};
         Rect m_scissorRect{};
         bool m_comInitialized = false;
@@ -240,35 +243,22 @@ namespace SasamiRenderer
         };
         float m_cameraPos[3] = { 0.0f, 0.0f, 0.0f };
 
-        Resource m_shadowMap;
-        DescriptorHeap m_dsvHeapShadow;
-        UINT m_shadowMapSize = 1024;
-        Viewport m_shadowViewport{};
-        Rect m_shadowScissor{};
-        GpuDescriptorHandle m_shadowSrv{};
-
-        float m_lightYaw = 0.7f;
-        float m_lightPitch = 1.0f;
-        float m_lightDistance = 4.0f;
-        float m_lightOrthoHalf = 1.8f;
-        float m_lightNear = 0.1f;
-        float m_lightFar = 10.0f;
-        float m_dirColor[3] = { 1.0f, 1.0f, 1.0f };
-        float m_dirIntensity = 1.0f;
-
-        std::vector<PointLight> m_pointLights = { PointLight{} };
-        std::vector<SpotLight> m_spotLights;
-
         Resource m_depth;
         DescriptorHeap m_dsvHeap;
 
         std::vector<DrawItem> m_drawItems;
         std::unordered_map<uint64_t, Texture*> m_textureCache;
+        std::vector<DeferredUploadBatch> m_deferredUploadBatches;
 
         bool m_useTessellation = false;
-        RasterShaderMode m_rasterShaderMode = RasterShaderMode::PBR;
+        RasterShaderMode m_rasterShaderMode = RasterShaderMode::Lighting;
         GBufferDebugView m_gBufferDebugView = GBufferDebugView::FinalLit;
         float m_deltaTime = 0.0f;
         GraphicsRuntime m_graphicsRuntime = GetBuildDefaultGraphicsRuntime();
+        std::vector<std::shared_ptr<IRenderNode>> m_renderPasses;
+        std::vector<PhaseCompletionNodeEntry> m_phaseCompletionNodes;
+        std::vector<RenderNodeType> m_renderNodeQueueTypes =
+            std::vector<RenderNodeType>(RenderNodeConstants::kDefaultRenderPathSequence.begin(),
+                                        RenderNodeConstants::kDefaultRenderPathSequence.end());
     };
 }

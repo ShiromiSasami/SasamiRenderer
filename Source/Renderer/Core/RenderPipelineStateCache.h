@@ -1,9 +1,11 @@
+#pragma once
+
 #include "Renderer/Core/GraphicsDevice.h"
 #include "d3dx12.h"
 
 namespace SasamiRenderer
 {
-    class RenderLayerConfigurator
+    class RenderPipelineStateCache
     {
     public:
         bool Initialize(GraphicsDevice& device);

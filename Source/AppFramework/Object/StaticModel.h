@@ -16,7 +16,9 @@ namespace SasamiRenderer
 
         bool LoadModel(const std::string& assetPath, ModelFormat format, float uniformScale = 1.0f);
         std::vector<RenderProxy> BuildRenderProxies() const;
-        void AddStaticMesh(Mesh mesh, const std::string& texturePath = "");
+        void AddStaticMesh(Mesh mesh,
+                           const std::string& albedoTexturePath = "",
+                           const std::string& occlusionTexturePath = "");
         void ClearModel();
         void SetTranslation(float x, float y, float z);
 

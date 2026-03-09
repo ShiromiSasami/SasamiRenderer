@@ -4,7 +4,7 @@
 #include "Input/InputSystem.h"
 #include "UI/ImGuiCoordinator.h"
 #include "ApplicationEntryPoint.h"
-#include "Foundation/Diagnostics/DebugOutput.h"
+#include "Foundation/Tools/DebugOutput.h"
 #include "imgui.h"
 
 #include <algorithm>
@@ -28,11 +28,21 @@ namespace SasamiRenderer
             app.RequestQuit();
             return;
         }
-        if (!app.set_main_camera(m_camera)) {
-            DebugLog("set_main_camera failed.\n");
+        if (!app.SetMainCamera(m_camera)) {
+            DebugLog("SetMainCamera failed.\n");
             app.RequestQuit();
             return;
         }
+
+        app.SetRenderNodeSequence({
+            ApplicationCore::RenderNodeType::Shadow,
+            ApplicationCore::RenderNodeType::Opaque,
+            ApplicationCore::RenderNodeType::Lighting,
+            ApplicationCore::RenderNodeType::Skybox,
+            ApplicationCore::RenderNodeType::Transparent,
+            ApplicationCore::RenderNodeType::TransparentLighting,
+            ApplicationCore::RenderNodeType::PostProcess,
+        });
 
         if (!app.LoadSkybox(kSkyboxPanoramaPath, ApplicationCore::SkyboxLoadFormat::HdrEquirect)) {
             DebugLog("Skybox load failed: invalid path for selected format.\n");
@@ -299,7 +309,7 @@ namespace SasamiRenderer
             }
 
             int rasterMode = app.GetRasterShaderModeIndex();
-            if (ImGui::Combo("Raster Shader", &rasterMode, "PBR\0Basic (Provisional)\0")) {
+            if (ImGui::Combo("Raster Shader", &rasterMode, "Lighting (PBR)\0Opaque (Unlit)\0")) {
                 app.SetRasterShaderModeIndex(rasterMode);
             }
 

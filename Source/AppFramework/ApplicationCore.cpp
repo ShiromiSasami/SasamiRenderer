@@ -2,11 +2,14 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <algorithm>
+#include <exception>
 #include <filesystem>
+#include <stdexcept>
 #include <cwctype>
 #include <utility>
 
-#include "Foundation/Diagnostics/DebugOutput.h"
+#include "Foundation/Tools/DebugOutput.h"
+#include "Foundation/Tools/ScopedPerfTimer.h"
 #include "Input/InputSystem.h"
 #include "Loader/AssetLoader.h"
 #include "Object/Camera.h"
@@ -105,6 +108,7 @@ namespace SasamiRenderer
     ApplicationCore::ApplicationCore(UINT width, UINT height, const wchar_t* title, IApplication* game)
         : m_width(width), m_height(height), m_title(title), m_running(true), m_game(game)
     {
+        ScopedPerfTimer perfTimer("ApplicationCore::ApplicationCore");
     }
 
     ApplicationCore::~ApplicationCore() { OnDestroy(); }
@@ -252,6 +256,62 @@ namespace SasamiRenderer
         m_renderer->CycleGBufferDebugView(delta);
     }
 
+    std::vector<ApplicationCore::RenderNodeType> ApplicationCore::GetRenderNodeSequence() const
+    {
+        if (!m_renderer) {
+            return {};
+        }
+        return m_renderer->GetRenderNodeSequence();
+    }
+
+    void ApplicationCore::SetRenderNodeSequence(const std::vector<RenderNodeType>& sequence)
+    {
+        if (!m_renderer) {
+            return;
+        }
+        m_renderer->SetRenderNodeSequence(sequence);
+    }
+
+    bool ApplicationCore::AddRenderPass(const std::shared_ptr<IRenderNode>& renderPass)
+    {
+        if (!m_renderer) {
+            return false;
+        }
+        return m_renderer->AddPass(renderPass).IsValid();
+    }
+
+    bool ApplicationCore::AddRenderPassBefore(std::string_view targetTag, const std::shared_ptr<IRenderNode>& renderPass)
+    {
+        if (!m_renderer) {
+            return false;
+        }
+        return m_renderer->AddPassBefore(targetTag, renderPass).IsValid();
+    }
+
+    bool ApplicationCore::AddRenderPassAfter(std::string_view targetTag, const std::shared_ptr<IRenderNode>& renderPass)
+    {
+        if (!m_renderer) {
+            return false;
+        }
+        return m_renderer->AddPassAfter(targetTag, renderPass).IsValid();
+    }
+
+    bool ApplicationCore::ReplaceRenderPass(std::string_view targetTag, const std::shared_ptr<IRenderNode>& renderPass)
+    {
+        if (!m_renderer) {
+            return false;
+        }
+        return m_renderer->ReplacePass(targetTag, renderPass);
+    }
+
+    void ApplicationCore::ClearRenderPasses()
+    {
+        if (!m_renderer) {
+            return;
+        }
+        m_renderer->ClearPasses();
+    }
+
     bool ApplicationCore::LoadSkybox(const std::string& resourcePath, SkyboxLoadFormat format)
     {
         if (!m_renderer) {
@@ -342,14 +402,64 @@ namespace SasamiRenderer
         return camera;
     }
 
+    void ApplicationCore::RegisterObjectInEcs(SObject* object)
+    {
+        if (!object) {
+            return;
+        }
+
+        if (m_objectEntityMap.contains(object)) {
+            return;
+        }
+
+        const EntityId entity = m_ecsRegistry.CreateEntity();
+        if (entity == EcsRegistry::INVALID_ENTITY) {
+            DebugLog("ApplicationCore::RegisterObjectInEcs: entity allocation failed.\n");
+            return;
+        }
+        m_objectEntityMap.emplace(object, entity);
+        m_ecsRegistry.AddComponent<ObjectRefComponent>(entity, ObjectRefComponent{ object });
+
+        if (dynamic_cast<StaticModel*>(object)) {
+            m_ecsRegistry.AddComponent<StaticModelTag>(entity);
+        }
+        if (dynamic_cast<PointLight*>(object)) {
+            m_ecsRegistry.AddComponent<PointLightTag>(entity);
+        }
+        if (dynamic_cast<SpotLight*>(object)) {
+            m_ecsRegistry.AddComponent<SpotLightTag>(entity);
+        }
+        if (dynamic_cast<Camera*>(object)) {
+            m_ecsRegistry.AddComponent<CameraTag>(entity);
+        }
+    }
+
+    void ApplicationCore::UnregisterObjectInEcs(SObject* object)
+    {
+        if (!object) {
+            return;
+        }
+
+        const auto found = m_objectEntityMap.find(object);
+        if (found == m_objectEntityMap.end()) {
+            return;
+        }
+
+        m_ecsRegistry.DestroyEntity(found->second);
+        m_objectEntityMap.erase(found);
+    }
+
     std::vector<PointLight*> ApplicationCore::GetPointLightObjects() const
     {
         std::vector<PointLight*> out;
-        out.reserve(m_objects.size());
-        for (const auto& entry : m_objects) {
-            if (auto* light = dynamic_cast<PointLight*>(entry.get())) {
-                out.push_back(light);
+        const auto pointLightEntities = m_ecsRegistry.View<PointLightTag, ObjectRefComponent>();
+        out.reserve(pointLightEntities.size());
+        for (const EntityId entity : pointLightEntities) {
+            const auto* objectRef = m_ecsRegistry.GetComponent<ObjectRefComponent>(entity);
+            if (!objectRef || !objectRef->object) {
+                continue;
             }
+            out.push_back(static_cast<PointLight*>(objectRef->object));
         }
         return out;
     }
@@ -357,11 +467,14 @@ namespace SasamiRenderer
     std::vector<SpotLight*> ApplicationCore::GetSpotLightObjects() const
     {
         std::vector<SpotLight*> out;
-        out.reserve(m_objects.size());
-        for (const auto& entry : m_objects) {
-            if (auto* light = dynamic_cast<SpotLight*>(entry.get())) {
-                out.push_back(light);
+        const auto spotLightEntities = m_ecsRegistry.View<SpotLightTag, ObjectRefComponent>();
+        out.reserve(spotLightEntities.size());
+        for (const EntityId entity : spotLightEntities) {
+            const auto* objectRef = m_ecsRegistry.GetComponent<ObjectRefComponent>(entity);
+            if (!objectRef || !objectRef->object) {
+                continue;
             }
+            out.push_back(static_cast<SpotLight*>(objectRef->object));
         }
         return out;
     }
@@ -373,10 +486,11 @@ namespace SasamiRenderer
             return true;
         }
 
-        const auto it = std::find_if(m_objects.begin(), m_objects.end(), [camera](const std::unique_ptr<SObject>& entry) {
-            return entry.get() == camera;
-        });
-        if (it == m_objects.end()) {
+        const auto found = m_objectEntityMap.find(camera);
+        if (found == m_objectEntityMap.end()) {
+            return false;
+        }
+        if (!m_ecsRegistry.HasComponent<CameraTag>(found->second)) {
             return false;
         }
 
@@ -405,6 +519,7 @@ namespace SasamiRenderer
         if (object == m_activeCamera) {
             m_activeCamera = nullptr;
         }
+        UnregisterObjectInEcs(object);
         m_objects.erase(it);
         m_objectsDirty = true;
         return true;
@@ -412,11 +527,10 @@ namespace SasamiRenderer
 
     void ApplicationCore::ClearObjects()
     {
-        if (m_objects.empty()) {
-            return;
-        }
         m_objects.clear();
         m_activeCamera = nullptr;
+        m_ecsRegistry.Clear();
+        m_objectEntityMap.clear();
         m_objectsDirty = true;
     }
 
@@ -429,11 +543,14 @@ namespace SasamiRenderer
         renderer.ClearRenderObjects();
 
         std::vector<Renderer::RenderProxy> proxies;
-        for (auto& entry : m_objects) {
-            StaticModel* model = dynamic_cast<StaticModel*>(entry.get());
-            if (!model) {
+        const auto staticModelEntities = m_ecsRegistry.View<StaticModelTag, ObjectRefComponent>();
+        for (const EntityId entity : staticModelEntities) {
+            auto* objectRef = m_ecsRegistry.GetComponent<ObjectRefComponent>(entity);
+            if (!objectRef || !objectRef->object) {
                 continue;
             }
+
+            auto* model = static_cast<StaticModel*>(objectRef->object);
             auto modelProxies = model->BuildRenderProxies();
             proxies.reserve(proxies.size() + modelProxies.size());
             for (auto& proxy : modelProxies) {
@@ -451,18 +568,27 @@ namespace SasamiRenderer
     {
         std::vector<Renderer::PointLight> pointLights;
         std::vector<Renderer::SpotLight> spotLights;
-        pointLights.reserve(m_objects.size());
-        spotLights.reserve(m_objects.size());
+        const auto pointLightEntities = m_ecsRegistry.View<PointLightTag, ObjectRefComponent>();
+        const auto spotLightEntities = m_ecsRegistry.View<SpotLightTag, ObjectRefComponent>();
+        pointLights.reserve(pointLightEntities.size());
+        spotLights.reserve(spotLightEntities.size());
 
-        for (const auto& entry : m_objects) {
-            if (const auto* point = dynamic_cast<const PointLight*>(entry.get())) {
-                pointLights.push_back(point->BuildRenderLightProxy());
+        for (const EntityId entity : pointLightEntities) {
+            const auto* objectRef = m_ecsRegistry.GetComponent<ObjectRefComponent>(entity);
+            if (!objectRef || !objectRef->object) {
                 continue;
             }
-            if (const auto* spot = dynamic_cast<const SpotLight*>(entry.get())) {
-                spotLights.push_back(spot->BuildRenderLightProxy());
+            const auto* point = static_cast<const PointLight*>(objectRef->object);
+            pointLights.push_back(point->BuildRenderLightProxy());
+        }
+
+        for (const EntityId entity : spotLightEntities) {
+            const auto* objectRef = m_ecsRegistry.GetComponent<ObjectRefComponent>(entity);
+            if (!objectRef || !objectRef->object) {
                 continue;
             }
+            const auto* spot = static_cast<const SpotLight*>(objectRef->object);
+            spotLights.push_back(spot->BuildRenderLightProxy());
         }
 
         renderer.GetPointLights() = std::move(pointLights);
@@ -471,33 +597,46 @@ namespace SasamiRenderer
 
     bool ApplicationCore::InitializeRenderer()
     {
-        if (m_renderer) {
+        ScopedPerfTimer perfTimer("ApplicationCore::InitializeRenderer");
+        try {
+            if (m_renderer) {
+                return true;
+            }
+
+            m_renderer = std::make_unique<Renderer>();
+            if (!m_renderer) {
+                return false;
+            }
+
+            if (!m_renderer->Initialize(m_hwnd, m_width, m_height)) {
+                // Renderer::Initialize reports the concrete failure reason.
+                // Avoid stacking another modal dialog here.
+                DebugLog("ApplicationCore::InitializeRenderer: Renderer initialization failed.\n");
+                m_renderer.reset();
+                return false;
+            }
+
+            if (!ImGuiCoordinator::Instance().Initialize(m_hwnd,
+                                                         m_renderer->GetNativeDevice(),
+                                                         m_renderer->GetNativeCommandQueue(),
+                                                         m_renderer->GetBackBufferFormat(),
+                                                         m_renderer->GetDepthFormat(),
+                                                         static_cast<int>(m_renderer->GetBackBufferCount()))) {
+                DebugLogDialog("ImGuiCoordinator initialization failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+                m_renderer.reset();
+                return false;
+            }
+
             return true;
-        }
-
-        m_renderer = std::make_unique<Renderer>();
-        if (!m_renderer) {
+        } catch (const std::exception& ex) {
+            ReportException(L"ApplicationCore::InitializeRenderer", ex, true);
+            m_renderer.reset();
             return false;
-        }
-
-        if (!m_renderer->Initialize(m_hwnd, m_width, m_height)) {
-            DebugLog("Renderer initialization failed.\n");
+        } catch (...) {
+            ReportUnknownException(L"ApplicationCore::InitializeRenderer", true);
             m_renderer.reset();
             return false;
         }
-
-        if (!ImGuiCoordinator::Instance().Initialize(m_hwnd,
-                                                     m_renderer->GetNativeDevice(),
-                                                     m_renderer->GetNativeCommandQueue(),
-                                                     m_renderer->GetBackBufferFormat(),
-                                                     m_renderer->GetDepthFormat(),
-                                                     static_cast<int>(m_renderer->GetBackBufferCount()))) {
-            DebugLog("ImGuiCoordinator initialization failed.\n");
-            m_renderer.reset();
-            return false;
-        }
-
-        return true;
     }
 
     void ApplicationCore::ShutdownRenderer()
@@ -507,43 +646,76 @@ namespace SasamiRenderer
     }
 
     int ApplicationCore::Run() {
-        const WindowIconHandle windowIcon = LoadWindowIcon();
-
-        WNDCLASS wc = {};
-        wc.lpfnWndProc = WindowProccessStatic;
-        wc.hInstance = GetModuleHandle(nullptr);
-        wc.lpszClassName = L"Sasami Renderer App Window";
-        wc.hIcon = windowIcon.icon;
-        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-        RegisterClass(&wc);
-
-        m_hwnd = CreateWindowEx(
-            0, wc.lpszClassName, m_title,
-            WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-            m_width, m_height, nullptr, nullptr, wc.hInstance, this);
-
-        if (m_hwnd && windowIcon.icon) {
-            SendMessageW(m_hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(windowIcon.icon));
-            SendMessageW(m_hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(windowIcon.icon));
-        }
-
-        ShowWindow(m_hwnd, SW_SHOW);
-        OnInit();
-
+        WindowIconHandle windowIcon{};
         MSG msg = {};
-        ULONGLONG lastTime = GetTickCount64();
-        while (m_running) {
-            while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
-                TranslateMessage(&msg);
-                DispatchMessage(&msg);
+
+        try {
+            windowIcon = LoadWindowIcon();
+
+            WNDCLASS wc = {};
+            wc.lpfnWndProc = WindowProccessStatic;
+            wc.hInstance = GetModuleHandle(nullptr);
+            wc.lpszClassName = L"Sasami Renderer App Window";
+            wc.hIcon = windowIcon.icon;
+            wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+            if (RegisterClass(&wc) == 0) {
+                const DWORD err = GetLastError();
+                if (err != ERROR_CLASS_ALREADY_EXISTS) {
+                    throw std::runtime_error("RegisterClass failed.");
+                }
             }
 
-            ULONGLONG currentTime = GetTickCount64();
-            float deltaTime = static_cast<float>(currentTime - lastTime) * 0.001f;
-            lastTime = currentTime;
+            m_hwnd = CreateWindowEx(
+                0, wc.lpszClassName, m_title,
+                WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+                m_width, m_height, nullptr, nullptr, wc.hInstance, this);
+            if (!m_hwnd) {
+                throw std::runtime_error("CreateWindowEx failed.");
+            }
 
-            OnUpdate(deltaTime);
-            OnRender();
+            if (windowIcon.icon) {
+                SendMessageW(m_hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(windowIcon.icon));
+                SendMessageW(m_hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(windowIcon.icon));
+            }
+
+            ShowWindow(m_hwnd, SW_SHOW);
+            OnInit();
+        } catch (const std::exception& ex) {
+            ReportException(L"ApplicationCore::Run initialization", ex, true);
+            if (windowIcon.shouldDestroy && windowIcon.icon) {
+                DestroyIcon(windowIcon.icon);
+            }
+            return -1;
+        } catch (...) {
+            ReportUnknownException(L"ApplicationCore::Run initialization", true);
+            if (windowIcon.shouldDestroy && windowIcon.icon) {
+                DestroyIcon(windowIcon.icon);
+            }
+            return -1;
+        }
+
+        ULONGLONG lastTime = GetTickCount64();
+        while (m_running) {
+            try {
+                while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                    TranslateMessage(&msg);
+                    DispatchMessage(&msg);
+                }
+
+                ULONGLONG currentTime = GetTickCount64();
+                float deltaTime = static_cast<float>(currentTime - lastTime) * 0.001f;
+                lastTime = currentTime;
+
+                OnUpdate(deltaTime);
+                OnRender();
+            } catch (const std::exception& ex) {
+                // Main loop exceptions are log-only to avoid modal interruptions during runtime.
+                ReportException(L"ApplicationCore::Run main loop", ex, false);
+                RequestQuit();
+            } catch (...) {
+                ReportUnknownException(L"ApplicationCore::Run main loop", false);
+                RequestQuit();
+            }
         }
 
         if (windowIcon.shouldDestroy && windowIcon.icon) {
@@ -554,13 +726,21 @@ namespace SasamiRenderer
     }
 
     void ApplicationCore::OnInit() {
-        InputSystem::Instance().RegisterRawInput(m_hwnd);
-        if (!InitializeRenderer()) {
+        try {
+            InputSystem::Instance().RegisterRawInput(m_hwnd);
+            if (!InitializeRenderer()) {
+                RequestQuit();
+                return;
+            }
+            if (m_game) {
+                m_game->OnInit(*this);
+            }
+        } catch (const std::exception& ex) {
+            ReportException(L"ApplicationCore::OnInit", ex, true);
             RequestQuit();
-            return;
-        }
-        if (m_game) {
-            m_game->OnInit(*this);
+        } catch (...) {
+            ReportUnknownException(L"ApplicationCore::OnInit", true);
+            RequestQuit();
         }
     }
 
@@ -586,11 +766,17 @@ namespace SasamiRenderer
     }
 
     void ApplicationCore::OnDestroy() { 
-        if (m_game) {
-            m_game->OnShutdown(*this);
+        try {
+            if (m_game) {
+                m_game->OnShutdown(*this);
+            }
+            ClearObjects();
+            ShutdownRenderer();
+        } catch (const std::exception& ex) {
+            ReportException(L"ApplicationCore::OnDestroy", ex, true);
+        } catch (...) {
+            ReportUnknownException(L"ApplicationCore::OnDestroy", true);
         }
-        ClearObjects();
-        ShutdownRenderer();
     }
 
     // Window message dispatcher for the application instance.
@@ -610,37 +796,48 @@ namespace SasamiRenderer
     }
 
     LRESULT ApplicationCore::WindowProccess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-        switch (msg) {
-        case WM_DESTROY:
-            m_running = false;
-            PostQuitMessage(0);
-            return 0;
-        case WM_SIZE:
-            m_width = LOWORD(lParam);
-            m_height = HIWORD(lParam);
-            ResizeRenderer(m_width, m_height);
-            if (m_game) {
-                m_game->OnResize(*this, m_width, m_height);
+        try {
+            switch (msg) {
+            case WM_DESTROY:
+                m_running = false;
+                PostQuitMessage(0);
+                return 0;
+            case WM_SIZE:
+                m_width = LOWORD(lParam);
+                m_height = HIWORD(lParam);
+                ResizeRenderer(m_width, m_height);
+                if (m_game) {
+                    m_game->OnResize(*this, m_width, m_height);
+                }
+                return 0;
+            case WM_INPUT:
+                if (InputSystem::Instance().HandleMessage(hWnd, msg, wParam, lParam))
+                    return 0;
+                break;
+            case WM_KEYDOWN:
+            case WM_KEYUP:
+            case WM_SYSKEYDOWN:
+            case WM_SYSKEYUP:
+            case WM_RBUTTONDOWN:
+            case WM_RBUTTONUP:
+            case WM_MOUSEMOVE:
+            case WM_MOUSEWHEEL:
+                if (InputSystem::Instance().HandleMessage(hWnd, msg, wParam, lParam))
+                    return 0;
+                break;
+            default:
+                return DefWindowProc(hWnd, msg, wParam, lParam);
             }
-            return 0;
-        case WM_INPUT:
-            if (InputSystem::Instance().HandleMessage(hWnd, msg, wParam, lParam))
-                return 0;
-            break;
-        case WM_KEYDOWN:
-        case WM_KEYUP:
-        case WM_SYSKEYDOWN:
-        case WM_SYSKEYUP:
-        case WM_RBUTTONDOWN:
-        case WM_RBUTTONUP:
-        case WM_MOUSEMOVE:
-        case WM_MOUSEWHEEL:
-            if (InputSystem::Instance().HandleMessage(hWnd, msg, wParam, lParam))
-                return 0;
-            break;
-        default:
+            return DefWindowProc(hWnd, msg, wParam, lParam);
+        } catch (const std::exception& ex) {
+            // Message processing is part of the runtime loop: keep this log-only.
+            ReportException(L"ApplicationCore::WindowProccess", ex, false);
+            RequestQuit();
+            return DefWindowProc(hWnd, msg, wParam, lParam);
+        } catch (...) {
+            ReportUnknownException(L"ApplicationCore::WindowProccess", false);
+            RequestQuit();
             return DefWindowProc(hWnd, msg, wParam, lParam);
         }
-        return DefWindowProc(hWnd, msg, wParam, lParam);
     }
 }

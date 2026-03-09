@@ -31,6 +31,7 @@
     <ClInclude Include="Source\AppFramework\Object\Camera.h" />
     <ClInclude Include="Source\AppFramework\Object\PointLight.h" />
     <ClInclude Include="Source\AppFramework\Object\SpotLight.h" />
+    <ClInclude Include="Source\AppFramework\ECS\EcsRegistry.h" />
     <ClInclude Include="Source\AppFramework\Loader\AssetLoader.h" />
     <ClInclude Include="Source\AppFramework\Loader\ModelLoader.h" />
     <ClInclude Include="Source\AppFramework\Object\SObject.h" />
