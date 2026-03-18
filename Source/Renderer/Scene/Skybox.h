@@ -102,6 +102,7 @@ namespace SasamiRenderer
         bool m_skyboxTextureUploaded = false;
         bool m_skyboxUploadAttempted = false;
         bool m_skyboxTextureIsHdr = false;
+        UINT m_skyboxMipLevels = 1;
 
         Resource m_iblIrradianceTexture;
         Resource m_iblIrradianceUpload;

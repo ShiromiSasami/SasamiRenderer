@@ -355,6 +355,7 @@ namespace SasamiRenderer
         m_skyboxTextureUploaded = false;
         m_skyboxUploadAttempted = false;
         m_skyboxTextureIsHdr = false;
+        m_skyboxMipLevels = 1;
     }
 
     void Skybox::ResetIblResources()
@@ -548,7 +549,7 @@ namespace SasamiRenderer
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srvDesc.Format = format;
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
-        srvDesc.TextureCube.MipLevels = 1;
+        srvDesc.TextureCube.MipLevels = m_skyboxMipLevels;
         srvDesc.TextureCube.MostDetailedMip = 0;
         srvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
         m_device->CreateShaderResourceView(m_skyboxTexture, &srvDesc, m_skyboxSrvCpu);
@@ -560,18 +561,32 @@ namespace SasamiRenderer
             return false;
         }
 
-        std::vector<std::vector<float>> skyFaces;
         const UINT skyFaceSize = 256;
+
+        // Calculate mip levels: floor(log2(faceSize)) + 1
+        UINT mipLevels = 1;
+        for (UINT s = skyFaceSize; s > 1; s >>= 1) {
+            ++mipLevels;
+        }
+
+        // Generate base cubemap faces from equirectangular source.
+        std::vector<std::vector<float>> skyFaces;
         RendererMathUtility::GenerateSkyCubemapFromEquirect(m_hdrEquirectPixels,
                                                             m_hdrEquirectWidth,
                                                             m_hdrEquirectHeight,
                                                             skyFaceSize,
                                                             skyFaces);
+
+        // Generate full mip chain via box-filter downsample.
+        std::vector<std::vector<float>> skySubresources;
+        RendererMathUtility::GenerateSkyboxCubemapMips(skyFaces, skyFaceSize, mipLevels, skySubresources);
+
+        m_skyboxMipLevels = mipLevels;
         if (!CreateTextureCubeFromFloatFacesWithMips(*m_device,
                                                      cmdList,
-                                                     skyFaces,
+                                                     skySubresources,
                                                      skyFaceSize,
-                                                     1,
+                                                     mipLevels,
                                                      m_skyboxTexture,
                                                      m_skyboxTextureUpload)) {
             return false;
@@ -614,6 +629,7 @@ namespace SasamiRenderer
             return false;
         }
 
+        m_skyboxMipLevels = 1;
         PublishSkyboxSrv(DXGI_FORMAT_R8G8B8A8_UNORM);
         m_skyboxTextureUploaded = true;
         m_skyboxTextureIsHdr = false;

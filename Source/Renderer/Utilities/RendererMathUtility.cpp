@@ -423,6 +423,68 @@ namespace SasamiRenderer
             }
         }
 
+        void GenerateSkyboxCubemapMips(const std::vector<std::vector<float>>& baseFaces,
+                                       std::uint32_t faceSize,
+                                       std::uint32_t mipLevels,
+                                       std::vector<std::vector<float>>& outSubresources)
+        {
+            if (baseFaces.size() != 6u || faceSize == 0 || mipLevels == 0) {
+                return;
+            }
+
+            outSubresources.assign(static_cast<std::size_t>(mipLevels) * 6u, {});
+
+            // Mip 0: copy base faces directly.
+            for (std::uint32_t face = 0; face < 6; ++face) {
+                outSubresources[0 + face * mipLevels] = baseFaces[face];
+            }
+
+            // Mip 1+: box-filter downsample from previous mip.
+            for (std::uint32_t mip = 1; mip < mipLevels; ++mip) {
+                const std::uint32_t srcSize = (faceSize >> (mip - 1)) > 0 ? (faceSize >> (mip - 1)) : 1u;
+                const std::uint32_t dstSize = (faceSize >> mip) > 0 ? (faceSize >> mip) : 1u;
+
+                for (std::uint32_t face = 0; face < 6; ++face) {
+                    const auto& src = outSubresources[(mip - 1) + face * mipLevels];
+                    auto& dst = outSubresources[mip + face * mipLevels];
+                    dst.resize(static_cast<std::size_t>(dstSize) * dstSize * 4u, 0.0f);
+
+                    for (std::uint32_t dy = 0; dy < dstSize; ++dy) {
+                        for (std::uint32_t dx = 0; dx < dstSize; ++dx) {
+                            float r = 0.0f, g = 0.0f, b = 0.0f, a = 0.0f;
+                            std::uint32_t count = 0;
+
+                            // Gather 2x2 (or 1x1 if srcSize==1) texels from previous mip.
+                            const std::uint32_t sx0 = dx * 2;
+                            const std::uint32_t sy0 = dy * 2;
+                            const std::uint32_t sx1 = (srcSize > 1) ? sx0 + 1 : sx0;
+                            const std::uint32_t sy1 = (srcSize > 1) ? sy0 + 1 : sy0;
+
+                            for (std::uint32_t sy = sy0; sy <= sy1 && sy < srcSize; ++sy) {
+                                for (std::uint32_t sx = sx0; sx <= sx1 && sx < srcSize; ++sx) {
+                                    const std::size_t idx = (static_cast<std::size_t>(sy) * srcSize + sx) * 4u;
+                                    r += src[idx + 0];
+                                    g += src[idx + 1];
+                                    b += src[idx + 2];
+                                    a += src[idx + 3];
+                                    ++count;
+                                }
+                            }
+
+                            if (count > 0) {
+                                const float inv = 1.0f / static_cast<float>(count);
+                                const std::size_t dstIdx = (static_cast<std::size_t>(dy) * dstSize + dx) * 4u;
+                                dst[dstIdx + 0] = r * inv;
+                                dst[dstIdx + 1] = g * inv;
+                                dst[dstIdx + 2] = b * inv;
+                                dst[dstIdx + 3] = a * inv;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         void GenerateBrdfLut(std::uint32_t width,
                              std::uint32_t height,
                              std::vector<float>& outPixels)
