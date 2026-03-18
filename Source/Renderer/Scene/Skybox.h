@@ -45,6 +45,7 @@ namespace SasamiRenderer
         bool IsSkyboxTextureUploaded() const { return m_skyboxTextureUploaded; }
         bool HasSkyboxUploadAttempted() const { return m_skyboxUploadAttempted; }
         bool IsIblUploaded() const { return m_iblUploaded; }
+        GpuDescriptorHandle GetSkyboxSrvTable() const { return m_skyboxSrv; }
         bool HasIblUploadAttempted() const { return m_iblUploadAttempted; }
 
         bool IsIblEnabled() const { return m_iblEnabled; }

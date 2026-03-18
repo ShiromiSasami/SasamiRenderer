@@ -90,7 +90,7 @@ namespace
 
         auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(outTexture.Get(),
             D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+            D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
         cmdList->ResourceBarrier(1, &barrier);
         return true;
     }
@@ -171,7 +171,7 @@ namespace
         UpdateSubresources(cmdList->Get(), outTexture.Get(), outUpload.Get(), 0, 0, subresourceCount, subresourceDescs.data());
         auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(outTexture.Get(),
             D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+            D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
         cmdList->ResourceBarrier(1, &barrier);
         return true;
     }
@@ -238,7 +238,7 @@ namespace
 
         auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(outTexture.Get(),
             D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+            D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
         cmdList->ResourceBarrier(1, &barrier);
         return true;
     }
