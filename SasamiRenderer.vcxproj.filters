@@ -34,8 +34,29 @@
     <Filter Include="Shader Files\Skybox">
       <UniqueIdentifier>{0fe97ee0-0f8c-4ff0-8f5f-d6284a96e4ea}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Shader Files\SSAO">
+      <UniqueIdentifier>{b3c1a2d4-e5f6-4789-ab01-23cd456ef789}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source Files\Tools">
       <UniqueIdentifier>{eb75eba7-f5ba-4126-aaa5-00245943bcd9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\RayTrace">
+      <UniqueIdentifier>{2513d7b2-6619-4ca0-b32a-3ba5eace56d7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\GI">
+      <UniqueIdentifier>{a1b2c3d4-e5f6-7890-ab01-23cd45ef6789}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\GI">
+      <UniqueIdentifier>{b2c3d4e5-f6a7-8901-bc12-34de56f07891}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Debug">
+      <UniqueIdentifier>{c3d4e5f6-a7b8-9012-cd23-45ef67089012}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\VolumetricCloud">
+      <UniqueIdentifier>{d4e5f6a7-b8c9-0123-de34-56f0781a2345}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\RayMarch">
+      <UniqueIdentifier>{e5f6a7b8-c9d0-1234-ef45-670891ab2345}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -54,10 +75,25 @@
     <ClInclude Include="Source\Renderer\Core\RenderPipelineStateCache.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\RenderSettings.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\RenderTargetPool.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Renderer\Core\RendererFrameCoordinator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Core\Renderer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\SrvDescriptorAllocator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\CameraState.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\RenderPassRegistry.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Scene\DrawCommandBuilder.h">
@@ -135,6 +171,51 @@
     <ClInclude Include="Source\Renderer\Passes\SkyboxRenderNode.h">
       <Filter>Header Files\RenderNode</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\SSAORenderNode.h">
+      <Filter>Header Files\RenderNode</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\DebugProbeGridRenderNode.h">
+      <Filter>Header Files\RenderNode</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\RayTracing\RayTracingScene.h">
+      <Filter>Source Files\RayTrace</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\GI\IrradianceProbeGrid.h">
+      <Filter>Source Files\GI</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\RayTracing\SoftwareRayTracer.h">
+      <Filter>Source Files\RayTrace</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\RayTracing\GpuSoftwareRayTracer.h">
+      <Filter>Source Files\RayTrace</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\RayTracing\DxrRayTracer.h">
+      <Filter>Source Files\RayTrace</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\RayTracing\SWRTExecutor.h">
+      <Filter>Source Files\RayTrace</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\RayTracingRenderNode.h">
+      <Filter>Source Files\RenderNode</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\RayTracingStats.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\SceneSubmitter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\VolumetricCloudRenderNode.h">
+      <Filter>Header Files\RenderNode</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\ProceduralSkyRenderNode.h">
+      <Filter>Header Files\RenderNode</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\SdfFluidRenderNode.h">
+      <Filter>Header Files\RenderNode</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\RayMarchRenderNode.h">
+      <Filter>Header Files\RenderNode</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Renderer\Scene\MeshBuffer.cpp">
@@ -146,7 +227,16 @@
     <ClCompile Include="Source\Renderer\Core\RenderGraph.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Renderer\Core\RenderTargetPool.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Renderer\Core\Renderer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Core\SrvDescriptorAllocator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Core\RenderPassRegistry.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Core\RendererFrameCoordinator.cpp">
@@ -191,12 +281,51 @@
     <ClCompile Include="Source\Renderer\Utilities\RendererMathUtility.cpp">
       <Filter>Source Files\Tools</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Renderer\RayTracing\SoftwareRayTracer.cpp">
+      <Filter>Source Files\RayTrace</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwareRayTracer.cpp">
+      <Filter>Source Files\RayTrace</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\RayTracing\DxrRayTracer.cpp">
+      <Filter>Source Files\RayTrace</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\RayTracing\SWRTExecutor.cpp">
+      <Filter>Source Files\RayTrace</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Scene\SceneSubmitter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\RayTracingRenderNode.cpp">
+      <Filter>Source Files\RenderNode</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\SSAORenderNode.cpp">
+      <Filter>Source Files\RenderNode</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\DebugProbeGridRenderNode.cpp">
+      <Filter>Source Files\RenderNode</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\GI\IrradianceProbeGrid.cpp">
+      <Filter>Source Files\GI</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\ProceduralSkyRenderNode.cpp">
+      <Filter>Source Files\RenderNode</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\SdfFluidRenderNode.cpp">
+      <Filter>Source Files\RenderNode</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\RayMarchRenderNode.cpp">
+      <Filter>Source Files\RenderNode</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\VolumetricCloudRenderNode.cpp">
+      <Filter>Source Files\RenderNode</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="Source\Renderer\Shaders\PBR_VS.hlsl">
+    <CustomBuild Include="Source\Renderer\Shaders\CookTorranceGGX_VS.hlsl">
       <Filter>Shader Files</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\PBR_PS.hlsl">
+    <CustomBuild Include="Source\Renderer\Shaders\CookTorranceGGX_PS.hlsl">
       <Filter>Shader Files</Filter>
     </CustomBuild>
     <CustomBuild Include="Source\Renderer\Shaders\Opaque_VS.hlsl">
@@ -226,5 +355,40 @@
     <CustomBuild Include="Source\Renderer\Shaders\Tessellation_GS.hlsl">
       <Filter>Shader Files</Filter>
     </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\SSAO\SSAO_VS.hlsl">
+      <Filter>Shader Files\SSAO</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\SSAO\SSAO_PS.hlsl">
+      <Filter>Shader Files\SSAO</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\VolumetricCloud\VolumetricCloud_VS.hlsl">
+      <Filter>Shader Files\VolumetricCloud</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\VolumetricCloud\VolumetricCloud_PS.hlsl">
+      <Filter>Shader Files\VolumetricCloud</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\RayMarch\RayMarch_VS.hlsl">
+      <Filter>Shader Files\RayMarch</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\RayMarch\RayMarch_PS.hlsl">
+      <Filter>Shader Files\RayMarch</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Source\Renderer\Shaders\GI\GI_Common.hlsli">
+      <Filter>Shader Files\GI</Filter>
+    </None>
+    <None Include="Source\Renderer\Shaders\GI\GI_ProbeUpdate_CS.hlsl">
+      <Filter>Shader Files\GI</Filter>
+    </None>
+    <None Include="Source\Renderer\Shaders\Debug\DebugProbeGrid_VS.hlsl">
+      <Filter>Shader Files\Debug</Filter>
+    </None>
+    <None Include="Source\Renderer\Shaders\Debug\DebugProbeGrid_PS.hlsl">
+      <Filter>Shader Files\Debug</Filter>
+    </None>
+    <None Include="Source\Renderer\Shaders\Debug\Tessellation_Debug_PS.hlsl">
+      <Filter>Shader Files\Debug</Filter>
+    </None>
   </ItemGroup>
 </Project>

@@ -1,5 +1,6 @@
 #include "Renderer/Scene/Skybox.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <utility>
@@ -371,6 +372,12 @@ namespace SasamiRenderer
         m_iblPrefilterMaxMip = 0.0f;
         m_diffuseShValid = false;
         std::memset(m_diffuseSh, 0, sizeof(m_diffuseSh));
+        m_cpuPrefilterSubresources.clear();
+        m_cpuBrdfLutPixels.clear();
+        m_cpuPrefilterBaseSize = 0;
+        m_cpuPrefilterMipLevels = 0;
+        m_cpuBrdfLutWidth = 0;
+        m_cpuBrdfLutHeight = 0;
     }
 
     void Skybox::RefreshEnvironmentAssets()
@@ -383,6 +390,23 @@ namespace SasamiRenderer
         m_hdrEquirectWidth = 0;
         m_hdrEquirectHeight = 0;
         m_hdrEquirectPixels.clear();
+    }
+
+    void Skybox::SetDirectionalLightMarkerAngularRadius(float radians)
+    {
+        const float minRadius = 0.001f;
+        const float maxRadius = 0.25f;
+        if (radians < minRadius) {
+            radians = minRadius;
+        } else if (radians > maxRadius) {
+            radians = maxRadius;
+        }
+
+        m_directionalLightMarkerAngularRadius = radians;
+        const float expandedRadius = radians * 4.0f;
+        const float minimumHaloRadius = radians + 0.02f;
+        m_directionalLightMarkerHaloAngularRadius =
+            (expandedRadius > minimumHaloRadius) ? expandedRadius : minimumHaloRadius;
     }
 
     bool Skybox::InitializeGeometry()
@@ -755,6 +779,12 @@ namespace SasamiRenderer
         PublishIblSrvs(DXGI_FORMAT_R16G16B16A16_FLOAT,
                        DXGI_FORMAT_R16G16B16A16_FLOAT,
                        data.prefilterMipLevels);
+        m_cpuPrefilterSubresources = data.prefilterSubresources;
+        m_cpuBrdfLutPixels = data.brdfLutPixels;
+        m_cpuPrefilterBaseSize = prefilterSize;
+        m_cpuPrefilterMipLevels = data.prefilterMipLevels;
+        m_cpuBrdfLutWidth = brdfLutSize;
+        m_cpuBrdfLutHeight = brdfLutSize;
         return true;
     }
 
@@ -843,6 +873,7 @@ namespace SasamiRenderer
                         const Rect& scissorRect,
                         const float cameraPV[16],
                         const float cameraPos[3],
+                        const RenderDirectionalLight& directionalLight,
                         const PushCameraCbCallback& pushCameraCb) const
     {
         if (!cmdList || !m_skyboxTextureUploaded || !m_skyboxVB.IsValid()) {
@@ -880,7 +911,32 @@ namespace SasamiRenderer
         float skyboxMVP[16];
         Mul4x4(skyboxWorld, cameraPV, skyboxMVP);
         if (pushCameraCb) {
-            const D3D12_GPU_VIRTUAL_ADDRESS cameraCbGpu = pushCameraCb(skyboxMVP, skyboxWorld);
+            float lightForward[3] = {};
+            Math::DirectionFromYawPitch(directionalLight.yaw, directionalLight.pitch, lightForward);
+
+            const float directionalLightDir[4] = {
+                -lightForward[0],
+                -lightForward[1],
+                -lightForward[2],
+                0.0f
+            };
+            const float directionalLightColor[4] = {
+                directionalLight.color[0],
+                directionalLight.color[1],
+                directionalLight.color[2],
+                directionalLight.intensity
+            };
+            const float directionalLightMarkerParams[4] = {
+                (m_directionalLightMarkerEnabled && directionalLight.intensity > 0.0f) ? 1.0f : 0.0f,
+                m_directionalLightMarkerAngularRadius,
+                m_directionalLightMarkerHaloAngularRadius,
+                m_directionalLightMarkerBrightness
+            };
+            const D3D12_GPU_VIRTUAL_ADDRESS cameraCbGpu = pushCameraCb(skyboxMVP,
+                                                                       skyboxWorld,
+                                                                       directionalLightDir,
+                                                                       directionalLightColor,
+                                                                       directionalLightMarkerParams);
             if (cameraCbGpu != 0) {
                 cmdList->SetGraphicsRootConstantBufferView(2, cameraCbGpu);
             }

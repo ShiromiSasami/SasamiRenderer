@@ -14,7 +14,15 @@ namespace SasamiRenderer
         builder.Read("ShadowMap");
         builder.Read("SceneDepth");
         builder.Write("SceneColor");
+        builder.Write("GBufferAlbedo");
+        builder.Write("GBufferNormal");
+        builder.Write("GBufferMaterial");
+        builder.Write("GBufferEmissive");
         builder.UseColorTarget("SceneColor");
+        builder.UseColorTarget("GBufferAlbedo");
+        builder.UseColorTarget("GBufferNormal");
+        builder.UseColorTarget("GBufferMaterial");
+        builder.UseColorTarget("GBufferEmissive");
         builder.UseDepthTarget("SceneDepth");
         builder.DependsOnPrevious();
     }
@@ -39,9 +47,11 @@ namespace SasamiRenderer
                 *inputs.scissorRect,
                 false,
                 inputs.shadowSrv,
+                inputs.spotShadowSrv,
                 inputs.lightSrvTable,
                 inputs.iblSrvTable,
                 inputs.aoSrv,
+                inputs.reflectionSrv,
                 inputs.lightCbGpu,
                 services.drawTransparentItems);
         return true;
@@ -54,9 +64,11 @@ namespace SasamiRenderer
                                                 const Rect& scissorRect,
                                                 bool useTessellation,
                                                 GpuDescriptorHandle shadowSrv,
+                                                GpuDescriptorHandle spotShadowSrv,
                                                 GpuDescriptorHandle lightSrvTable,
                                                 GpuDescriptorHandle iblSrvTable,
                                                 GpuDescriptorHandle aoSrv,
+                                                GpuDescriptorHandle reflectionSrv,
                                                 D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu,
                                                 const std::function<void()>& drawCallback) const
     {
@@ -82,6 +94,8 @@ namespace SasamiRenderer
         cmdList->SetGraphicsRootDescriptorTable(4, lightSrvTable);
         cmdList->SetGraphicsRootDescriptorTable(5, iblSrvTable);
         cmdList->SetGraphicsRootDescriptorTable(6, aoSrv);
+        cmdList->SetGraphicsRootDescriptorTable(7, reflectionSrv);
+        cmdList->SetGraphicsRootDescriptorTable(12, spotShadowSrv);
 
         if (lightCbGpu != 0) {
             cmdList->SetGraphicsRootConstantBufferView(3, lightCbGpu);

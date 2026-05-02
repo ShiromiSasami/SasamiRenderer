@@ -46,6 +46,12 @@ namespace SasamiRenderer
 
         void EnsureCameraBuffers(FrameContext& frame, UINT requiredCount);
         D3D12_GPU_VIRTUAL_ADDRESS PushCameraCB(FrameContext& frame, const float mvp[16], const float world[16]);
+        D3D12_GPU_VIRTUAL_ADDRESS PushCameraCB(FrameContext& frame,
+                                               const float mvp[16],
+                                               const float world[16],
+                                               const float extra0[4],
+                                               const float extra1[4],
+                                               const float extra2[4]);
 
     private:
         void WaitForFrameFence(UINT frameIndex);

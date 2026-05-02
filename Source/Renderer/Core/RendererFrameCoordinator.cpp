@@ -12,6 +12,9 @@ namespace
     {
         float mvp[16];
         float world[16];
+        float extra0[4];
+        float extra1[4];
+        float extra2[4];
     };
 }
 
@@ -142,8 +145,8 @@ namespace SasamiRenderer
         }
 
         if (m_frameFence->GetCompletedValue() < fenceValue) {
-            m_frameFence->SetEventOnCompletion(fenceValue, m_frameFenceEvent);
-            WaitForSingleObject(m_frameFenceEvent, INFINITE);
+            if (FAILED(m_frameFence->SetEventOnCompletion(fenceValue, m_frameFenceEvent))) return;
+            WaitForSingleObject(m_frameFenceEvent, 5000);
         }
     }
 
@@ -255,8 +258,18 @@ namespace SasamiRenderer
     }
 
     D3D12_GPU_VIRTUAL_ADDRESS RendererFrameCoordinator::PushCameraCB(FrameContext& frame,
-                                                                      const float mvp[16],
-                                                                      const float world[16])
+                                                                     const float mvp[16],
+                                                                     const float world[16])
+    {
+        return PushCameraCB(frame, mvp, world, nullptr, nullptr, nullptr);
+    }
+
+    D3D12_GPU_VIRTUAL_ADDRESS RendererFrameCoordinator::PushCameraCB(FrameContext& frame,
+                                                                     const float mvp[16],
+                                                                     const float world[16],
+                                                                     const float extra0[4],
+                                                                     const float extra1[4],
+                                                                     const float extra2[4])
     {
         if (!frame.cameraCB.IsValid() || !frame.cameraCBPtr || frame.cameraCbCapacity == 0) {
             return 0;
@@ -274,6 +287,21 @@ namespace SasamiRenderer
             frame.cameraCBPtr + static_cast<size_t>(cbSize) * static_cast<size_t>(slot));
         std::memcpy(dst->mvp, mvp, sizeof(dst->mvp));
         std::memcpy(dst->world, world, sizeof(dst->world));
+        if (extra0) {
+            std::memcpy(dst->extra0, extra0, sizeof(dst->extra0));
+        } else {
+            std::memset(dst->extra0, 0, sizeof(dst->extra0));
+        }
+        if (extra1) {
+            std::memcpy(dst->extra1, extra1, sizeof(dst->extra1));
+        } else {
+            std::memset(dst->extra1, 0, sizeof(dst->extra1));
+        }
+        if (extra2) {
+            std::memcpy(dst->extra2, extra2, sizeof(dst->extra2));
+        } else {
+            std::memset(dst->extra2, 0, sizeof(dst->extra2));
+        }
 
         return frame.cameraCB->GetGPUVirtualAddress() + static_cast<UINT64>(cbSize) * static_cast<UINT64>(slot);
     }

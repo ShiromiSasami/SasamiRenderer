@@ -11,9 +11,10 @@ namespace SasamiRenderer
         using RenderNodeType = RendererEnums::RenderNodeType;
 
         // Default forward render path order.
-        constexpr std::array<RenderNodeType, 7> kDefaultRenderPathSequence = {
+        constexpr std::array<RenderNodeType, 8> kDefaultRenderPathSequence = {
             RenderNodeType::Shadow,
             RenderNodeType::Opaque,
+            RenderNodeType::SSAO,
             RenderNodeType::Lighting,
             RenderNodeType::Skybox,
             RenderNodeType::Transparent,

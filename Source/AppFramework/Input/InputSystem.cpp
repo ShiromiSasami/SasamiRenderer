@@ -186,6 +186,10 @@ namespace SasamiRenderer
 
     bool InputSystem::HandleMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     {
+        auto hasImGuiContext = []() -> bool {
+            return ImGui::GetCurrentContext() != nullptr;
+        };
+
         auto processRawInput = [&](HRAWINPUT hRaw) -> bool {
             UINT size = 0;
             if (GetRawInputData(hRaw, RID_INPUT, nullptr, &size, sizeof(RAWINPUTHEADER)) != 0 || size == 0)
@@ -195,18 +199,19 @@ namespace SasamiRenderer
                 return false;
 
             RAWINPUT* raw = reinterpret_cast<RAWINPUT*>(buffer.data());
-            ImGuiIO& io = ImGui::GetIO();
+            ImGuiIO* io = hasImGuiContext() ? &ImGui::GetIO() : nullptr;
 
             if (raw->header.dwType == RIM_TYPEKEYBOARD)
             {
                 const RAWKEYBOARD& kb = raw->data.keyboard;
                 bool down = !(kb.Flags & RI_KEY_BREAK);
                 ImGuiKey key = VirtualKeyToImGuiKey(kb.VKey);
-                if (key != ImGuiKey_None)
-                    io.AddKeyEvent(key, down);
+                if (io && key != ImGuiKey_None) {
+                    io->AddKeyEvent(key, down);
+                }
                 const bool movementKey = IsCameraMovementKey(kb.VKey);
-                const bool allowMovementThroughUi = movementKey && !io.WantTextInput;
-                if (!io.WantCaptureKeyboard || allowMovementThroughUi) {
+                const bool allowMovementThroughUi = movementKey && (!io || !io->WantTextInput);
+                if (!io || !io->WantCaptureKeyboard || allowMovementThroughUi) {
                     if (down) OnKeyDown(kb.VKey);
                     else OnKeyUp(kb.VKey);
                 }
@@ -216,27 +221,35 @@ namespace SasamiRenderer
             {
                 const RAWMOUSE& rm = raw->data.mouse;
                 POINT pt; GetCursorPos(&pt); ScreenToClient(hWnd, &pt);
-                io.AddMousePosEvent(static_cast<float>(pt.x), static_cast<float>(pt.y));
+                if (io) {
+                    io->AddMousePosEvent(static_cast<float>(pt.x), static_cast<float>(pt.y));
+                }
 
                 if (rm.usButtonFlags & RI_MOUSE_WHEEL)
                 {
                     float wheel = static_cast<SHORT>(rm.usButtonData) / static_cast<float>(WHEEL_DELTA);
-                    io.AddMouseWheelEvent(0.0f, wheel);
-                    if (!io.WantCaptureMouse)
+                    if (io) {
+                        io->AddMouseWheelEvent(0.0f, wheel);
+                    }
+                    if (!io || !io->WantCaptureMouse)
                         OnMouseWheel(static_cast<SHORT>(rm.usButtonData));
                 }
 
                 auto handleButton = [&](int index, USHORT downFlag, USHORT upFlag) {
                     if (rm.usButtonFlags & downFlag) {
                         m_mouseButtons[index] = true;
-                        io.AddMouseButtonEvent(index, true);
-                        if (!io.WantCaptureMouse && index == ImGuiMouseButton_Right)
+                        if (io) {
+                            io->AddMouseButtonEvent(index, true);
+                        }
+                        if ((!io || !io->WantCaptureMouse) && index == ImGuiMouseButton_Right)
                             OnMouseDown(pt.x, pt.y);
                     }
                     if (rm.usButtonFlags & upFlag) {
                         m_mouseButtons[index] = false;
-                        io.AddMouseButtonEvent(index, false);
-                        if (!io.WantCaptureMouse && index == ImGuiMouseButton_Right)
+                        if (io) {
+                            io->AddMouseButtonEvent(index, false);
+                        }
+                        if ((!io || !io->WantCaptureMouse) && index == ImGuiMouseButton_Right)
                             OnMouseUp();
                     }
                 };
@@ -244,7 +257,7 @@ namespace SasamiRenderer
                 handleButton(ImGuiMouseButton_Right, RI_MOUSE_RIGHT_BUTTON_DOWN, RI_MOUSE_RIGHT_BUTTON_UP);
                 handleButton(ImGuiMouseButton_Middle, RI_MOUSE_MIDDLE_BUTTON_DOWN, RI_MOUSE_MIDDLE_BUTTON_UP);
 
-                if ((rm.lLastX != 0 || rm.lLastY != 0) && !io.WantCaptureMouse)
+                if ((rm.lLastX != 0 || rm.lLastY != 0) && (!io || !io->WantCaptureMouse))
                     OnMouseMove(pt.x, pt.y, m_mouseButtons[ImGuiMouseButton_Right]);
                 return true;
             }
@@ -280,8 +293,8 @@ namespace SasamiRenderer
         case WM_SYSKEYDOWN:
         {
             const bool movementKey = IsCameraMovementKey(wParam);
-            const ImGuiIO& io = ImGui::GetIO();
-            const bool allowMovementThroughUi = movementKey && !io.WantTextInput;
+            const ImGuiIO* io = hasImGuiContext() ? &ImGui::GetIO() : nullptr;
+            const bool allowMovementThroughUi = movementKey && (!io || !io->WantTextInput);
             if (!ImGuiCoordinator::Instance().WantsKeyboardCapture() || allowMovementThroughUi)
                 OnKeyDown(wParam);
             return true;
@@ -290,8 +303,8 @@ namespace SasamiRenderer
         case WM_SYSKEYUP:
         {
             const bool movementKey = IsCameraMovementKey(wParam);
-            const ImGuiIO& io = ImGui::GetIO();
-            const bool allowMovementThroughUi = movementKey && !io.WantTextInput;
+            const ImGuiIO* io = hasImGuiContext() ? &ImGui::GetIO() : nullptr;
+            const bool allowMovementThroughUi = movementKey && (!io || !io->WantTextInput);
             if (!ImGuiCoordinator::Instance().WantsKeyboardCapture() || allowMovementThroughUi)
                 OnKeyUp(wParam);
             return true;

@@ -48,12 +48,20 @@ namespace SasamiRenderer
 
     struct RenderGraphExecuteContext
     {
-        const RenderNodeExecutionPolicy* executionPolicy = nullptr;
-        const RenderNodeFrameInputs* frameInputs = nullptr;
-        const RenderNodeExecutionServices* executionServices = nullptr;
-        const ResourceRegistry* resources = nullptr;
+        const RenderNodeExecutionPolicy*     executionPolicy      = nullptr;
+        const RenderNodeFrameInputs*         frameInputs          = nullptr;  // graphics CL
+        const RenderNodeFrameInputs*         computeFrameInputs   = nullptr;  // compute CL (may be null)
+        const RenderNodeExecutionServices*   executionServices    = nullptr;
+        const ResourceRegistry*              resources            = nullptr;
+
+        // Async compute cross-queue sync. All may be null if no compute queue.
+        ID3D12CommandQueue*  graphicsQueueRaw   = nullptr;
+        ID3D12CommandQueue*  computeQueueRaw    = nullptr;
+        ID3D12Fence*         crossQueueFence    = nullptr;
+        UINT64*              crossQueueFenceVal = nullptr;
 
         RenderNodeContextView CreateContextView(const RenderNodeRequirements& requirements) const;
+        RenderNodeContextView CreateComputeContextView(const RenderNodeRequirements& requirements) const;
         ResourceHandle FindGraphResource(std::string_view resourceName) const;
         std::string_view GetResourceName(ResourceHandle handle) const;
     };
@@ -110,7 +118,7 @@ namespace SasamiRenderer
             Opportunistic
         };
 
-        struct PassHandle
+        struct NodeHandle
         {
             size_t index = static_cast<size_t>(-1);
             bool IsValid() const { return index != static_cast<size_t>(-1); }
@@ -121,20 +129,20 @@ namespace SasamiRenderer
             bool IsValid() const { return index != static_cast<size_t>(-1); }
         };
 
-        PassHandle AddPass(const IRenderNode& renderNode,
+        NodeHandle AddNode(const IRenderNode& renderNode,
                            const RenderGraphExecuteContext& executeContext,
-                           PassHandle previousPass = {});
+                           NodeHandle previousNode = {});
         PhaseHandle AddPhase(std::string_view phaseName);
         bool AddPhaseCompletionNode(std::string_view phaseName,
                                     std::string_view nodeName,
                                     const ExecuteCallback& execute,
                                     PhaseCompletionMode mode);
         ResourceHandle ImportExternalResource(std::string_view resourceName, const ExternalRenderGraphResourceDesc& desc);
-        void Read(PassHandle pass, ResourceHandle resource);
-        void Write(PassHandle pass, ResourceHandle resource);
-        void UseColorTarget(PassHandle pass, ResourceHandle resource);
-        void UseDepthTarget(PassHandle pass, ResourceHandle resource);
-        void DependsOn(PassHandle pass, PassHandle dependency);
+        void Read(NodeHandle node, ResourceHandle resource);
+        void Write(NodeHandle node, ResourceHandle resource);
+        void UseColorTarget(NodeHandle node, ResourceHandle resource);
+        void UseDepthTarget(NodeHandle node, ResourceHandle resource);
+        void DependsOn(NodeHandle node, NodeHandle dependency);
 
         bool Execute();
         void Clear();
@@ -145,10 +153,12 @@ namespace SasamiRenderer
         struct PhaseCompletionNode;
         struct PhaseNode;
 
-        PassHandle AddPassInternal(const std::string& name, const ExecuteCallback& execute, PhaseHandle phase);
+        NodeHandle AddPassInternal(const std::string& name, const ExecuteCallback& execute, PhaseHandle phase);
         PhaseHandle FindOrAddPhase(std::string_view phaseName);
         bool ExecutePhaseCompletionNodes(size_t phaseIndex, PhaseCompletionMode mode) const;
         bool BuildExecutionOrder(std::vector<size_t>& outOrder) const;
+        // Group nodes in topological order into parallel levels (same level = no dependency on each other).
+        std::vector<std::vector<size_t>> BuildExecutionLevels(const std::vector<size_t>& topoOrder) const;
         CommandList* GetCommandList() const;
         bool TransitionResource(ResourceRegistry::ResourceRecord& resource, D3D12_RESOURCE_STATES requiredState);
         bool PreparePassResources(const PassNode& pass);
@@ -164,6 +174,7 @@ namespace SasamiRenderer
             std::vector<ResourceHandle> colorTargets;
             ResourceHandle depthTarget{};
             std::vector<size_t> explicitDependencies;
+            bool preferCompute = false; // cached from IRenderNode::PreferredQueue()
         };
         struct PhaseCompletionNode
         {
@@ -191,8 +202,8 @@ namespace SasamiRenderer
     public:
         RenderGraphBuilder(RenderGraph& renderGraph,
                            ResourceRegistry& resources,
-                           RenderGraph::PassHandle pass,
-                           RenderGraph::PassHandle previousPass);
+                           RenderGraph::NodeHandle pass,
+                           RenderGraph::NodeHandle previousPass);
 
         ResourceHandle Import(std::string_view resourceName);
         ResourceHandle Read(std::string_view resourceName);
@@ -208,8 +219,8 @@ namespace SasamiRenderer
     private:
         RenderGraph* m_renderGraph = nullptr;
         ResourceRegistry* m_resources = nullptr;
-        RenderGraph::PassHandle m_pass{};
-        RenderGraph::PassHandle m_previousPass{};
+        RenderGraph::NodeHandle m_pass{};
+        RenderGraph::NodeHandle m_previousPass{};
     };
 
 }

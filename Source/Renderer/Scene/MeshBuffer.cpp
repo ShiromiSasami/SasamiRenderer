@@ -122,6 +122,7 @@ namespace SasamiRenderer
         auto& it = m_items[i];
         if (it.vb.IsValid()) { cmdList->IASetVertexBuffers(0, 1, &it.vbv); }
         if (it.ib.IsValid()) { cmdList->IASetIndexBuffer(&it.ibv); }
-        cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        // Topology is set by the caller (render node) before the draw callback,
+        // so it must not be overridden here.
     }
 }

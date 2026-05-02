@@ -25,9 +25,11 @@ namespace SasamiRenderer
                      const Rect& scissorRect,
                      bool useTessellation,
                      GpuDescriptorHandle shadowSrv,
+                     GpuDescriptorHandle spotShadowSrv,
                      GpuDescriptorHandle lightSrvTable,
                      GpuDescriptorHandle iblSrvTable,
                      GpuDescriptorHandle aoSrv,
+                     GpuDescriptorHandle reflectionSrv,
                      D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu,
                      const std::function<void()>& drawCallback) const;
     };

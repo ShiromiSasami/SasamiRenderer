@@ -28,7 +28,9 @@ namespace SasamiRenderer
             m_fence.Reset();
             m_swapChain.m_swapChain.Reset();
             m_commandQueue.m_queue.Reset();
+            m_rayTracingDevice.Reset();
             m_device.Reset();
+            m_supportsHardwareRayTracing = false;
         };
 
         ComPtr<IDXGIFactory6> factory;
@@ -66,6 +68,20 @@ namespace SasamiRenderer
             DebugLog(msg);
         }
 
+        m_supportsHardwareRayTracing = false;
+        D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5{};
+        if (SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5,
+                                                    &options5,
+                                                    sizeof(options5))) &&
+            options5.RaytracingTier >= D3D12_RAYTRACING_TIER_1_0 &&
+            SUCCEEDED(m_device.As(&m_rayTracingDevice))) {
+            m_supportsHardwareRayTracing = true;
+            DebugLog("Dx12GraphicsDevice::Initialize: hardware ray tracing is supported.\n");
+        } else {
+            m_rayTracingDevice.Reset();
+            DebugLog("Dx12GraphicsDevice::Initialize: hardware ray tracing is not supported.\n");
+        }
+
         D3D12_COMMAND_QUEUE_DESC cqDesc = {};
         cqDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
         result = m_device->CreateCommandQueue(&cqDesc, IID_PPV_ARGS(&m_commandQueue.m_queue));
@@ -73,6 +89,14 @@ namespace SasamiRenderer
             DebugLogDialog("Dx12GraphicsDevice::Initialize: CreateCommandQueue failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             cleanup();
             return false;
+        }
+
+        D3D12_COMMAND_QUEUE_DESC cqComputeDesc = {};
+        cqComputeDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
+        result = m_device->CreateCommandQueue(&cqComputeDesc, IID_PPV_ARGS(&m_computeQueue.m_queue));
+        if (FAILED(result)) {
+            DebugLog("Dx12GraphicsDevice::Initialize: CreateCommandQueue (COMPUTE) failed. Async compute will be unavailable.\n");
+            m_computeQueue.m_queue.Reset(); // non-fatal: fall back to no compute queue
         }
 
         DXGI_SWAP_CHAIN_DESC1 scDesc = {};
@@ -133,9 +157,24 @@ namespace SasamiRenderer
         return m_device.Get();
     }
 
+    ID3D12Device5* Dx12GraphicsDevice::GetRayTracingDevice() const
+    {
+        return m_rayTracingDevice.Get();
+    }
+
+    bool Dx12GraphicsDevice::SupportsHardwareRayTracing() const
+    {
+        return m_supportsHardwareRayTracing;
+    }
+
     CommandQueue& Dx12GraphicsDevice::GetCommandQueue()
     {
         return m_commandQueue;
+    }
+
+    CommandQueue& Dx12GraphicsDevice::GetComputeQueue()
+    {
+        return m_computeQueue;
     }
 
     SwapChain& Dx12GraphicsDevice::GetSwapChain()
@@ -152,10 +191,10 @@ namespace SasamiRenderer
     {
         if (!m_commandQueue.m_queue || !m_fence) return;
         const UINT64 v = ++m_fenceValue;
-        m_commandQueue.m_queue->Signal(m_fence.Get(), v);
+        if (FAILED(m_commandQueue.m_queue->Signal(m_fence.Get(), v))) return;
         if (m_fence->GetCompletedValue() < v) {
-            m_fence->SetEventOnCompletion(v, m_fenceEvent);
-            WaitForSingleObject(m_fenceEvent, INFINITE);
+            if (FAILED(m_fence->SetEventOnCompletion(v, m_fenceEvent))) return;
+            WaitForSingleObject(m_fenceEvent, 5000);
         }
     }
 
@@ -195,6 +234,19 @@ namespace SasamiRenderer
     HRESULT Dx12GraphicsDevice::CreateGraphicsPipelineState(const GraphicsPipelineDesc& desc, PipelineState& out)
     {
         return m_device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&out.m_state));
+    }
+
+    HRESULT Dx12GraphicsDevice::CreatePipelineStateFromStream(const void* streamData, size_t streamSize, PipelineState& out)
+    {
+        ComPtr<ID3D12Device2> device2;
+        HRESULT hr = m_device.As(&device2);
+        if (FAILED(hr)) {
+            return hr;
+        }
+        D3D12_PIPELINE_STATE_STREAM_DESC streamDesc{};
+        streamDesc.SizeInBytes                   = streamSize;
+        streamDesc.pPipelineStateSubobjectStream = const_cast<void*>(streamData);
+        return device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&out.m_state));
     }
 
     HRESULT Dx12GraphicsDevice::CreateRootSignature(UINT nodeMask, const void* blobData, size_t blobSize, RootSignature& out)

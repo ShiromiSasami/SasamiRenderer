@@ -10,6 +10,7 @@ namespace SasamiRenderer
 {
     class Camera : public SObject {
     public:
+        using CameraMode = RenderCameraMode;
         Camera() { AddComponent<TransformComponent>(); }
 
         void SetYawPitch(float yaw, float pitch) {
@@ -51,9 +52,14 @@ namespace SasamiRenderer
         }
         float NearClip() const { return m_nearClip; }
         float FarClip() const { return m_farClip; }
+        void SetCameraMode(CameraMode mode) { m_cameraMode = mode; }
+        CameraMode GetCameraMode() const { return m_cameraMode; }
 
         std::array<float,16> ComputeMVP(float viewportWidth, float viewportHeight) const;
         RenderCameraProxy BuildRenderCameraProxy(float viewportWidth, float viewportHeight) const;
+        RenderCameraProxy BuildRenderCameraProxy(float viewportWidth,
+                                                 float viewportHeight,
+                                                 CameraMode mode) const;
 
         void OnKeyDown(WPARAM key);
         void OnKeyUp(WPARAM key);
@@ -100,6 +106,7 @@ namespace SasamiRenderer
         float m_moveSpeed = 1.0f;
         float m_nearClip = 0.0005f;
         float m_farClip = 500.0f;
+        CameraMode m_cameraMode = CameraMode::Pbr;
         int m_lastX = 0;
         int m_lastY = 0;
     };

@@ -2,8 +2,10 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
+#include "Renderer/Scene/SurfaceMaterial.h"
 #include "Renderer/Structures/Mesh.h"
 
 namespace SasamiRenderer
@@ -21,7 +23,10 @@ namespace SasamiRenderer
         Mesh mesh;
         std::shared_ptr<const CpuTextureRgba8> albedoTexture;
         std::shared_ptr<const CpuTextureRgba8> occlusionTexture;
+        bool usesMetallicRoughnessTexture = false;
+        SurfaceMaterial material;
         bool transparent = false;
+        std::string debugLabel;
         float model[16] = {
             1,0,0,0,
             0,1,0,0,

@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include "Renderer/Scene/SurfaceMaterial.h"
 #include "Renderer/Structures/Vertex.h"
 #include "Renderer/Structures/Mesh.h"
 
@@ -22,6 +23,8 @@ namespace SasamiRenderer
         Mesh mesh;
         std::string texturePath;
         std::string occlusionTexturePath;
+        std::string metallicRoughnessTexturePath;
+        SurfaceMaterial material;
         float localTransform[16] = {
             1,0,0,0,
             0,1,0,0,
@@ -37,8 +40,16 @@ namespace SasamiRenderer
     struct GltfMaterial {
         int baseColorTexture = -1; // index into textures array
         int occlusionTexture = -1; // index into textures array
+        int metallicRoughnessTexture = -1; // index into textures array
+        int emissiveTexture = -1; // index into textures array
         float baseColorFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        float emissiveFactor[3] = { 0.0f, 0.0f, 0.0f };
+        float metallicFactor = 1.0f;
+        float roughnessFactor = 1.0f;
         float occlusionStrength = 1.0f;
+        bool alphaBlend = false;
+        float transmissionFactor = 0.0f;
+        float ior = 1.5f;
     };
 
     struct GltfPrimitiveInstance {

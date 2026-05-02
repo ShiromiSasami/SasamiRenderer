@@ -8,6 +8,7 @@ namespace SasamiRenderer
     {
         builder.RequireGraphicsBase();
         builder.RequireSkybox();
+        builder.RequireLightSystem();
         builder.RequireCameraPV();
         builder.RequireCameraPos();
         builder.RequireFrameCoordinator();
@@ -30,6 +31,9 @@ namespace SasamiRenderer
             return false;
         }
         const RenderNodeExecutionPolicy& policy = context.Policy();
+        if (policy.renderPathMode == RendererEnums::RenderPathMode::SdfFluid) {
+            return true;
+        }
         if (policy.gBufferDebugView != RendererEnums::GBufferDebugView::FinalLit) {
             return true;
         }
@@ -43,8 +47,18 @@ namespace SasamiRenderer
                 *inputs.scissorRect,
                 inputs.cameraPV,
                 inputs.cameraPos,
-                [inputs](const float mvp[16], const float world[16]) -> D3D12_GPU_VIRTUAL_ADDRESS {
-                    return inputs.frameCoordinator->PushCameraCB(*inputs.frame, mvp, world);
+                inputs.lightSystem->GetDirectionalLightSettings(),
+                [inputs](const float mvp[16],
+                         const float world[16],
+                         const float extra0[4],
+                         const float extra1[4],
+                         const float extra2[4]) -> D3D12_GPU_VIRTUAL_ADDRESS {
+                    return inputs.frameCoordinator->PushCameraCB(*inputs.frame,
+                                                                 mvp,
+                                                                 world,
+                                                                 extra0,
+                                                                 extra1,
+                                                                 extra2);
                 });
         return true;
     }
@@ -57,6 +71,7 @@ namespace SasamiRenderer
                                    const Rect& scissorRect,
                                    const float cameraPV[16],
                                    const float cameraPos[3],
+                                   const RenderDirectionalLight& directionalLight,
                                    const Skybox::PushCameraCbCallback& pushCameraCb) const
     {
         skybox.Render(cmdList,
@@ -66,6 +81,7 @@ namespace SasamiRenderer
                       scissorRect,
                       cameraPV,
                       cameraPos,
+                      directionalLight,
                       pushCameraCb);
     }
 }

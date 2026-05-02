@@ -3,6 +3,9 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+# Claude Code (entire folder)
+.claude/
+
 # User-specific files
 *.rsuser
 *.suo
@@ -379,3 +382,6 @@ ARCHITECTURE.md
 # Local IA/IDA work folders
 .ida/
 ia/
+
+# VS Code Local History extension
+.history/

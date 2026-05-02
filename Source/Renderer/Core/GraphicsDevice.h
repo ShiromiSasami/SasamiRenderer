@@ -218,6 +218,10 @@ namespace SasamiRenderer
         {
             m_list->SetGraphicsRootConstantBufferView(rootIndex, address);
         }
+        void SetGraphicsRootShaderResourceView(UINT rootIndex, D3D12_GPU_VIRTUAL_ADDRESS address)
+        {
+            m_list->SetGraphicsRootShaderResourceView(rootIndex, address);
+        }
         void IASetPrimitiveTopology(PrimitiveTopology topology) { m_list->IASetPrimitiveTopology(topology); }
         void IASetVertexBuffers(UINT startSlot, UINT numViews, const VertexBufferView* views)
         {
@@ -243,6 +247,8 @@ namespace SasamiRenderer
         friend class Dx12GraphicsDevice;
     };
 
+    enum class CommandQueueType { Graphics, Compute };
+
     class CommandQueue
     {
     public:
@@ -253,6 +259,8 @@ namespace SasamiRenderer
             m_queue->ExecuteCommandLists(count, lists);
         }
         HRESULT Signal(ID3D12Fence* fence, UINT64 value) { return m_queue->Signal(fence, value); }
+        HRESULT Wait(ID3D12Fence* fence, UINT64 value)   { return m_queue->Wait(fence, value);   }
+        bool IsValid() const { return m_queue != nullptr; }
 
     private:
         ComPtr<ID3D12CommandQueue> m_queue;
@@ -287,7 +295,10 @@ namespace SasamiRenderer
         virtual void* GetNativeDeviceHandle() const = 0;
         virtual void* GetNativeGraphicsQueueHandle() const = 0;
         virtual ID3D12Device* GetDevice() const = 0;
+        virtual ID3D12Device5* GetRayTracingDevice() const = 0;
+        virtual bool SupportsHardwareRayTracing() const = 0;
         virtual CommandQueue& GetCommandQueue() = 0;
+        virtual CommandQueue& GetComputeQueue() = 0;
         virtual SwapChain& GetSwapChain() = 0;
         virtual UINT GetDescriptorHandleIncrementSize(DescriptorHeapType type) const = 0;
         virtual void WaitForGPU() = 0;
@@ -299,6 +310,7 @@ namespace SasamiRenderer
         virtual HRESULT CreateCommandList(UINT nodeMask, CommandListType type, CommandAllocator& allocator,
                                           PipelineState* initialPSO, CommandList& out) = 0;
         virtual HRESULT CreateGraphicsPipelineState(const GraphicsPipelineDesc& desc, PipelineState& out) = 0;
+        virtual HRESULT CreatePipelineStateFromStream(const void* streamData, size_t streamSize, PipelineState& out) = 0;
         virtual HRESULT CreateRootSignature(UINT nodeMask, const void* blobData, size_t blobSize, RootSignature& out) = 0;
         virtual void CreateShaderResourceView(Resource& resource, const ShaderResourceViewDesc* desc, CpuDescriptorHandle dest) = 0;
         virtual void CreateDepthStencilView(Resource& resource, const DepthStencilViewDesc* desc, CpuDescriptorHandle dest) = 0;

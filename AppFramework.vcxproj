@@ -167,6 +167,7 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
       <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;C:\local\boost_1_89_0</AdditionalIncludeDirectories>
+      <AdditionalOptions>/FS /utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -189,6 +190,7 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
       <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;$(BOOST_ROOT);$(BOOST_INCLUDEDIR)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/FS /utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -211,6 +213,7 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
       <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;C:\local\boost_1_89_0</AdditionalIncludeDirectories>
+      <AdditionalOptions>/FS /utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

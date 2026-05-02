@@ -38,10 +38,14 @@ namespace SasamiRenderer
                 *inputs.viewport,
                 *inputs.scissorRect,
                 inputs.shadowSrv,
+                inputs.spotShadowSrv,
                 inputs.lightSrvTable,
                 inputs.iblSrvTable,
                 inputs.aoSrv,
+                inputs.reflectionSrv,
                 inputs.lightCbGpu,
+                policy.useTessellation,
+                policy.useTessellationDebugColors,
                 services.drawOpaqueItems);
         return true;
     }
@@ -52,10 +56,14 @@ namespace SasamiRenderer
                                    const Viewport& viewport,
                                    const Rect& scissorRect,
                                    GpuDescriptorHandle shadowSrv,
+                                   GpuDescriptorHandle spotShadowSrv,
                                    GpuDescriptorHandle lightSrvTable,
                                    GpuDescriptorHandle iblSrvTable,
                                    GpuDescriptorHandle aoSrv,
+                                   GpuDescriptorHandle reflectionSrv,
                                    D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu,
+                                   bool useTessellation,
+                                   bool tessDebugColors,
                                    const std::function<void()>& drawCallback) const
     {
         if (!cmdList) {
@@ -65,8 +73,17 @@ namespace SasamiRenderer
         cmdList->SetGraphicsRootSignature(pipelineStateCache.GetRootSignature());
         cmdList->RSSetViewports(1, &viewport);
         cmdList->RSSetScissorRects(1, &scissorRect);
-        cmdList->SetPipelineState(pipelineStateCache.GetBasicPipelineState());
-        cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        if (useTessellation) {
+            if (tessDebugColors && pipelineStateCache.GetTessellationDebugPipelineState().Get()) {
+                cmdList->SetPipelineState(pipelineStateCache.GetTessellationDebugPipelineState());
+            } else {
+                cmdList->SetPipelineState(pipelineStateCache.GetTessellationPipelineState());
+            }
+            cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST);
+        } else {
+            cmdList->SetPipelineState(pipelineStateCache.GetBasicPipelineState());
+            cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        }
 
         DescriptorHeap* heaps[] = { &srvHeap };
         cmdList->SetDescriptorHeaps(1, heaps);
@@ -74,6 +91,8 @@ namespace SasamiRenderer
         cmdList->SetGraphicsRootDescriptorTable(4, lightSrvTable);
         cmdList->SetGraphicsRootDescriptorTable(5, iblSrvTable);
         cmdList->SetGraphicsRootDescriptorTable(6, aoSrv);
+        cmdList->SetGraphicsRootDescriptorTable(7, reflectionSrv);
+        cmdList->SetGraphicsRootDescriptorTable(12, spotShadowSrv);
 
         if (lightCbGpu != 0) {
             cmdList->SetGraphicsRootConstantBufferView(3, lightCbGpu);

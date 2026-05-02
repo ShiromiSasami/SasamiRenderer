@@ -5,6 +5,7 @@
 #include "Renderer/Core/RendererFrameCoordinator.h"
 #include "Renderer/Passes/IRenderNode.h"
 #include "Renderer/Passes/RenderNodeSetupContext.h"
+#include "Renderer/Scene/RenderLightProxy.h"
 #include "Renderer/Scene/Skybox.h"
 
 #include <functional>
@@ -28,6 +29,7 @@ namespace SasamiRenderer
                      const Rect& scissorRect,
                      const float cameraPV[16],
                      const float cameraPos[3],
+                     const RenderDirectionalLight& directionalLight,
                      const Skybox::PushCameraCbCallback& pushCameraCb) const;
     };
 }

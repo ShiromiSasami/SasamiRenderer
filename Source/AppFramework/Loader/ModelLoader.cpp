@@ -358,10 +358,10 @@ namespace SasamiRenderer
                     BuildScale(s, S);
                 }
             }
-            // TRS composition in row-vector convention:
-            // local = T * R * S
-            float TR[16]; Mul4x4(T, R, TR);
-            Mul4x4(TR, S, out);
+            // TRS composition in row-vector convention (matches glTF column-major T*R*S):
+            // local = S * R * T
+            float SR[16]; Mul4x4(S, R, SR);
+            Mul4x4(SR, T, out);
         }
 
         static void GatherNodeTransforms(const std::vector<Node>& nodes, int nodeIndex, const float parent[16],
@@ -483,8 +483,27 @@ namespace SasamiRenderer
                         const auto& bct = pbr["baseColorTexture"];
                         if (bct.HasMember("index")) mat.baseColorTexture = bct["index"].GetInt();
                     }
+                    if (pbr.HasMember("metallicRoughnessTexture")) {
+                        const auto& mrt = pbr["metallicRoughnessTexture"];
+                        if (mrt.HasMember("index")) mat.metallicRoughnessTexture = mrt["index"].GetInt();
+                    }
                     if (pbr.HasMember("baseColorFactor")) {
                         ReadVec(pbr["baseColorFactor"], mat.baseColorFactor, 4);
+                    }
+                    if (pbr.HasMember("metallicFactor")) {
+                        mat.metallicFactor = pbr["metallicFactor"].GetFloat();
+                    }
+                    if (pbr.HasMember("roughnessFactor")) {
+                        mat.roughnessFactor = pbr["roughnessFactor"].GetFloat();
+                    }
+                }
+                if (m.HasMember("emissiveFactor")) {
+                    ReadVec(m["emissiveFactor"], mat.emissiveFactor, 3);
+                }
+                if (m.HasMember("emissiveTexture") && m["emissiveTexture"].IsObject()) {
+                    const auto& emissive = m["emissiveTexture"];
+                    if (emissive.HasMember("index")) {
+                        mat.emissiveTexture = emissive["index"].GetInt();
                     }
                 }
                 if (m.HasMember("occlusionTexture") && m["occlusionTexture"].IsObject()) {
@@ -494,6 +513,26 @@ namespace SasamiRenderer
                     }
                     if (occ.HasMember("strength")) {
                         mat.occlusionStrength = occ["strength"].GetFloat();
+                    }
+                }
+                if (m.HasMember("alphaMode") && m["alphaMode"].IsString()) {
+                    mat.alphaBlend = (std::string(m["alphaMode"].GetString()) == "BLEND");
+                }
+                if (m.HasMember("extensions") && m["extensions"].IsObject()) {
+                    const auto& extensions = m["extensions"];
+                    if (extensions.HasMember("KHR_materials_transmission") &&
+                        extensions["KHR_materials_transmission"].IsObject()) {
+                        const auto& transmission = extensions["KHR_materials_transmission"];
+                        if (transmission.HasMember("transmissionFactor")) {
+                            mat.transmissionFactor = transmission["transmissionFactor"].GetFloat();
+                        }
+                    }
+                    if (extensions.HasMember("KHR_materials_ior") &&
+                        extensions["KHR_materials_ior"].IsObject()) {
+                        const auto& ior = extensions["KHR_materials_ior"];
+                        if (ior.HasMember("ior")) {
+                            mat.ior = ior["ior"].GetFloat();
+                        }
                     }
                 }
                 outScene.materials[i] = mat;
@@ -680,22 +719,30 @@ namespace SasamiRenderer
 
         outMeshes.reserve(scene.primitives.size());
         for (auto& prim : scene.primitives) {
-            if (prim.materialIndex >= 0 && prim.materialIndex < static_cast<int>(scene.materials.size())) {
-                const auto& mat = scene.materials[prim.materialIndex];
-                for (auto& v : prim.mesh.vertices) {
-                    v.color[0] *= mat.baseColorFactor[0];
-                    v.color[1] *= mat.baseColorFactor[1];
-                    v.color[2] *= mat.baseColorFactor[2];
-                    v.color[3] *= mat.baseColorFactor[3];
-                }
-            }
-
             LoadedStaticMesh out;
             out.mesh = std::move(prim.mesh);
-            // Final local transform = uniformScale * sourcePrimitiveTransform.
-            Mul4x4(scaleM, prim.transform, out.localTransform);
+            // Final local transform = sourcePrimitiveTransform * uniformScale
+            // (scales world-space result including translations, not just local vertices).
+            Mul4x4(prim.transform, scaleM, out.localTransform);
             if (prim.materialIndex >= 0 && prim.materialIndex < static_cast<int>(scene.materials.size())) {
                 const GltfMaterial& material = scene.materials[prim.materialIndex];
+                out.material.baseColor[0] = material.baseColorFactor[0];
+                out.material.baseColor[1] = material.baseColorFactor[1];
+                out.material.baseColor[2] = material.baseColorFactor[2];
+                out.material.baseColor[3] = material.baseColorFactor[3];
+                if (material.emissiveTexture < 0) {
+                    out.material.emissive[0] = material.emissiveFactor[0];
+                    out.material.emissive[1] = material.emissiveFactor[1];
+                    out.material.emissive[2] = material.emissiveFactor[2];
+                }
+                out.material.metallic = material.metallicFactor;
+                out.material.roughness = material.roughnessFactor;
+                out.material.occlusionStrength = material.occlusionStrength;
+                out.material.ior = material.ior;
+                if (material.alphaBlend) {
+                    out.material.transmission = 1.0f - material.baseColorFactor[3];
+                }
+                out.material.transmission = std::max(out.material.transmission, material.transmissionFactor);
 
                 const int baseColorIndex = material.baseColorTexture;
                 if (baseColorIndex >= 0 && baseColorIndex < static_cast<int>(scene.textures.size())) {
@@ -710,6 +757,14 @@ namespace SasamiRenderer
                     const int imageIndex = scene.textures[occlusionIndex].imageIndex;
                     if (imageIndex >= 0 && imageIndex < static_cast<int>(scene.images.size())) {
                         out.occlusionTexturePath = scene.images[imageIndex].uri;
+                    }
+                }
+
+                const int metallicRoughnessIndex = material.metallicRoughnessTexture;
+                if (metallicRoughnessIndex >= 0 && metallicRoughnessIndex < static_cast<int>(scene.textures.size())) {
+                    const int imageIndex = scene.textures[metallicRoughnessIndex].imageIndex;
+                    if (imageIndex >= 0 && imageIndex < static_cast<int>(scene.images.size())) {
+                        out.metallicRoughnessTexturePath = scene.images[imageIndex].uri;
                     }
                 }
             }

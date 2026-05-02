@@ -2,6 +2,7 @@
 
 #include "IApplication.h"
 #include "Object/Camera.h"
+#include "Renderer/Scene/SurfaceMaterial.h"
 #include <array>
 #include <string>
 #include <vector>
@@ -9,6 +10,8 @@
 
 namespace SasamiRenderer
 {
+    class StaticModel;
+
     class RenderingApp : public IApplication
     {
     public:
@@ -32,6 +35,17 @@ namespace SasamiRenderer
         void RegisterUi(ApplicationCore& app);
 
         Camera* m_camera = nullptr;
+        StaticModel* m_sphereModel = nullptr;
+        StaticModel* m_boxModel = nullptr;
+        StaticModel* m_transparentSphereModel = nullptr;
+        StaticModel* m_transparentBoxModel = nullptr;
+        SurfaceMaterial m_sphereMaterial{};
+        SurfaceMaterial m_boxMaterial{};
+        SurfaceMaterial m_transparentSphereMaterial{};
+        SurfaceMaterial m_transparentBoxMaterial{};
+        bool m_showLightGizmo  = true;
+        bool m_showLightGizmos = true; // Point / Spot light gizmos
+        int m_probeGridPreset = 1;     // 0=Interior, 1=Wide, 2=Very Wide
         std::vector<boost::signals2::scoped_connection> m_inputConnections;
     };
 }

@@ -2,9 +2,11 @@
 
 #include "Renderer/Core/GraphicsDevice.h"
 #include "Renderer/Core/RendererFrameCoordinator.h"
+#include "Renderer/Scene/RenderCameraProxy.h"
 #include "Renderer/Scene/LightSystem.h"
 #include "Renderer/Structures/RendererEnums.h"
 
+#include <cstdint>
 #include <functional>
 #include <string_view>
 
@@ -13,19 +15,31 @@ namespace SasamiRenderer
     class RenderPipelineStateCache;
     class Skybox;
 
+    struct RayTracingStats;
+
     struct RenderNodeExecutionPolicy
     {
         bool executeOpaqueFamilyPasses = false;
         bool executeLightingFamilyPasses = true;
         bool useTessellation = false;
+        bool useTessellationWireframe = false;
+        bool useTessellationDebugColors = false;
+        bool useMeshletDebugView = false;
         bool useShadowTessellationPath = false;
+        bool useSoftwareRayTracedDirectionalShadow = false;
+        bool useSoftwareRayTracedReflections = false;
+        uint32_t softwareRayTracedShadowMapSize = 1024u;
+        uint32_t renderWidth = 0u;
+        uint32_t renderHeight = 0u;
         float iblIntensity = 0.0f;
         RendererEnums::GBufferDebugView gBufferDebugView = RendererEnums::GBufferDebugView::FinalLit;
+        RendererEnums::RenderPathMode renderPathMode = RendererEnums::RenderPathMode::Raster;
     };
 
     struct RenderNodeFrameInputs
     {
-        CommandList* cmdList = nullptr;
+        CommandList* cmdList        = nullptr;
+        CommandList* computeCmdList = nullptr; // async compute CL; null = no compute queue available
         RenderPipelineStateCache* pipelineStateCache = nullptr;
         DescriptorHeap* srvHeap = nullptr;
         const Viewport* viewport = nullptr;
@@ -37,12 +51,35 @@ namespace SasamiRenderer
         LightSystem::FrameResources* frameLight = nullptr;
         Skybox* skybox = nullptr;
         const float* cameraPV = nullptr;
+        const float* cameraInvPV = nullptr;
         const float* cameraPos = nullptr;
+        const float* cameraRight = nullptr;
+        const float* cameraUp = nullptr;
+        const float* cameraForward = nullptr;
+        float cameraTanHalfFovY = 0.577350269f;
+        float cameraAspectRatio = 1.0f;
+        RenderCameraMode cameraMode = RenderCameraMode::Pbr;
         GpuDescriptorHandle shadowSrv{};
+        GpuDescriptorHandle spotShadowSrv{};
         GpuDescriptorHandle lightSrvTable{};
         GpuDescriptorHandle iblSrvTable{};
         GpuDescriptorHandle aoSrv{};
+        GpuDescriptorHandle reflectionSrv{};
+        GpuDescriptorHandle screenSpaceAoSrv{};
         D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu = 0;
+
+        float sceneTimeSec = 0.0f;
+
+        // SSAO pass resources
+        GpuDescriptorHandle       depthSrv{};
+        GpuDescriptorHandle       gbufferNormalSrv{};
+        ID3D12Resource*           depthResource = nullptr;
+        CpuDescriptorHandle       ssaoRtv{};
+        ID3D12Resource*           ssaoResource = nullptr;
+        GpuDescriptorHandle       ssaoRawSrv{};       // GPU SRV for raw (pre-blur) SSAO output
+        CpuDescriptorHandle       ssaoBlurRtv{};      // RTV for blurred SSAO output
+        ID3D12Resource*           ssaoBlurResource = nullptr; // resource for blurred SSAO texture
+        D3D12_GPU_VIRTUAL_ADDRESS ssaoCbGpu = 0;
     };
 
     struct RenderNodeExecutionServices
@@ -51,6 +88,9 @@ namespace SasamiRenderer
         std::function<void()> drawOpaqueItems;
         std::function<void()> drawTransparentItems;
         std::function<void(const LightSystem::ShadowPassContext&)> drawShadowItems;
+        std::function<bool(const LightSystem::ShadowPassContext&)> executeSoftwareDirectionalShadow;
+        std::function<bool()> executeSoftwareReflections;
+        std::function<bool()> executeRayTracing;
     };
 
     struct RenderNodeRequirements
@@ -71,6 +111,7 @@ namespace SasamiRenderer
         bool drawOpaqueItems = false;
         bool drawTransparentItems = false;
         bool drawShadowItems = false;
+        bool executeRayTracing = false;
     };
 
     class RenderNodeRequirementBuilder
@@ -92,6 +133,7 @@ namespace SasamiRenderer
         void RequireDrawOpaqueItems() { m_requirements.drawOpaqueItems = true; }
         void RequireDrawTransparentItems() { m_requirements.drawTransparentItems = true; }
         void RequireDrawShadowItems() { m_requirements.drawShadowItems = true; }
+        void RequireExecuteRayTracing() { m_requirements.executeRayTracing = true; }
 
         // Convenience methods for common graphics requirements.
         void RequireGraphicsBase()
@@ -174,6 +216,9 @@ namespace SasamiRenderer
                 return false;
             }
             if (m_requirements.drawShadowItems && !m_services->drawShadowItems) {
+                return false;
+            }
+            if (m_requirements.executeRayTracing && !m_services->executeRayTracing) {
                 return false;
             }
             return true;

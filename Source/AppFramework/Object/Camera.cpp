@@ -83,8 +83,23 @@ namespace SasamiRenderer
 
     RenderCameraProxy Camera::BuildRenderCameraProxy(float viewportWidth, float viewportHeight) const
     {
+        return BuildRenderCameraProxy(viewportWidth, viewportHeight, m_cameraMode);
+    }
+
+    RenderCameraProxy Camera::BuildRenderCameraProxy(float viewportWidth,
+                                                     float viewportHeight,
+                                                     CameraMode mode) const
+    {
         const TransformComponent& transform = Transform();
         RenderCameraProxy proxy{};
+        proxy.cameraMode = mode;
+        Vector3 forward = ComputeForward(m_yaw, m_pitch);
+        Normalize(forward);
+        const Vector3 upWorld(0.0f, 1.0f, 0.0f);
+        Vector3 right = Cross(upWorld, forward);
+        Normalize(right);
+        Vector3 up = Cross(forward, right);
+        Normalize(up);
         const auto vp = ComputeMVP(viewportWidth, viewportHeight);
         for (int i = 0; i < 16; ++i) {
             proxy.viewProjection[i] = vp[i];
@@ -92,6 +107,38 @@ namespace SasamiRenderer
         proxy.cameraPosition[0] = transform.position.x;
         proxy.cameraPosition[1] = transform.position.y;
         proxy.cameraPosition[2] = transform.position.z;
+        proxy.nearClip = m_nearClip;
+        proxy.farClip = m_farClip;
+
+        // Store the projection matrix separately (needed by SSAO pass for hemisphere sampling).
+        const float safeHeight = (viewportHeight > 0.0f) ? viewportHeight : 1.0f;
+        const float aspect = viewportWidth / safeHeight;
+        const float fov = Deg(60.0f);
+        const float zn = m_nearClip;
+        const float zf = m_farClip;
+        const float yScale = 1.0f / std::tan(fov * 0.5f);
+        const float xScale = yScale / aspect;
+        const float proj[16] = {
+            xScale, 0,      0,                      0,
+            0,      yScale, 0,                      0,
+            0,      0,      zf / (zf - zn),         1,
+            0,      0,      (-zn * zf) / (zf - zn), 0,
+        };
+        for (int i = 0; i < 16; ++i) {
+            proxy.projection[i] = proj[i];
+        }
+        proxy.rayMarchCameraRight[0] = right.x;
+        proxy.rayMarchCameraRight[1] = right.y;
+        proxy.rayMarchCameraRight[2] = right.z;
+        proxy.rayMarchCameraUp[0] = up.x;
+        proxy.rayMarchCameraUp[1] = up.y;
+        proxy.rayMarchCameraUp[2] = up.z;
+        proxy.rayMarchCameraForward[0] = forward.x;
+        proxy.rayMarchCameraForward[1] = forward.y;
+        proxy.rayMarchCameraForward[2] = forward.z;
+        proxy.rayMarchTanHalfFovY = std::tan(fov * 0.5f);
+        proxy.rayMarchAspectRatio = aspect;
+
         return proxy;
     }
     // Input handling

@@ -18,7 +18,10 @@ namespace SasamiRenderer
         void* GetNativeDeviceHandle() const override;
         void* GetNativeGraphicsQueueHandle() const override;
         ID3D12Device* GetDevice() const override;
+        ID3D12Device5* GetRayTracingDevice() const override;
+        bool SupportsHardwareRayTracing() const override;
         CommandQueue& GetCommandQueue() override;
+        CommandQueue& GetComputeQueue() override;
         SwapChain& GetSwapChain() override;
         UINT GetDescriptorHandleIncrementSize(DescriptorHeapType type) const override;
         void WaitForGPU() override;
@@ -37,6 +40,7 @@ namespace SasamiRenderer
                                   PipelineState* initialPSO,
                                   CommandList& out) override;
         HRESULT CreateGraphicsPipelineState(const GraphicsPipelineDesc& desc, PipelineState& out) override;
+        HRESULT CreatePipelineStateFromStream(const void* streamData, size_t streamSize, PipelineState& out) override;
         HRESULT CreateRootSignature(UINT nodeMask, const void* blobData, size_t blobSize, RootSignature& out) override;
         void CreateShaderResourceView(Resource& resource, const ShaderResourceViewDesc* desc, CpuDescriptorHandle dest) override;
         void CreateDepthStencilView(Resource& resource, const DepthStencilViewDesc* desc, CpuDescriptorHandle dest) override;
@@ -47,12 +51,15 @@ namespace SasamiRenderer
 
     private:
         ComPtr<ID3D12Device> m_device;
+        ComPtr<ID3D12Device5> m_rayTracingDevice;
         CommandQueue m_commandQueue;
+        CommandQueue m_computeQueue;
         SwapChain m_swapChain;
         UINT m_bufferCount = 0;
         ComPtr<ID3D12Fence> m_fence;
         UINT64 m_fenceValue = 0;
         HANDLE m_fenceEvent = nullptr;
+        bool m_supportsHardwareRayTracing = false;
     };
 #endif
 }

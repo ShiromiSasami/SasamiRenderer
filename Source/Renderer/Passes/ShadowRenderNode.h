@@ -30,6 +30,9 @@ namespace SasamiRenderer
                      RenderPipelineStateCache& pipelineStateCache,
                      DescriptorHeap& srvHeap,
                      const float cameraPos[3],
+                     const float cameraPV[16],
+                     bool useSoftwareRayTracedDirectionalShadow,
+                     bool useSoftwareRayTracedReflections,
                      bool useTessellationPath,
                      bool iblEnabled,
                      float iblIntensity,
@@ -37,6 +40,11 @@ namespace SasamiRenderer
                      bool hasDiffuseSh,
                      const float (*diffuseShCoefficients)[3],
                      RendererEnums::GBufferDebugView debugView,
+                     uint32_t softwareRayTracedShadowMapSize,
+                     uint32_t renderWidth,
+                     uint32_t renderHeight,
+                     const std::function<bool(const LightSystem::ShadowPassContext&)>& softwareShadowCallback,
+                     const std::function<bool()>& softwareReflectionCallback,
                      const DrawCallback& drawCallback) const;
     };
 }

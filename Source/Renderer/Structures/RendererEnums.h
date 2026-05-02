@@ -10,7 +10,8 @@ namespace SasamiRenderer
             Opaque = 1,
 
             // Backward compatibility aliases.
-            PBR = Lighting,
+            CookTorranceGGX = Lighting,
+            PBR = Lighting,   // deprecated alias
             Basic = Opaque,
         };
 
@@ -23,7 +24,41 @@ namespace SasamiRenderer
             Metallic = 4,
             AmbientOcclusion = 5,
             Shadow = 6,
+            Emissive = 7,
+            ScreenSpaceAmbientOcclusionRaw = 8,
+            ScreenSpaceAmbientOcclusionFiltered = 9,
+            DirectionalLightDirection = 10,
+            DirectionalLightNdotL = 11,
             Count
+        };
+
+        enum class RenderPathMode
+        {
+            Raster = 0,
+            HardwareRayTracing = 1,
+            SdfFluid = 2,
+        };
+
+        enum class RayTracingPerformancePreset
+        {
+            Balanced = 0,
+            Performance = 1,
+            UltraFast = 2,
+        };
+
+        enum class AmbientOcclusionMode
+        {
+            MaterialOnly = 0,
+            SSAOOnly = 1,
+            SWRTAOOnly = 2,
+            Hybrid = 3,
+        };
+
+        enum class RayTracingQualityTier
+        {
+            Full = 0,
+            Fast = 1,
+            UltraFast = 2,
         };
 
         enum class SkyboxLoadFormat
@@ -43,6 +78,9 @@ namespace SasamiRenderer
             TransparentLighting = 4,
             Skybox = 5,
             PostProcess = 6,
+            SSAO = 7,
+            ProceduralSky = 8,
+            SdfFluid = 9,
         };
     }
 }

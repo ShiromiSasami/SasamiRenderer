@@ -8,6 +8,7 @@
 #include "Object/PointLight.h"
 #include "Object/SpotLight.h"
 #include "ECS/EcsRegistry.h"
+#include "Renderer/Core/Renderer.h"
 #include "Renderer/Scene/RenderCameraProxy.h"
 #include "Renderer/Structures/RendererEnums.h"
 
@@ -24,7 +25,6 @@ namespace SasamiRenderer
 {
     class Camera;
     class IRenderNode;
-    class Renderer;
     struct RenderCameraProxy;
 
 	class ApplicationCore
@@ -32,6 +32,7 @@ namespace SasamiRenderer
     public:
         using SkyboxLoadFormat = RendererEnums::SkyboxLoadFormat;
         using RenderNodeType = RendererEnums::RenderNodeType;
+        using RenderPathMode = RendererEnums::RenderPathMode;
 
         ApplicationCore(UINT width, UINT height, const wchar_t* title, IApplication* game = nullptr);
         ~ApplicationCore();
@@ -44,19 +45,94 @@ namespace SasamiRenderer
         float GetDeltaTime() const { return m_deltaTime; }
         void RequestQuit() { m_running = false; }
         bool IsRendererReady() const;
+        Renderer& GetRenderer() { return *m_renderer; }
         void RenderFrame();
         void RenderFrame(const Camera& camera);
         void ResizeRenderer(UINT width, UINT height);
 
         DirectionalLight GetDirectionalLight() const;
         void SetDirectionalLight(const DirectionalLight& light);
+        bool GetShowDirectionalLightOnSkybox() const;
+        void SetShowDirectionalLightOnSkybox(bool enabled);
+        float GetDirectionalLightOnSkyboxAngularRadius() const;
+        void SetDirectionalLightOnSkyboxAngularRadius(float radians);
 
         float GetIblIntensity() const;
         void SetIblIntensity(float intensity);
         bool GetUseTessellation() const;
         void SetUseTessellation(bool enabled);
+        bool GetTessWireframeEnabled() const;
+        void SetTessWireframeEnabled(bool enabled);
+        bool GetTessDebugColorsEnabled() const;
+        void SetTessDebugColorsEnabled(bool enabled);
+        bool  GetVolumetricCloudEnabled() const;
+        void  SetVolumetricCloudEnabled(bool enabled);
+        float GetCloudCover() const;
+        void  SetCloudCover(float v);
+        float GetCloudDensity() const;
+        void  SetCloudDensity(float v);
+        float GetCloudWindSpeed() const;
+        void  SetCloudWindSpeed(float v);
+        float GetCloudBaseAlt() const;
+        void  SetCloudBaseAlt(float v);
+        float GetCloudTopAlt() const;
+        void  SetCloudTopAlt(float v);
+        bool GetDebugProbeGridEnabled() const;
+        void SetDebugProbeGridEnabled(bool enabled);
+        float GetDebugProbeRadius() const;
+        void SetDebugProbeRadius(float radius);
+        void FitProbeGridToScene(float bMinX, float bMinY, float bMinZ,
+                                  float bMaxX, float bMaxY, float bMaxZ,
+                                  float margin = 1.0f);
+        void ReinsertDebugProbeGrid();
+        bool GetMeshletDebugViewEnabled() const;
+        void SetMeshletDebugViewEnabled(bool enabled);
+        bool GetUseMeshShader() const;
+        void SetUseMeshShader(bool enabled);
         int GetRasterShaderModeIndex() const;
         void SetRasterShaderModeIndex(int modeIndex);
+        int GetRenderPathModeIndex() const;
+        void SetRenderPathModeIndex(int modeIndex);
+        int GetRayTracingPerformancePresetIndex() const;
+        void SetRayTracingPerformancePresetIndex(int presetIndex);
+        bool GetRayTracingDynamicResolutionEnabled() const;
+        void SetRayTracingDynamicResolutionEnabled(bool enabled);
+        int GetRayTracingMaxBounceCount() const;
+        void SetRayTracingMaxBounceCount(int count);
+        bool GetRasterSoftwareRayTracedDirectionalShadowEnabled() const;
+        void SetRasterSoftwareRayTracedDirectionalShadowEnabled(bool enabled);
+        bool GetRasterSoftwareRayTracedReflectionEnabled() const;
+        void SetRasterSoftwareRayTracedReflectionEnabled(bool enabled);
+        bool GetRasterSoftwareRayTracedAmbientOcclusionEnabled() const;
+        void SetRasterSoftwareRayTracedAmbientOcclusionEnabled(bool enabled);
+        int GetAmbientOcclusionModeIndex() const;
+        void SetAmbientOcclusionModeIndex(int modeIndex);
+        bool GetSSAOEnabled() const;
+        void SetSSAOEnabled(bool enabled);
+        float GetSSAORadius() const;
+        void SetSSAORadius(float radius);
+        float GetSSAOBias() const;
+        void SetSSAOBias(float bias);
+        float GetSSAOIntensity() const;
+        void SetSSAOIntensity(float intensity);
+        float GetSSAOThickness() const;
+        void SetSSAOThickness(float thickness);
+        int GetSSAOQualityIndex() const;
+        void SetSSAOQualityIndex(int qualityIndex);
+        int GetSwrtAoSampleCount() const;
+        void SetSwrtAoSampleCount(int count);
+        float GetAoMinOcclusion() const;
+        void  SetAoMinOcclusion(float v);
+        bool GetSwrtUseReSTIR() const;
+        void SetSwrtUseReSTIR(bool useReSTIR);
+        int  GetSwrtSamplingMode() const;
+        void SetSwrtSamplingMode(int mode);
+        int  GetSwrtSamplesPerPixel() const;
+        void SetSwrtSamplesPerPixel(int n);
+        int  GetSwrtMaxBounces() const;
+        void SetSwrtMaxBounces(int n);
+        bool IsHardwareRayTracingSupported() const;
+        Renderer::RayTracingStats GetRayTracingStats() const;
         int GetGBufferDebugViewIndex() const;
         void SetGBufferDebugViewIndex(int modeIndex);
         void CycleGBufferDebugView(int delta = 1);
@@ -103,6 +179,7 @@ namespace SasamiRenderer
         Camera* GetActiveCamera() const { return m_activeCamera; }
         bool DeleteObject(SObject* object);
         void ClearObjects();
+        void InvalidateRenderObjects() { m_objectsDirty = true; }
 
     private:
         using EntityId = EcsRegistry::EntityId;

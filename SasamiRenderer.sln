@@ -13,6 +13,12 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PBRApp", "PBRApp.vcxproj", 
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AppFramework", "AppFramework.vcxproj", "{DDE97C49-FE02-47E4-BB5A-78D07807FA31}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RayMarchApp", "RayMarchApp.vcxproj", "{6A3F2B1C-D8E4-4F7A-9BC0-1234567890AB}"
+	ProjectSection(ProjectDependencies) = postProject
+		{3D92F90C-6C3D-4A78-B8F5-8E564888CAFC} = {3D92F90C-6C3D-4A78-B8F5-8E564888CAFC}
+		{DDE97C49-FE02-47E4-BB5A-78D07807FA31} = {DDE97C49-FE02-47E4-BB5A-78D07807FA31}
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -45,6 +51,14 @@ Global
 		{DDE97C49-FE02-47E4-BB5A-78D07807FA31}.Release|Win32.Build.0 = Release|Win32
 		{DDE97C49-FE02-47E4-BB5A-78D07807FA31}.Release|x64.ActiveCfg = Release|x64
 		{DDE97C49-FE02-47E4-BB5A-78D07807FA31}.Release|x64.Build.0 = Release|x64
+		{6A3F2B1C-D8E4-4F7A-9BC0-1234567890AB}.Debug|Win32.ActiveCfg = Debug|Win32
+		{6A3F2B1C-D8E4-4F7A-9BC0-1234567890AB}.Debug|Win32.Build.0 = Debug|Win32
+		{6A3F2B1C-D8E4-4F7A-9BC0-1234567890AB}.Debug|x64.ActiveCfg = Debug|x64
+		{6A3F2B1C-D8E4-4F7A-9BC0-1234567890AB}.Debug|x64.Build.0 = Debug|x64
+		{6A3F2B1C-D8E4-4F7A-9BC0-1234567890AB}.Release|Win32.ActiveCfg = Release|Win32
+		{6A3F2B1C-D8E4-4F7A-9BC0-1234567890AB}.Release|Win32.Build.0 = Release|Win32
+		{6A3F2B1C-D8E4-4F7A-9BC0-1234567890AB}.Release|x64.ActiveCfg = Release|x64
+		{6A3F2B1C-D8E4-4F7A-9BC0-1234567890AB}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

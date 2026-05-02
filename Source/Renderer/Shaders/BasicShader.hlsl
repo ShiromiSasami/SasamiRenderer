@@ -1,5 +1,5 @@
 Texture2D tex0 : register(t0);
-Texture2D shadowMap : register(t1);
+Texture2DArray shadowMap : register(t1);
 SamplerState samp0 : register(s0);
 
 struct PointLight
@@ -25,13 +25,7 @@ cbuffer CameraCB : register(b0)
     row_major float4x4 u_world;
 }
 
-cbuffer LightCB : register(b1)
-{
-    row_major float4x4 u_lightVP;
-    float4 u_dirDir;     // xyz: forward dir, w: intensity
-    float4 u_dirColor;   // rgb: color
-    float4 u_lightCounts; // x: pointCount, y: spotCount
-}
+#include "Common/LightCB.hlsli"
 
 struct VSInput
 {
@@ -51,15 +45,53 @@ struct PSInput
     float3 worldPos : TEXCOORD2;
 };
 
+float3x3 ComputeWorldToObject3x3()
+{
+    const float a = u_world[0][0];
+    const float b = u_world[0][1];
+    const float c = u_world[0][2];
+    const float d = u_world[1][0];
+    const float e = u_world[1][1];
+    const float f = u_world[1][2];
+    const float g = u_world[2][0];
+    const float h = u_world[2][1];
+    const float i = u_world[2][2];
+
+    const float cofactor00 = e * i - f * h;
+    const float cofactor01 = c * h - b * i;
+    const float cofactor02 = b * f - c * e;
+    const float cofactor10 = f * g - d * i;
+    const float cofactor11 = a * i - c * g;
+    const float cofactor12 = c * d - a * f;
+    const float cofactor20 = d * h - e * g;
+    const float cofactor21 = b * g - a * h;
+    const float cofactor22 = a * e - b * d;
+
+    const float det = a * cofactor00 + b * cofactor10 + c * cofactor20;
+    if (abs(det) <= 1e-8) {
+        return float3x3(
+            1.0, 0.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 0.0, 1.0);
+    }
+
+    const float invDet = 1.0 / det;
+    return float3x3(
+        cofactor00 * invDet, cofactor01 * invDet, cofactor02 * invDet,
+        cofactor10 * invDet, cofactor11 * invDet, cofactor12 * invDet,
+        cofactor20 * invDet, cofactor21 * invDet, cofactor22 * invDet);
+}
+
 PSInput VSMain(VSInput input)
 {
     PSInput output;
+    const float3x3 worldToObject = ComputeWorldToObject3x3();
     float4 worldPos = mul(float4(input.position, 1.0f), u_world);
     output.position = mul(float4(input.position, 1.0f), u_mvp);
-    output.normal = normalize(mul(float4(input.normal, 0.0f), u_world).xyz);
+    output.normal = normalize(mul(input.normal, worldToObject));
     output.color = input.color;
     output.uv = input.uv;
-    output.lightPos = mul(worldPos, u_lightVP);
+    output.lightPos = mul(worldPos, u_lightVP[0]);
     output.worldPos = worldPos.xyz;
     return output;
 }
@@ -75,19 +107,19 @@ float4 PSMain(PSInput input) : SV_TARGET
     // Shadow sampling (manual 2x2 PCF):
     // visibility = (1 / 4) * sum_{kernel} step(shadowDepth >= receiverDepth - bias)
     float3 sc = input.lightPos.xyz / max(input.lightPos.w, 1e-6);
-    float2 suv = sc.xy * 0.5 + 0.5;   // NDC->UV
-    float  sdepth = sc.z * 0.5 + 0.5; // map from [-1,1] to [0,1]
-    float bias = 0.0015;
+    float2 suv = float2(sc.x * 0.5 + 0.5, -sc.y * 0.5 + 0.5);  // NDC->UV (Y flipped: D3D NDC+1 = texture row 0)
+    float  sdepth = sc.z;             // D3D NDC z is already [0,1]
+    float bias = 0.0005;
     float visibility = 1.0;
     if (all(suv >= 0.0) && all(suv <= 1.0)) {
-        float2 texel = float2(1.0 / 1024.0, 1.0 / 1024.0);
+        float2 texel = max(u_shadowParams.xy, float2(1e-5, 1e-5));
         float acc = 0.0;
         [unroll]
         for (int dy = 0; dy < 2; ++dy) {
             [unroll]
             for (int dx = 0; dx < 2; ++dx) {
                 float2 uv = suv + float2(dx, dy) * texel;
-                float sd = shadowMap.SampleLevel(samp0, uv, 0).r;
+                float sd = shadowMap.SampleLevel(samp0, float3(uv, 0.0f), 0).r;
                 acc += (sdepth - bias <= sd) ? 1.0 : 0.0;
             }
         }
