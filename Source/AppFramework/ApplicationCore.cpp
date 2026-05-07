@@ -1,6 +1,7 @@
 #include "ApplicationCore.h"
 #include <windows.h>
 #include <windowsx.h>
+#include <array>
 #include <algorithm>
 #include <exception>
 #include <filesystem>
@@ -101,6 +102,55 @@ namespace SasamiRenderer
                 return static_cast<wchar_t>(std::towlower(c));
             });
             return ext == L".hdr";
+        }
+
+        bool ResolveCubemapFacePaths(const std::filesystem::path& directory,
+                                     std::array<std::wstring, 6>& outPaths)
+        {
+            static const std::array<std::vector<std::wstring>, 6> kFaceNameCandidates = {{
+                { L"px", L"posx", L"positive_x", L"right", L"xpos", L"+x" },
+                { L"nx", L"negx", L"negative_x", L"left",  L"xneg", L"-x" },
+                { L"py", L"posy", L"positive_y", L"up",    L"ypos", L"+y" },
+                { L"ny", L"negy", L"negative_y", L"down",  L"yneg", L"-y" },
+                { L"pz", L"posz", L"positive_z", L"front", L"zpos", L"+z" },
+                { L"nz", L"negz", L"negative_z", L"back",  L"zneg", L"-z" },
+            }};
+            static const std::array<std::wstring, 8> kExtensions = {
+                L".png", L".jpg", L".jpeg", L".bmp", L".tif", L".tiff", L".wdp", L".hdp"
+            };
+
+            std::error_code ec;
+            if (!std::filesystem::is_directory(directory, ec)) {
+                return false;
+            }
+
+            for (size_t face = 0; face < kFaceNameCandidates.size(); ++face) {
+                bool resolved = false;
+                for (const std::wstring& name : kFaceNameCandidates[face]) {
+                    const std::filesystem::path exact = directory / name;
+                    if (std::filesystem::is_regular_file(exact, ec)) {
+                        outPaths[face] = exact.wstring();
+                        resolved = true;
+                        break;
+                    }
+                    for (const std::wstring& ext : kExtensions) {
+                        const std::filesystem::path candidate = directory / (name + ext);
+                        if (std::filesystem::is_regular_file(candidate, ec)) {
+                            outPaths[face] = candidate.wstring();
+                            resolved = true;
+                            break;
+                        }
+                    }
+                    if (resolved) {
+                        break;
+                    }
+                }
+                if (!resolved) {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
     }
@@ -503,6 +553,19 @@ namespace SasamiRenderer
         m_renderer->SetRasterSoftwareRayTracedReflectionEnabled(enabled);
     }
 
+    bool ApplicationCore::GetRasterScreenSpaceReflectionEnabled() const
+    {
+        return m_renderer ? m_renderer->GetRasterScreenSpaceReflectionEnabled() : false;
+    }
+
+    void ApplicationCore::SetRasterScreenSpaceReflectionEnabled(bool enabled)
+    {
+        if (!m_renderer) {
+            return;
+        }
+        m_renderer->SetRasterScreenSpaceReflectionEnabled(enabled);
+    }
+
     bool ApplicationCore::GetRasterSoftwareRayTracedAmbientOcclusionEnabled() const
     {
         return m_renderer ? m_renderer->GetRasterSoftwareRayTracedAmbientOcclusionEnabled() : false;
@@ -533,83 +596,98 @@ namespace SasamiRenderer
         m_renderer->SetAmbientOcclusionMode(static_cast<RendererEnums::AmbientOcclusionMode>(clamped));
     }
 
-    bool ApplicationCore::GetSSAOEnabled() const
+    int ApplicationCore::GetRuntimeAOMethodIndex() const
     {
-        return m_renderer ? m_renderer->GetSSAOEnabled() : false;
+        return m_renderer ? static_cast<int>(m_renderer->GetRuntimeAmbientOcclusionMethod()) : 0;
     }
 
-    void ApplicationCore::SetSSAOEnabled(bool enabled)
-    {
-        if (!m_renderer) {
-            return;
-        }
-        m_renderer->SetSSAOEnabled(enabled);
-    }
-
-    float ApplicationCore::GetSSAORadius() const
-    {
-        return m_renderer ? m_renderer->GetSSAORadius() : 0.5f;
-    }
-
-    void ApplicationCore::SetSSAORadius(float radius)
+    void ApplicationCore::SetRuntimeAOMethodIndex(int methodIndex)
     {
         if (!m_renderer) {
             return;
         }
-        m_renderer->SetSSAORadius(radius);
+        const int clamped = (methodIndex < 0) ? 0 : (methodIndex > 1 ? 1 : methodIndex);
+        m_renderer->SetRuntimeAmbientOcclusionMethod(
+            static_cast<RendererEnums::RuntimeAmbientOcclusionMethod>(clamped));
     }
 
-    float ApplicationCore::GetSSAOBias() const
+    bool ApplicationCore::GetRuntimeAOEnabled() const
     {
-        return m_renderer ? m_renderer->GetSSAOBias() : 0.025f;
+        return m_renderer ? m_renderer->GetRuntimeAOEnabled() : false;
     }
 
-    void ApplicationCore::SetSSAOBias(float bias)
-    {
-        if (!m_renderer) {
-            return;
-        }
-        m_renderer->SetSSAOBias(bias);
-    }
-
-    float ApplicationCore::GetSSAOIntensity() const
-    {
-        return m_renderer ? m_renderer->GetSSAOIntensity() : 1.0f;
-    }
-
-    void ApplicationCore::SetSSAOIntensity(float intensity)
+    void ApplicationCore::SetRuntimeAOEnabled(bool enabled)
     {
         if (!m_renderer) {
             return;
         }
-        m_renderer->SetSSAOIntensity(intensity);
+        m_renderer->SetRuntimeAOEnabled(enabled);
     }
 
-    float ApplicationCore::GetSSAOThickness() const
+    float ApplicationCore::GetRuntimeAORadius() const
     {
-        return m_renderer ? m_renderer->GetSSAOThickness() : 0.15f;
+        return m_renderer ? m_renderer->GetRuntimeAORadius() : 0.5f;
     }
 
-    void ApplicationCore::SetSSAOThickness(float thickness)
+    void ApplicationCore::SetRuntimeAORadius(float radius)
     {
         if (!m_renderer) {
             return;
         }
-        m_renderer->SetSSAOThickness(thickness);
+        m_renderer->SetRuntimeAORadius(radius);
     }
 
-    int ApplicationCore::GetSSAOQualityIndex() const
+    float ApplicationCore::GetRuntimeAOBias() const
     {
-        return m_renderer ? static_cast<int>(m_renderer->GetSSAOQuality()) : 1;
+        return m_renderer ? m_renderer->GetRuntimeAOBias() : 0.025f;
     }
 
-    void ApplicationCore::SetSSAOQualityIndex(int qualityIndex)
+    void ApplicationCore::SetRuntimeAOBias(float bias)
+    {
+        if (!m_renderer) {
+            return;
+        }
+        m_renderer->SetRuntimeAOBias(bias);
+    }
+
+    float ApplicationCore::GetRuntimeAOIntensity() const
+    {
+        return m_renderer ? m_renderer->GetRuntimeAOIntensity() : 1.0f;
+    }
+
+    void ApplicationCore::SetRuntimeAOIntensity(float intensity)
+    {
+        if (!m_renderer) {
+            return;
+        }
+        m_renderer->SetRuntimeAOIntensity(intensity);
+    }
+
+    float ApplicationCore::GetRuntimeAOThickness() const
+    {
+        return m_renderer ? m_renderer->GetRuntimeAOThickness() : 0.15f;
+    }
+
+    void ApplicationCore::SetRuntimeAOThickness(float thickness)
+    {
+        if (!m_renderer) {
+            return;
+        }
+        m_renderer->SetRuntimeAOThickness(thickness);
+    }
+
+    int ApplicationCore::GetRuntimeAOQualityIndex() const
+    {
+        return m_renderer ? static_cast<int>(m_renderer->GetRuntimeAOQuality()) : 1;
+    }
+
+    void ApplicationCore::SetRuntimeAOQualityIndex(int qualityIndex)
     {
         if (!m_renderer) {
             return;
         }
         const int clamped = (qualityIndex < 0) ? 0 : (qualityIndex > 2 ? 2 : qualityIndex);
-        m_renderer->SetSSAOQuality(static_cast<uint32_t>(clamped));
+        m_renderer->SetRuntimeAOQuality(static_cast<uint32_t>(clamped));
     }
 
     int ApplicationCore::GetSwrtAoSampleCount() const
@@ -686,6 +764,32 @@ namespace SasamiRenderer
             return;
         }
         m_renderer->SetSwrtMaxBounces(static_cast<uint32_t>(n));
+    }
+
+    bool ApplicationCore::GetSwrtDenoiserEnabled() const
+    {
+        return m_renderer ? m_renderer->GetSwrtDenoiserEnabled() : false;
+    }
+
+    void ApplicationCore::SetSwrtDenoiserEnabled(bool enabled)
+    {
+        if (!m_renderer) {
+            return;
+        }
+        m_renderer->SetSwrtDenoiserEnabled(enabled);
+    }
+
+    int ApplicationCore::GetSwrtReflectionAtrousIterations() const
+    {
+        return m_renderer ? static_cast<int>(m_renderer->GetSwrtReflectionAtrousIterations()) : 0;
+    }
+
+    void ApplicationCore::SetSwrtReflectionAtrousIterations(int n)
+    {
+        if (!m_renderer) {
+            return;
+        }
+        m_renderer->SetSwrtReflectionAtrousIterations(static_cast<uint32_t>(n < 0 ? 0 : n));
     }
 
     bool ApplicationCore::IsHardwareRayTracingSupported() const
@@ -799,9 +903,25 @@ namespace SasamiRenderer
             return false;
         }
         if (format == SkyboxLoadFormat::CubemapFaces) {
-            DebugLog("LoadSkybox failed: CubemapFaces is not supported in this build.\n");
-            return false;
+            std::array<std::wstring, 6> facePaths{};
+            if (!ResolveCubemapFacePaths(configuredPath, facePaths)) {
+                DebugLog("LoadSkybox failed: CubemapFaces expects a directory with +X/-X/+Y/-Y/+Z/-Z face images.\n");
+                return false;
+            }
+
+            UINT width = 0;
+            UINT height = 0;
+            std::vector<std::vector<uint8_t>> facePixels;
+            if (!AssetLoader::LoadCubemapFacesViaWIC(facePaths, facePixels, width, height)) {
+                DebugLog("LoadSkybox failed: could not load cubemap face sources.\n");
+                return false;
+            }
+            m_renderer->SetSkyboxLdrCubemapFacesData(std::move(facePixels), width, height);
+            m_renderer->SetSkyboxLoadFormat(format);
+            m_renderer->RefreshEnvironmentAssets();
+            return true;
         }
+
         if (!std::filesystem::is_regular_file(configuredPath, ec)) {
             DebugLog("LoadSkybox failed: equirect skybox path must be a file.\n");
             return false;

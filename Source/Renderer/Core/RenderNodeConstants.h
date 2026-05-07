@@ -14,7 +14,7 @@ namespace SasamiRenderer
         constexpr std::array<RenderNodeType, 8> kDefaultRenderPathSequence = {
             RenderNodeType::Shadow,
             RenderNodeType::Opaque,
-            RenderNodeType::SSAO,
+            RenderNodeType::RuntimeAO,
             RenderNodeType::Lighting,
             RenderNodeType::Skybox,
             RenderNodeType::Transparent,

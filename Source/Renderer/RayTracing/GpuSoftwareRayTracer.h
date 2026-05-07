@@ -80,6 +80,11 @@ namespace SasamiRenderer
             // True when the camera moved since the last frame.
             // Causes forceFullRefresh and disables temporal history accumulation.
             bool cameraChanged = false;
+
+            bool     denoiserEnabled = true;
+            float    temporalAlpha = 0.1f;
+            uint32_t atrousIterations = 3u;
+            float    atrousPhiDepth = 0.35f;
         };
 
         struct AmbientOcclusionTextureDesc
@@ -445,8 +450,10 @@ namespace SasamiRenderer
         // ---- Temporal EMA pass (Legacy reflection only) ----
         ComPtr<ID3D12RootSignature> m_reflTemporalRootSignature;
         ComPtr<ID3D12PipelineState> m_reflTemporalPso;
+        ComPtr<ID3D12PipelineState> m_reflAtrousPso;
         Resource m_reflHistoryA;     // R16G16B16A16_FLOAT, ping-pong A
         Resource m_reflHistoryB;     // R16G16B16A16_FLOAT, ping-pong B
+        Resource m_reflAtrousScratch; // R16G16B16A16_FLOAT, spatial filter scratch
         uint32_t m_reflHistoryWidth  = 0;
         uint32_t m_reflHistoryHeight = 0;
         bool     m_reflHistoryPingA  = true;   // true = A is write side this frame

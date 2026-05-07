@@ -42,15 +42,26 @@ namespace SasamiRenderer
             return std::max(1u, static_cast<uint32_t>(std::round(static_cast<float>(dimension) * scale)));
         }
 
-        bool UsesSsaoAmbientOcclusionMode(RendererEnums::AmbientOcclusionMode mode)
+        bool UsesRuntimeAmbientOcclusionMode(RendererEnums::AmbientOcclusionMode mode)
         {
-            return mode == RendererEnums::AmbientOcclusionMode::SSAOOnly ||
+            return mode == RendererEnums::AmbientOcclusionMode::RuntimeAOOnly ||
+                   mode == RendererEnums::AmbientOcclusionMode::RayTracedAOOnly ||
                    mode == RendererEnums::AmbientOcclusionMode::Hybrid;
         }
 
-        bool UsesSwrtAmbientOcclusionMode(RendererEnums::AmbientOcclusionMode mode)
+        bool UsesRayTracedRuntimeAmbientOcclusion(RendererEnums::AmbientOcclusionMode mode,
+                                                  RendererEnums::RuntimeAmbientOcclusionMethod method)
         {
-            return mode == RendererEnums::AmbientOcclusionMode::SWRTAOOnly;
+            return mode != RendererEnums::AmbientOcclusionMode::MaterialOnly &&
+                   (method == RendererEnums::RuntimeAmbientOcclusionMethod::RayTraced ||
+                    mode == RendererEnums::AmbientOcclusionMode::RayTracedAOOnly);
+        }
+
+        bool UsesSsaoRuntimeAmbientOcclusion(RendererEnums::AmbientOcclusionMode mode,
+                                             RendererEnums::RuntimeAmbientOcclusionMethod method)
+        {
+            return UsesRuntimeAmbientOcclusionMode(mode) &&
+                   !UsesRayTracedRuntimeAmbientOcclusion(mode, method);
         }
     }
 
@@ -416,8 +427,7 @@ namespace SasamiRenderer
             m_sdfFluidRenderNode->SetCloudDensity(m_settings.cloudDensity);
         }
 
-        // PBR no longer inserts the volumetric cloud pass. RayMarch sky/cloud stays on the
-        // SdfFluid path, so cloud settings are still forwarded there.
+        EnsureVolumetricCloudPassInserted();
 
         // Insert the debug probe grid after sky composition so deferred lighting has already
         // produced SceneColor. Transparent passes still come later and can draw over it.
@@ -491,7 +501,17 @@ namespace SasamiRenderer
         policy.useSoftwareRayTracedReflections =
             (m_settings.renderPathMode == RenderPathMode::Raster) &&
             m_settings.rasterSoftwareRayTracedReflectionEnabled &&
-            m_renderTargetPool.GetSWRTReflectionTexture().IsValid();
+            m_renderTargetPool.GetSWRTReflectionTexture().IsValid() &&
+            m_swrtExecutor.IsReflectionCacheValid();
+        const bool useScreenSpaceReflections =
+            (m_settings.renderPathMode == RenderPathMode::Raster) &&
+            !policy.useSoftwareRayTracedReflections &&
+            m_settings.rasterScreenSpaceReflectionEnabled &&
+            m_sceneColorHistoryValid &&
+            m_renderTargetPool.GetTransparentSceneColorCopyTexture().IsValid();
+        policy.reflectionMode = policy.useSoftwareRayTracedReflections
+            ? 1.0f
+            : (useScreenSpaceReflections ? 2.0f : 0.0f);
         policy.softwareRayTracedShadowMapSize =
             policy.useSoftwareRayTracedDirectionalShadow
                 ? partialBehavior.shadowMapSize
@@ -542,23 +562,33 @@ namespace SasamiRenderer
         inputs.lightSrvTable = frame ? frame->light.lightSrvTable : GpuDescriptorHandle{};
         inputs.iblSrvTable = m_skybox.GetIblSrvTable();
         inputs.aoSrv = defaultAoSrv;
-        inputs.reflectionSrv =
-            ((m_settings.renderPathMode == RenderPathMode::Raster) &&
-             m_settings.rasterSoftwareRayTracedReflectionEnabled &&
-             m_renderTargetPool.GetSWRTReflectionTexture().IsValid() &&
-             m_swrtExecutor.IsReflectionCacheValid())
-                ? m_renderTargetPool.GetSWRTReflectionSrv()
-                : m_nullTextureSrv;
+        const bool useSwrtReflection =
+            (m_settings.renderPathMode == RenderPathMode::Raster) &&
+            m_settings.rasterSoftwareRayTracedReflectionEnabled &&
+            m_renderTargetPool.GetSWRTReflectionTexture().IsValid() &&
+            m_swrtExecutor.IsReflectionCacheValid();
+        const bool useScreenSpaceReflection =
+            (m_settings.renderPathMode == RenderPathMode::Raster) &&
+            !useSwrtReflection &&
+            m_settings.rasterScreenSpaceReflectionEnabled &&
+            m_sceneColorHistoryValid &&
+            m_renderTargetPool.GetTransparentSceneColorCopyTexture().IsValid();
+        inputs.reflectionSrv = useSwrtReflection
+            ? m_renderTargetPool.GetSWRTReflectionSrv()
+            : (useScreenSpaceReflection ? m_renderTargetPool.GetTransparentSceneColorCopySrv() : m_nullTextureSrv);
         inputs.lightCbGpu = lightCbGpu;
         inputs.sceneTimeSec = m_sceneTime;
 
-        // SSAO resources
+        // Runtime AO resources. SSAO and RTAO share the same AO consumption slot in lighting.
         inputs.depthSrv = m_renderTargetPool.GetDepthSrv();
         inputs.gbufferNormalSrv = m_renderTargetPool.GetGBufferNormal().IsValid()
             ? m_renderTargetPool.GetGBufferNormalSrv()
             : m_nullTextureSrv;
         inputs.depthResource = m_renderTargetPool.GetDepth().IsValid() ? m_renderTargetPool.GetDepth().Get() : nullptr;
-        const bool usesSsaoAo = UsesSsaoAmbientOcclusionMode(m_settings.ambientOcclusionMode);
+        const bool usesSsaoAo = m_settings.runtimeAoEnabled &&
+            UsesSsaoRuntimeAmbientOcclusion(m_settings.ambientOcclusionMode, m_settings.runtimeAoMethod);
+        const bool usesRayTracedAo = m_settings.runtimeAoEnabled &&
+            UsesRayTracedRuntimeAmbientOcclusion(m_settings.ambientOcclusionMode, m_settings.runtimeAoMethod);
         inputs.ssaoRtv = m_renderTargetPool.GetSSAORtv();
         inputs.ssaoResource =
             (usesSsaoAo && m_renderTargetPool.GetSSAOTexture().IsValid()) ? m_renderTargetPool.GetSSAOTexture().Get() : nullptr;
@@ -571,14 +601,21 @@ namespace SasamiRenderer
         case RendererEnums::AmbientOcclusionMode::MaterialOnly:
             inputs.screenSpaceAoSrv = defaultAoSrv;
             break;
-        case RendererEnums::AmbientOcclusionMode::SSAOOnly:
+        case RendererEnums::AmbientOcclusionMode::RuntimeAOOnly:
         case RendererEnums::AmbientOcclusionMode::Hybrid:
-            inputs.screenSpaceAoSrv =
-                m_renderTargetPool.GetSSAOBlurTexture().IsValid() ? m_renderTargetPool.GetSSAOBlurSrv()
-                : m_renderTargetPool.GetSSAOTexture().IsValid() ? m_renderTargetPool.GetSSAOSrv()
-                : defaultAoSrv;
+            if (usesRayTracedAo) {
+                inputs.screenSpaceAoSrv =
+                    m_renderTargetPool.GetSWRTAmbientOcclusionTexture().IsValid()
+                        ? m_renderTargetPool.GetSWRTAmbientOcclusionSrv()
+                        : defaultAoSrv;
+            } else {
+                inputs.screenSpaceAoSrv =
+                    m_renderTargetPool.GetSSAOBlurTexture().IsValid() ? m_renderTargetPool.GetSSAOBlurSrv()
+                    : m_renderTargetPool.GetSSAOTexture().IsValid() ? m_renderTargetPool.GetSSAOSrv()
+                    : defaultAoSrv;
+            }
             break;
-        case RendererEnums::AmbientOcclusionMode::SWRTAOOnly:
+        case RendererEnums::AmbientOcclusionMode::RayTracedAOOnly:
             inputs.screenSpaceAoSrv =
                 m_renderTargetPool.GetSWRTAmbientOcclusionTexture().IsValid()
                     ? m_renderTargetPool.GetSWRTAmbientOcclusionSrv()
@@ -589,13 +626,13 @@ namespace SasamiRenderer
             break;
         }
 
-        // Push SSAO CB: reuse PushCameraCB with (cameraPV, cameraInvPV, ssaoParams, screenSize, cameraPos)
+        // Push Runtime AO CB for the SSAO generator. RTAO uses the same tuning fields in SWRTExecutor.
         if (frame && usesSsaoAo) {
             const float ssaoExtra0[4] = {
-                m_settings.ssaoRadius,
-                m_settings.ssaoBias,
-                m_settings.ssaoIntensity,
-                m_settings.ssaoThickness
+                m_settings.runtimeAoRadius,
+                m_settings.runtimeAoBias,
+                m_settings.runtimeAoIntensity,
+                m_settings.runtimeAoThickness
             };
             const float ssaoExtra1[4] = {
                 m_viewport.Width,
@@ -607,7 +644,7 @@ namespace SasamiRenderer
                 m_cameraState.GetPos()[0],
                 m_cameraState.GetPos()[1],
                 m_cameraState.GetPos()[2],
-                static_cast<float>(m_settings.ssaoQuality)
+                static_cast<float>(m_settings.runtimeAoQuality)
             };
             inputs.ssaoCbGpu = m_frameCoordinator.PushCameraCB(
                 *frame, m_cameraState.GetPV(), m_cameraState.GetInvPV(), ssaoExtra0, ssaoExtra1, ssaoExtra2);
@@ -719,34 +756,39 @@ namespace SasamiRenderer
         }
 
         auto drawItems = [this, cmdList, frame](bool drawTransparent) {
-            // Bind screen-space AO texture at slot 8 (t9 in shader) once per batch
-            // Use blur output if available, fall back to raw SSAO, then null
-            GpuDescriptorHandle ssaoSrv = m_nullTextureSrv;
+            // Bind runtime-generated AO texture at slot 8 (t9 in shader) once per batch.
+            GpuDescriptorHandle runtimeAoSrv = m_nullTextureSrv;
+            const bool usesRayTracedAo = m_settings.runtimeAoEnabled &&
+                UsesRayTracedRuntimeAmbientOcclusion(m_settings.ambientOcclusionMode, m_settings.runtimeAoMethod);
             switch (m_settings.ambientOcclusionMode) {
             case RendererEnums::AmbientOcclusionMode::MaterialOnly:
-                ssaoSrv = m_nullTextureSrv;
+                runtimeAoSrv = m_nullTextureSrv;
                 break;
-            case RendererEnums::AmbientOcclusionMode::SSAOOnly:
+            case RendererEnums::AmbientOcclusionMode::RuntimeAOOnly:
             case RendererEnums::AmbientOcclusionMode::Hybrid:
             {
-                // Fallback to white (AO=1) rather than null (AO=0) when SSAO textures aren't ready.
-                // Using a black null texture here would zero all ambient even before SSAO runs.
-                const GpuDescriptorHandle ssaoFallback = m_defaultOcclusionTexture
+                // Fallback to white (AO=1) rather than null (AO=0) when runtime AO is not ready.
+                const GpuDescriptorHandle runtimeAoFallback = m_defaultOcclusionTexture
                     ? m_defaultOcclusionTexture->srv : m_nullTextureSrv;
-                if (m_settings.gBufferDebugView == RendererEnums::GBufferDebugView::ScreenSpaceAmbientOcclusionRaw) {
-                    ssaoSrv = m_renderTargetPool.GetSSAOTexture().IsValid()
+                if (usesRayTracedAo) {
+                    runtimeAoSrv =
+                        m_renderTargetPool.GetSWRTAmbientOcclusionTexture().IsValid()
+                            ? m_renderTargetPool.GetSWRTAmbientOcclusionSrv()
+                            : runtimeAoFallback;
+                } else if (m_settings.gBufferDebugView == RendererEnums::GBufferDebugView::RuntimeAmbientOcclusionRaw) {
+                    runtimeAoSrv = m_renderTargetPool.GetSSAOTexture().IsValid()
                         ? m_renderTargetPool.GetSSAOSrv()
-                        : ssaoFallback;
+                        : runtimeAoFallback;
                 } else {
-                    ssaoSrv =
+                    runtimeAoSrv =
                         m_renderTargetPool.GetSSAOBlurTexture().IsValid() ? m_renderTargetPool.GetSSAOBlurSrv()
                         : m_renderTargetPool.GetSSAOTexture().IsValid() ? m_renderTargetPool.GetSSAOSrv()
-                        : ssaoFallback;
+                        : runtimeAoFallback;
                 }
                 break;
             }
-            case RendererEnums::AmbientOcclusionMode::SWRTAOOnly:
-                ssaoSrv =
+            case RendererEnums::AmbientOcclusionMode::RayTracedAOOnly:
+                runtimeAoSrv =
                     m_renderTargetPool.GetSWRTAmbientOcclusionTexture().IsValid()
                         ? m_renderTargetPool.GetSWRTAmbientOcclusionSrv()
                         : m_nullTextureSrv;
@@ -754,7 +796,7 @@ namespace SasamiRenderer
             default:
                 break;
             }
-            cmdList->SetGraphicsRootDescriptorTable(8, ssaoSrv);
+            cmdList->SetGraphicsRootDescriptorTable(8, runtimeAoSrv);
 
             // Bind GI probe grid CB (b2) and probe SH data (t10) as inline root descriptors.
             // These are always bound so PBR_PS can read g_giEnabled to decide whether to use probes.
@@ -782,16 +824,26 @@ namespace SasamiRenderer
                     item.material.emissive[2],
                     item.material.roughness,
                 };
+                const RendererEnums::AmbientOcclusionMode effectiveAoMode =
+                    m_settings.runtimeAoEnabled
+                        ? m_settings.ambientOcclusionMode
+                        : RendererEnums::AmbientOcclusionMode::MaterialOnly;
                 const float extra2[4] = {
                     item.material.metallic,
                     item.material.occlusionStrength,
-                    static_cast<float>(m_settings.ambientOcclusionMode),
+                    static_cast<float>(effectiveAoMode),
                     item.usesMetallicRoughnessTexture ? 1.0f : 0.0f,
+                };
+                const float extra3[4] = {
+                    item.material.specularColor[0],
+                    item.material.specularColor[1],
+                    item.material.specularColor[2],
+                    static_cast<float>(static_cast<uint32_t>(item.material.workflow)),
                 };
                 float objMVP[16];
                 Mul4x4(item.model, m_cameraState.GetPV(), objMVP);
                 const D3D12_GPU_VIRTUAL_ADDRESS cameraCbGpu =
-                    m_frameCoordinator.PushCameraCB(*frame, objMVP, item.model, extra0, extra1, extra2);
+                    m_frameCoordinator.PushCameraCB(*frame, objMVP, item.model, extra0, extra1, extra2, extra3);
                 if (cameraCbGpu != 0) {
                     cmdList->SetGraphicsRootConstantBufferView(2, cameraCbGpu);
                 }
@@ -840,7 +892,9 @@ namespace SasamiRenderer
             m_settings.rasterSoftwareRayTracedReflectionEnabled;
         const bool useSoftwareRayTracedAmbientOcclusion =
             (m_settings.renderPathMode == RenderPathMode::Raster) &&
-            UsesSwrtAmbientOcclusionMode(m_settings.ambientOcclusionMode);
+            m_settings.runtimeAoEnabled &&
+            UsesRayTracedRuntimeAmbientOcclusion(m_settings.ambientOcclusionMode,
+                                                 m_settings.runtimeAoMethod);
         if (useSoftwareRayTracedDirectionalShadow) {
             bool cacheInvalidated = false;
             if (!m_renderTargetPool.EnsureSWRTShadow(*m_device, partialBehavior.shadowMapSize, cacheInvalidated)) {
@@ -869,7 +923,7 @@ namespace SasamiRenderer
                                                                static_cast<uint32_t>(m_viewport.Width),
                                                                static_cast<uint32_t>(m_viewport.Height),
                                                                aoCacheInvalidated)) {
-                DebugLog("Renderer::Render: failed to prepare software ambient occlusion resources. Falling back to SSAO.\n");
+                DebugLog("Renderer::Render: failed to prepare ray-traced runtime AO resources. Falling back to default AO.\n");
             }
         }
         if (useSoftwareRayTracedDirectionalShadow || useSoftwareRayTracedReflections || useSoftwareRayTracedAmbientOcclusion) {
@@ -1046,6 +1100,8 @@ namespace SasamiRenderer
             return;
         }
 
+        CaptureSceneColorHistory(cmdList, backIndex);
+
         if (overlay) {
             TransitionBackBufferToRenderTarget(cmdList, backIndex);
             BindMainTargets(cmdList, backIndex);
@@ -1062,6 +1118,63 @@ namespace SasamiRenderer
     bool Renderer::IsHardwareRayTracingSupported() const
     {
         return m_device ? m_device->SupportsHardwareRayTracing() : false;
+    }
+
+    void Renderer::SetRenderPathMode(RenderPathMode mode)
+    {
+        if (mode != RenderPathMode::Raster &&
+            mode != RenderPathMode::HardwareRayTracing &&
+            mode != RenderPathMode::SdfFluid) {
+            mode = RenderPathMode::Raster;
+        }
+
+        if (mode == RenderPathMode::HardwareRayTracing &&
+            !IsHardwareRayTracingSupported()) {
+            mode = RenderPathMode::Raster;
+        }
+
+        const RenderPathMode previousMode = m_settings.renderPathMode;
+        m_settings.renderPathMode = mode;
+
+        if (m_settings.renderPathMode != RenderPathMode::Raster) {
+            m_settings.gBufferDebugView = GBufferDebugView::FinalLit;
+        }
+
+        if (mode == RenderPathMode::SdfFluid) {
+            if (previousMode != RenderPathMode::SdfFluid) {
+                m_preSdfRenderNodeSequence = m_passRegistry.GetRenderNodeSequence();
+                if (m_preSdfRenderNodeSequence.empty()) {
+                    m_preSdfRenderNodeSequence.assign(RenderNodeConstants::kDefaultRenderPathSequence.begin(),
+                                                      RenderNodeConstants::kDefaultRenderPathSequence.end());
+                }
+            }
+            SetRenderNodeSequence({ RenderNodeType::SdfFluid });
+            return;
+        }
+
+        if (previousMode == RenderPathMode::SdfFluid) {
+            std::vector<RenderNodeType> restoreSequence = m_preSdfRenderNodeSequence;
+            if (restoreSequence.empty()) {
+                restoreSequence.assign(RenderNodeConstants::kDefaultRenderPathSequence.begin(),
+                                       RenderNodeConstants::kDefaultRenderPathSequence.end());
+            }
+            SetRenderNodeSequence(restoreSequence);
+            m_preSdfRenderNodeSequence.clear();
+            return;
+        }
+
+        EnsureVolumetricCloudPassInserted();
+    }
+
+    void Renderer::SetVolumetricCloudEnabled(bool e)
+    {
+        m_settings.volumetricCloudEnabled = e;
+        if (m_volumetricCloudRenderNode) {
+            m_volumetricCloudRenderNode->SetEnabled(e);
+        }
+        if (e) {
+            EnsureVolumetricCloudPassInserted();
+        }
     }
 
     void Renderer::SetDirectionalLightSettings(const DirectionalLightSettings& settings)
@@ -1095,6 +1208,7 @@ namespace SasamiRenderer
         m_scissorRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
 
         m_renderTargetPool.OnResize(*m_device, width, height);
+        m_sceneColorHistoryValid = false;
 
         // Recreate SSAO resources at new size (OnResize resets them, EnsureSSAO recreates)
         if (!m_renderTargetPool.EnsureSSAO(*m_device, width, height)) {
@@ -1132,6 +1246,12 @@ namespace SasamiRenderer
         m_swrtExecutor.OnReflectionResourcesReallocated();
     }
 
+    void Renderer::SetSkyboxLdrCubemapFacesData(std::vector<std::vector<uint8_t>> facePixels, UINT width, UINT height)
+    {
+        m_skybox.SetLdrCubemapFaceData(std::move(facePixels), width, height);
+        m_swrtExecutor.OnReflectionResourcesReallocated();
+    }
+
     void Renderer::SetSkyboxLoadFormat(SkyboxLoadFormat format)
     {
         m_skybox.SetLoadFormat(format);
@@ -1156,6 +1276,31 @@ namespace SasamiRenderer
     bool Renderer::ReplacePass(std::string_view targetTag, const std::shared_ptr<IRenderNode>& renderPass)
     {
         return m_passRegistry.ReplacePass(targetTag, renderPass);
+    }
+
+    bool Renderer::HasRenderPass(std::string_view tag) const
+    {
+        const auto& passes = m_passRegistry.GetPasses();
+        return std::any_of(passes.begin(), passes.end(),
+                           [tag](const std::shared_ptr<IRenderNode>& pass) {
+                               return pass && pass->Tag() == tag;
+                           });
+    }
+
+    void Renderer::EnsureVolumetricCloudPassInserted()
+    {
+        if (!m_volumetricCloudRenderNode ||
+            !m_settings.volumetricCloudEnabled ||
+            m_settings.renderPathMode == RenderPathMode::SdfFluid ||
+            HasRenderPass("VolumetricCloud")) {
+            return;
+        }
+
+        m_volumetricCloudRenderNode->SetEnabled(true);
+        if (AddPassAfter("Skybox", m_volumetricCloudRenderNode).IsValid()) return;
+        if (AddPassAfter("ProceduralSky", m_volumetricCloudRenderNode).IsValid()) return;
+        if (AddPassAfter("Lighting", m_volumetricCloudRenderNode).IsValid()) return;
+        AddPass(m_volumetricCloudRenderNode);
     }
 
     bool Renderer::AddPhaseCompletionNode(std::string_view phaseTag,
@@ -1201,6 +1346,7 @@ namespace SasamiRenderer
                 }
             }
         }
+        EnsureVolumetricCloudPassInserted();
     }
 
     void Renderer::ReinsertDebugProbeGrid()
@@ -1300,6 +1446,53 @@ namespace SasamiRenderer
         barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
         barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
         cmdList->ResourceBarrier(1, &barrier);
+    }
+
+    void Renderer::CaptureSceneColorHistory(CommandList* cmdList, UINT backIndex)
+    {
+        if (!cmdList || !m_device ||
+            m_settings.renderPathMode != RenderPathMode::Raster ||
+            !m_settings.rasterScreenSpaceReflectionEnabled ||
+            m_viewport.Width <= 0.0f || m_viewport.Height <= 0.0f) {
+            return;
+        }
+
+        const auto* backBuffer = m_renderTargetPool.GetBackBufferResource(backIndex);
+        const uint32_t width = static_cast<uint32_t>(m_viewport.Width);
+        const uint32_t height = static_cast<uint32_t>(m_viewport.Height);
+        if (!backBuffer || !backBuffer->IsValid() ||
+            !m_renderTargetPool.EnsureTransparentSceneColorCopy(*m_device, width, height)) {
+            m_sceneColorHistoryValid = false;
+            return;
+        }
+
+        Resource& history = m_renderTargetPool.GetTransparentSceneColorCopyTexture();
+        if (!history.IsValid()) {
+            m_sceneColorHistoryValid = false;
+            return;
+        }
+
+        D3D12_RESOURCE_BARRIER preCopy[] = {
+            CD3DX12_RESOURCE_BARRIER::Transition(backBuffer->Get(),
+                                                 D3D12_RESOURCE_STATE_PRESENT,
+                                                 D3D12_RESOURCE_STATE_COPY_SOURCE),
+            CD3DX12_RESOURCE_BARRIER::Transition(history.Get(),
+                                                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                                 D3D12_RESOURCE_STATE_COPY_DEST)
+        };
+        cmdList->ResourceBarrier(_countof(preCopy), preCopy);
+        cmdList->Get()->CopyResource(history.Get(), backBuffer->Get());
+
+        D3D12_RESOURCE_BARRIER postCopy[] = {
+            CD3DX12_RESOURCE_BARRIER::Transition(backBuffer->Get(),
+                                                 D3D12_RESOURCE_STATE_COPY_SOURCE,
+                                                 D3D12_RESOURCE_STATE_PRESENT),
+            CD3DX12_RESOURCE_BARRIER::Transition(history.Get(),
+                                                 D3D12_RESOURCE_STATE_COPY_DEST,
+                                                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+        };
+        cmdList->ResourceBarrier(_countof(postCopy), postCopy);
+        m_sceneColorHistoryValid = true;
     }
 
     void Renderer::SubmitAndPresent(CommandList* cmdList, UINT frameIndex)

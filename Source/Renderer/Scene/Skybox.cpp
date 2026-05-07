@@ -318,6 +318,7 @@ namespace SasamiRenderer
             m_sourceHeight = 0;
             m_sourceHdrRgb.clear();
             m_sourceLdrRgba8.clear();
+            m_sourceCubemapFaceRgba8.clear();
             DebugLog("Skybox::SetHdrEquirectData failed: invalid HDR source size.\n");
             return;
         }
@@ -327,6 +328,7 @@ namespace SasamiRenderer
         m_sourceHeight = height;
         m_sourceHdrRgb = std::move(pixels);
         m_sourceLdrRgba8.clear();
+        m_sourceCubemapFaceRgba8.clear();
     }
 
     void Skybox::SetLdrEquirectData(std::vector<uint8_t> pixels, UINT width, UINT height)
@@ -338,6 +340,7 @@ namespace SasamiRenderer
             m_sourceHeight = 0;
             m_sourceHdrRgb.clear();
             m_sourceLdrRgba8.clear();
+            m_sourceCubemapFaceRgba8.clear();
             DebugLog("Skybox::SetLdrEquirectData failed: invalid LDR source size.\n");
             return;
         }
@@ -347,6 +350,37 @@ namespace SasamiRenderer
         m_sourceHeight = height;
         m_sourceLdrRgba8 = std::move(pixels);
         m_sourceHdrRgb.clear();
+        m_sourceCubemapFaceRgba8.clear();
+    }
+
+    void Skybox::SetLdrCubemapFaceData(std::vector<std::vector<uint8_t>> facePixels, UINT width, UINT height)
+    {
+        const size_t expectedFaceSize = static_cast<size_t>(width) * static_cast<size_t>(height) * 4u;
+        const bool valid =
+            width != 0 &&
+            height != 0 &&
+            facePixels.size() == 6u &&
+            std::all_of(facePixels.begin(), facePixels.end(),
+                        [expectedFaceSize](const std::vector<uint8_t>& face) {
+                            return face.size() == expectedFaceSize;
+                        });
+        if (!valid) {
+            m_sourceType = SourceType::None;
+            m_sourceWidth = 0;
+            m_sourceHeight = 0;
+            m_sourceHdrRgb.clear();
+            m_sourceLdrRgba8.clear();
+            m_sourceCubemapFaceRgba8.clear();
+            DebugLog("Skybox::SetLdrCubemapFaceData failed: invalid cubemap face source size.\n");
+            return;
+        }
+
+        m_sourceType = SourceType::LdrCubemapFaces;
+        m_sourceWidth = width;
+        m_sourceHeight = height;
+        m_sourceCubemapFaceRgba8 = std::move(facePixels);
+        m_sourceHdrRgb.clear();
+        m_sourceLdrRgba8.clear();
     }
 
     void Skybox::ResetSkyboxResources()
@@ -607,6 +641,30 @@ namespace SasamiRenderer
         return true;
     }
 
+    bool Skybox::UploadLdrCubemapTexture(CommandList* cmdList)
+    {
+        if (!m_device || !cmdList ||
+            m_sourceType != SourceType::LdrCubemapFaces ||
+            m_sourceCubemapFaceRgba8.size() != 6u) {
+            return false;
+        }
+
+        if (!CreateTextureCubeFromRgba8Faces(*m_device,
+                                             cmdList,
+                                             m_sourceCubemapFaceRgba8,
+                                             m_sourceWidth,
+                                             m_sourceHeight,
+                                             m_skyboxTexture,
+                                             m_skyboxTextureUpload)) {
+            return false;
+        }
+
+        PublishSkyboxSrv(DXGI_FORMAT_R8G8B8A8_UNORM);
+        m_skyboxTextureUploaded = true;
+        m_skyboxTextureIsHdr = false;
+        return true;
+    }
+
     bool Skybox::UploadFallbackSkyboxTexture(CommandList* cmdList)
     {
         if (!m_device || !cmdList) {
@@ -650,6 +708,15 @@ namespace SasamiRenderer
             return;
         }
         m_skyboxUploadAttempted = true;
+
+        if (m_skyboxLoadFormat == SkyboxLoadFormat::CubemapFaces) {
+            if (UploadLdrCubemapTexture(cmdList)) {
+                return;
+            }
+            DebugLog("Skybox cubemap face upload failed. Falling back to solid cubemap.\n");
+            (void)UploadFallbackSkyboxTexture(cmdList);
+            return;
+        }
 
         const bool hasHdrEnvironment = EnsureHdrEnvironmentLoaded();
         if (hasHdrEnvironment && UploadHdrSkyboxTexture(cmdList)) {

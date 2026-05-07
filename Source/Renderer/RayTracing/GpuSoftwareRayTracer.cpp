@@ -838,6 +838,20 @@ namespace SasamiRenderer
                     &tpso, IID_PPV_ARGS(m_reflTemporalPso.ReleaseAndGetAddressOf())))) {
                 return false;
             }
+
+            ComPtr<ID3DBlob> acs;
+            if (!CompileComputeShader(L"SWRT/SWRT_Reflection_ATrous_CS.hlsl",
+                                      "CS_ReflectionATrous", acs)) {
+                OutputDebugStringA("GpuSWRT: failed to compile SWRT_Reflection_ATrous_CS.hlsl\n");
+                return false;
+            }
+            D3D12_COMPUTE_PIPELINE_STATE_DESC apso{};
+            apso.pRootSignature = m_reflTemporalRootSignature.Get();
+            apso.CS             = { acs->GetBufferPointer(), acs->GetBufferSize() };
+            if (FAILED(dev->CreateComputePipelineState(
+                    &apso, IID_PPV_ARGS(m_reflAtrousPso.ReleaseAndGetAddressOf())))) {
+                return false;
+            }
         }
 
         return true;
@@ -2367,22 +2381,25 @@ namespace SasamiRenderer
         // Only runs on full-refresh frames (updatePhaseCount == 1) to avoid
         // blending stale partial-update pixels into the history.
         // -----------------------------------------------------------------------
-        if (m_reflTemporalPso && desc.updatePhaseCount == 1u)
+        if (desc.denoiserEnabled && m_reflTemporalPso && desc.updatePhaseCount == 1u)
         {
             bool firstFrame = (m_reflHistoryWidth  != desc.width ||
                                m_reflHistoryHeight != desc.height);
 
-            // Lazily allocate / reallocate ping-pong history textures on size change
-            if (firstFrame)
-            {
-                const auto kSrv = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-                m_reflHistoryA.Reset();
-                m_reflHistoryB.Reset();
-                const bool allocOk =
-                    CreateUavTexture2D(device, desc.width, desc.height,
+                // Lazily allocate / reallocate ping-pong history textures on size change
+                if (firstFrame)
+                {
+                    const auto kSrv = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+                    m_reflHistoryA.Reset();
+                    m_reflHistoryB.Reset();
+                    m_reflAtrousScratch.Reset();
+                    const bool allocOk =
+                        CreateUavTexture2D(device, desc.width, desc.height,
                                        DXGI_FORMAT_R16G16B16A16_FLOAT, kSrv, m_reflHistoryA) &&
-                    CreateUavTexture2D(device, desc.width, desc.height,
-                                       DXGI_FORMAT_R16G16B16A16_FLOAT, kSrv, m_reflHistoryB);
+                        CreateUavTexture2D(device, desc.width, desc.height,
+                                       DXGI_FORMAT_R16G16B16A16_FLOAT, kSrv, m_reflHistoryB) &&
+                        CreateUavTexture2D(device, desc.width, desc.height,
+                                       DXGI_FORMAT_R16G16B16A16_FLOAT, kSrv, m_reflAtrousScratch);
                 if (allocOk)
                 {
                     m_reflHistoryWidth  = desc.width;
@@ -2405,7 +2422,7 @@ namespace SasamiRenderer
                 // Keep some history during camera motion instead of fully resetting.
                 // A hard reset exposes the raw 1spp/low-res reflection and causes
                 // black flicker while the camera is being shaken.
-                const float alpha = firstFrame ? 1.0f : (desc.cameraChanged ? 0.35f : 0.1f);
+                const float alpha = firstFrame ? 1.0f : (desc.cameraChanged ? 0.35f : desc.temporalAlpha);
 
                 // ---- Barriers: prepare textures for temporal CS ----
                 // outTexture: UAV (just written by reflection CS) → NON_PIXEL_SHADER_RESOURCE (SRV t0)
@@ -2515,6 +2532,99 @@ namespace SasamiRenderer
                 m_reflHistoryPingA = !m_reflHistoryPingA;
             } // end if histories valid
         } // end temporal EMA block
+
+        if (desc.denoiserEnabled &&
+            m_reflAtrousPso &&
+            m_reflAtrousScratch.IsValid() &&
+            desc.gbufferNormalTex &&
+            desc.updatePhaseCount == 1u &&
+            desc.atrousIterations > 0u)
+        {
+            auto cpuBase = m_descHeap.GetCPUDescriptorHandleForHeapStart();
+            auto writeSrv = [&](ID3D12Resource* res, DXGI_FORMAT fmt, UINT slot)
+            {
+                D3D12_CPU_DESCRIPTOR_HANDLE h = cpuBase;
+                h.ptr += slot * m_descIncrementSize;
+                CreateTex2DSrv(dev, res, fmt, h);
+            };
+            auto writeUav = [&](ID3D12Resource* res, DXGI_FORMAT fmt, UINT slot)
+            {
+                D3D12_CPU_DESCRIPTOR_HANDLE h = cpuBase;
+                h.ptr += slot * m_descIncrementSize;
+                CreateTex2DUav(dev, res, fmt, h);
+            };
+
+            ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
+            cl->SetDescriptorHeaps(1, heaps);
+            cl->SetPipelineState(m_reflAtrousPso.Get());
+            cl->SetComputeRootSignature(m_reflTemporalRootSignature.Get());
+
+            const uint32_t iterations = std::min(desc.atrousIterations, 5u);
+            for (uint32_t iter = 0; iter < iterations; ++iter)
+            {
+                writeSrv(outTexture.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, kTemporalSrvBase + 0u);
+                writeSrv(desc.gbufferNormalTex, DXGI_FORMAT_R16G16B16A16_FLOAT, kTemporalSrvBase + 1u);
+                writeUav(m_reflAtrousScratch.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, kTemporalUavBase + 0u);
+
+                D3D12_RESOURCE_BARRIER pre[] = {
+                    CD3DX12_RESOURCE_BARRIER::Transition(
+                        outTexture.Get(),
+                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+                    CD3DX12_RESOURCE_BARRIER::Transition(
+                        m_reflAtrousScratch.Get(),
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
+                };
+                cl->ResourceBarrier(_countof(pre), pre);
+
+                const float stepWidth = static_cast<float>(1u << iter);
+                uint32_t constants[4] = {
+                    *reinterpret_cast<const uint32_t*>(&stepWidth),
+                    desc.width,
+                    desc.height,
+                    *reinterpret_cast<const uint32_t*>(&desc.atrousPhiDepth),
+                };
+                cl->SetComputeRoot32BitConstants(0, 4, constants, 0);
+
+                D3D12_GPU_DESCRIPTOR_HANDLE srvGpu = m_descHeap.GetGPUDescriptorHandleForHeapStart();
+                srvGpu.ptr += kTemporalSrvBase * m_descIncrementSize;
+                cl->SetComputeRootDescriptorTable(1, srvGpu);
+
+                D3D12_GPU_DESCRIPTOR_HANDLE uavGpu = m_descHeap.GetGPUDescriptorHandleForHeapStart();
+                uavGpu.ptr += kTemporalUavBase * m_descIncrementSize;
+                cl->SetComputeRootDescriptorTable(2, uavGpu);
+
+                const UINT tgx = (desc.width  + 15u) / 16u;
+                const UINT tgy = (desc.height + 15u) / 16u;
+                cl->Dispatch(tgx, tgy, 1u);
+
+                D3D12_RESOURCE_BARRIER copyPre[] = {
+                    CD3DX12_RESOURCE_BARRIER::Transition(
+                        m_reflAtrousScratch.Get(),
+                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12_RESOURCE_STATE_COPY_SOURCE),
+                    CD3DX12_RESOURCE_BARRIER::Transition(
+                        outTexture.Get(),
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                        D3D12_RESOURCE_STATE_COPY_DEST),
+                };
+                cl->ResourceBarrier(_countof(copyPre), copyPre);
+                cl->CopyResource(outTexture.Get(), m_reflAtrousScratch.Get());
+
+                D3D12_RESOURCE_BARRIER copyPost[] = {
+                    CD3DX12_RESOURCE_BARRIER::Transition(
+                        m_reflAtrousScratch.Get(),
+                        D3D12_RESOURCE_STATE_COPY_SOURCE,
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+                    CD3DX12_RESOURCE_BARRIER::Transition(
+                        outTexture.Get(),
+                        D3D12_RESOURCE_STATE_COPY_DEST,
+                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
+                };
+                cl->ResourceBarrier(_countof(copyPost), copyPost);
+            }
+        }
 
         // Legacy SWRT also uses this frame index for per-frame GGX jitter.
         // Without advancing it, rough reflections keep reusing the same sample.

@@ -58,6 +58,7 @@ namespace SasamiRenderer
         using RenderPathMode = RendererEnums::RenderPathMode;
         using RayTracingPerformancePreset = RendererEnums::RayTracingPerformancePreset;
         using RayTracingQualityTier = RendererEnums::RayTracingQualityTier;
+        using RuntimeAmbientOcclusionMethod = RendererEnums::RuntimeAmbientOcclusionMethod;
         using SkyboxLoadFormat = RendererEnums::SkyboxLoadFormat;
         using RenderNodeType = RendererEnums::RenderNodeType;
 
@@ -89,6 +90,7 @@ namespace SasamiRenderer
         void SetDeltaTime(float dt) { m_deltaTime = dt; }
         void SetSkyboxHdrEquirectData(std::vector<float> pixels, UINT width, UINT height);
         void SetSkyboxLdrEquirectData(std::vector<uint8_t> pixels, UINT width, UINT height);
+        void SetSkyboxLdrCubemapFacesData(std::vector<std::vector<uint8_t>> facePixels, UINT width, UINT height);
         void SetSkyboxLoadFormat(SkyboxLoadFormat format);
         bool GetShowDirectionalLightOnSkybox() const { return m_skybox.IsDirectionalLightMarkerEnabled(); }
         void SetShowDirectionalLightOnSkybox(bool enabled) { m_skybox.SetDirectionalLightMarkerEnabled(enabled); }
@@ -131,21 +133,7 @@ namespace SasamiRenderer
         RasterShaderMode GetRasterShaderMode() const { return m_settings.rasterShaderMode; }
         void SetRasterShaderMode(RasterShaderMode mode) { m_settings.rasterShaderMode = mode; }
         RenderPathMode GetRenderPathMode() const { return m_settings.renderPathMode; }
-        void SetRenderPathMode(RenderPathMode mode)
-        {
-            if (mode != RenderPathMode::Raster &&
-                mode != RenderPathMode::HardwareRayTracing) {
-                mode = RenderPathMode::Raster;
-            }
-            if (mode == RenderPathMode::HardwareRayTracing &&
-                !IsHardwareRayTracingSupported()) {
-                mode = RenderPathMode::Raster;
-            }
-            m_settings.renderPathMode = mode;
-            if (m_settings.renderPathMode != RenderPathMode::Raster) {
-                m_settings.gBufferDebugView = GBufferDebugView::FinalLit;
-            }
-        }
+        void SetRenderPathMode(RenderPathMode mode);
         RayTracingPerformancePreset GetRayTracingPerformancePreset() const { return m_settings.rayTracingPerformancePreset; }
         void SetRayTracingPerformancePreset(RayTracingPerformancePreset preset) { m_settings.rayTracingPerformancePreset = preset; }
         bool GetRayTracingDynamicResolutionEnabled() const { return m_settings.rayTracingDynamicResolutionEnabled; }
@@ -183,16 +171,33 @@ namespace SasamiRenderer
             }
             m_settings.rasterSoftwareRayTracedReflectionEnabled = enabled;
         }
+        bool GetRasterScreenSpaceReflectionEnabled() const
+        {
+            return m_settings.rasterScreenSpaceReflectionEnabled;
+        }
+        void SetRasterScreenSpaceReflectionEnabled(bool enabled)
+        {
+            if (m_settings.rasterScreenSpaceReflectionEnabled != enabled) {
+                m_sceneColorHistoryValid = false;
+            }
+            m_settings.rasterScreenSpaceReflectionEnabled = enabled;
+        }
         bool GetRasterSoftwareRayTracedAmbientOcclusionEnabled() const
         {
-            return m_settings.ambientOcclusionMode == RendererEnums::AmbientOcclusionMode::SWRTAOOnly;
+            return m_settings.ambientOcclusionMode != RendererEnums::AmbientOcclusionMode::MaterialOnly &&
+                   (m_settings.runtimeAoMethod == RuntimeAmbientOcclusionMethod::RayTraced ||
+                    m_settings.ambientOcclusionMode == RendererEnums::AmbientOcclusionMode::RayTracedAOOnly);
         }
         void SetRasterSoftwareRayTracedAmbientOcclusionEnabled(bool enabled)
         {
             m_settings.rasterSoftwareRayTracedAmbientOcclusionEnabled = enabled;
-            m_settings.ambientOcclusionMode = enabled
-                ? RendererEnums::AmbientOcclusionMode::SWRTAOOnly
-                : RendererEnums::AmbientOcclusionMode::Hybrid;
+            if (enabled) {
+                m_settings.ambientOcclusionMode = RendererEnums::AmbientOcclusionMode::RuntimeAOOnly;
+                m_settings.runtimeAoMethod = RuntimeAmbientOcclusionMethod::RayTraced;
+            } else {
+                m_settings.ambientOcclusionMode = RendererEnums::AmbientOcclusionMode::Hybrid;
+                m_settings.runtimeAoMethod = RuntimeAmbientOcclusionMethod::SSAO;
+            }
         }
         RendererEnums::AmbientOcclusionMode GetAmbientOcclusionMode() const
         {
@@ -201,8 +206,17 @@ namespace SasamiRenderer
         void SetAmbientOcclusionMode(RendererEnums::AmbientOcclusionMode mode)
         {
             m_settings.ambientOcclusionMode = mode;
+            if (mode == RendererEnums::AmbientOcclusionMode::RayTracedAOOnly) {
+                m_settings.runtimeAoMethod = RuntimeAmbientOcclusionMethod::RayTraced;
+            }
+            m_settings.rasterSoftwareRayTracedAmbientOcclusionEnabled = GetRasterSoftwareRayTracedAmbientOcclusionEnabled();
+        }
+        RuntimeAmbientOcclusionMethod GetRuntimeAmbientOcclusionMethod() const { return m_settings.runtimeAoMethod; }
+        void SetRuntimeAmbientOcclusionMethod(RuntimeAmbientOcclusionMethod method)
+        {
+            m_settings.runtimeAoMethod = method;
             m_settings.rasterSoftwareRayTracedAmbientOcclusionEnabled =
-                (mode == RendererEnums::AmbientOcclusionMode::SWRTAOOnly);
+                (method == RuntimeAmbientOcclusionMethod::RayTraced);
         }
         bool GetSwrtUseReSTIR() const { return m_settings.swrtUseReSTIR; }
         void SetSwrtUseReSTIR(bool useReSTIR)
@@ -217,6 +231,10 @@ namespace SasamiRenderer
         void SetSwrtSamplesPerPixel(uint32_t n) { m_settings.swrtSamplesPerPixel = n; }
         uint32_t GetSwrtMaxBounces() const { return m_settings.swrtMaxBounces; }
         void SetSwrtMaxBounces(uint32_t n) { m_settings.swrtMaxBounces = (n < 1u ? 1u : (n > 8u ? 8u : n)); }
+        bool GetSwrtDenoiserEnabled() const { return m_settings.swrtDenoiserEnabled; }
+        void SetSwrtDenoiserEnabled(bool enabled) { m_settings.swrtDenoiserEnabled = enabled; }
+        uint32_t GetSwrtReflectionAtrousIterations() const { return m_settings.swrtReflectionAtrousIterations; }
+        void SetSwrtReflectionAtrousIterations(uint32_t n) { m_settings.swrtReflectionAtrousIterations = (n > 5u ? 5u : n); }
         bool GetGIEnabled()     const { return m_probeGrid.GetEnabled(); }
         void SetGIEnabled(bool e)     { m_probeGrid.SetEnabled(e); }
         float GetGIIntensity()  const { return m_probeGrid.GetGiIntensity(); }
@@ -231,7 +249,7 @@ namespace SasamiRenderer
                                   float margin = 1.0f);
         // Volumetric cloud
         bool  GetVolumetricCloudEnabled()  const { return m_settings.volumetricCloudEnabled; }
-        void  SetVolumetricCloudEnabled(bool e)  { m_settings.volumetricCloudEnabled = e; if (m_volumetricCloudRenderNode) m_volumetricCloudRenderNode->SetEnabled(e); }
+        void  SetVolumetricCloudEnabled(bool e);
         float GetCloudCover()   const { return m_settings.cloudCover; }
         void  SetCloudCover(float v) { m_settings.cloudCover = v; if (m_volumetricCloudRenderNode) m_volumetricCloudRenderNode->SetCloudCover(v); if (m_sdfFluidRenderNode) m_sdfFluidRenderNode->SetCloudCover(v); }
         float GetCloudDensity() const { return m_settings.cloudDensity; }
@@ -287,18 +305,30 @@ namespace SasamiRenderer
             m_settings.gBufferDebugView = static_cast<GBufferDebugView>(index);
         }
         float GetDeltaTime() const { return m_deltaTime; }
-        bool GetSSAOEnabled() const { return m_settings.ssaoEnabled; }
-        void SetSSAOEnabled(bool enabled) { m_settings.ssaoEnabled = enabled; }
-        float GetSSAORadius() const { return m_settings.ssaoRadius; }
-        void SetSSAORadius(float r) { m_settings.ssaoRadius = (r > 0.0f) ? r : 0.01f; }
-        float GetSSAOBias() const { return m_settings.ssaoBias; }
-        void SetSSAOBias(float b) { m_settings.ssaoBias = b; }
-        float GetSSAOIntensity() const { return m_settings.ssaoIntensity; }
-        void SetSSAOIntensity(float i) { m_settings.ssaoIntensity = (i >= 0.0f) ? i : 0.0f; }
-        float GetSSAOThickness() const { return m_settings.ssaoThickness; }
-        void SetSSAOThickness(float t) { m_settings.ssaoThickness = (t >= 0.0f) ? t : 0.0f; }
-        uint32_t GetSSAOQuality() const { return m_settings.ssaoQuality; }
-        void SetSSAOQuality(uint32_t q) { m_settings.ssaoQuality = (q > 2u) ? 2u : q; }
+        bool GetRuntimeAOEnabled() const { return m_settings.runtimeAoEnabled; }
+        void SetRuntimeAOEnabled(bool enabled) { m_settings.runtimeAoEnabled = enabled; }
+        float GetRuntimeAORadius() const { return m_settings.runtimeAoRadius; }
+        void SetRuntimeAORadius(float r) { m_settings.runtimeAoRadius = (r > 0.0f) ? r : 0.01f; }
+        float GetRuntimeAOBias() const { return m_settings.runtimeAoBias; }
+        void SetRuntimeAOBias(float b) { m_settings.runtimeAoBias = b; }
+        float GetRuntimeAOIntensity() const { return m_settings.runtimeAoIntensity; }
+        void SetRuntimeAOIntensity(float i) { m_settings.runtimeAoIntensity = (i >= 0.0f) ? i : 0.0f; }
+        float GetRuntimeAOThickness() const { return m_settings.runtimeAoThickness; }
+        void SetRuntimeAOThickness(float t) { m_settings.runtimeAoThickness = (t >= 0.0f) ? t : 0.0f; }
+        uint32_t GetRuntimeAOQuality() const { return m_settings.runtimeAoQuality; }
+        void SetRuntimeAOQuality(uint32_t q) { m_settings.runtimeAoQuality = (q > 2u) ? 2u : q; }
+        bool GetSSAOEnabled() const { return GetRuntimeAOEnabled(); }
+        void SetSSAOEnabled(bool enabled) { SetRuntimeAOEnabled(enabled); }
+        float GetSSAORadius() const { return GetRuntimeAORadius(); }
+        void SetSSAORadius(float r) { SetRuntimeAORadius(r); }
+        float GetSSAOBias() const { return GetRuntimeAOBias(); }
+        void SetSSAOBias(float b) { SetRuntimeAOBias(b); }
+        float GetSSAOIntensity() const { return GetRuntimeAOIntensity(); }
+        void SetSSAOIntensity(float i) { SetRuntimeAOIntensity(i); }
+        float GetSSAOThickness() const { return GetRuntimeAOThickness(); }
+        void SetSSAOThickness(float t) { SetRuntimeAOThickness(t); }
+        uint32_t GetSSAOQuality() const { return GetRuntimeAOQuality(); }
+        void SetSSAOQuality(uint32_t q) { SetRuntimeAOQuality(q); }
         uint32_t GetSwrtAoSampleCount() const { return m_settings.swrtAoSampleCount; }
         void SetSwrtAoSampleCount(uint32_t count)
         {
@@ -359,11 +389,14 @@ namespace SasamiRenderer
                                                          GpuDescriptorHandle defaultAoSrv);
         RenderNodeExecutionServices BuildRenderNodeExecutionServices(const DrawSceneItemsCallback& drawItems,
                                                                      const DrawShadowItemsCallback& drawShadowItems);
+        bool HasRenderPass(std::string_view tag) const;
+        void EnsureVolumetricCloudPassInserted();
 
         void TransitionBackBufferToRenderTarget(CommandList* cmdList, UINT backIndex);
         void ClearAndBindMainTargets(CommandList* cmdList, UINT backIndex);
         void BindMainTargets(CommandList* cmdList, UINT backIndex);
         void TransitionBackBufferToPresent(CommandList* cmdList, UINT backIndex);
+        void CaptureSceneColorHistory(CommandList* cmdList, UINT backIndex);
         void SubmitAndPresent(CommandList* cmdList, UINT frameIndex);
         Texture* CreateTextureFromRgba8Data(const CpuTextureRgba8& src, CommandList* cmdList,
                                             std::vector<Resource>& uploads);
@@ -414,6 +447,8 @@ namespace SasamiRenderer
 
         RenderSettings m_settings;
         RayTracingStats m_rayTracingStats{};
+        std::vector<RenderNodeType> m_preSdfRenderNodeSequence;
+        bool m_sceneColorHistoryValid = false;
         float m_deltaTime = 0.0f;
         float m_sceneTime = 0.0f;
         GraphicsRuntime m_graphicsRuntime = GetBuildDefaultGraphicsRuntime();

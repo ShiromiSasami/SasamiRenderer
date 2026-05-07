@@ -28,6 +28,7 @@ namespace SasamiRenderer
         bool useShadowTessellationPath = false;
         bool useSoftwareRayTracedDirectionalShadow = false;
         bool useSoftwareRayTracedReflections = false;
+        float reflectionMode = 0.0f; // 0=disabled, 1=SWRT, 2=screen-space
         uint32_t softwareRayTracedShadowMapSize = 1024u;
         uint32_t renderWidth = 0u;
         uint32_t renderHeight = 0u;

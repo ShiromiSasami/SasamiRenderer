@@ -66,7 +66,7 @@ namespace SasamiRenderer
                                  RendererEnums::GBufferDebugView debugView,
                                  uint32_t shadowMapWidth,
                                  uint32_t shadowMapHeight,
-                                 bool reflectionEnabled,
+                                 float reflectionMode,
                                  float reflectionStrength,
                                  uint32_t renderWidth,
                                  uint32_t renderHeight);
@@ -92,7 +92,7 @@ namespace SasamiRenderer
                                RendererEnums::GBufferDebugView debugView,
                                uint32_t shadowMapWidth,
                                uint32_t shadowMapHeight,
-                               bool reflectionEnabled,
+                               float reflectionMode,
                                float reflectionStrength,
                                uint32_t renderWidth,
                                uint32_t renderHeight,

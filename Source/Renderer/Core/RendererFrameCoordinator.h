@@ -51,7 +51,8 @@ namespace SasamiRenderer
                                                const float world[16],
                                                const float extra0[4],
                                                const float extra1[4],
-                                               const float extra2[4]);
+                                               const float extra2[4],
+                                               const float extra3[4] = nullptr);
 
     private:
         void WaitForFrameFence(UINT frameIndex);

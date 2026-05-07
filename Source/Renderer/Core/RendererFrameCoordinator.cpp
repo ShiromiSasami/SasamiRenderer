@@ -15,6 +15,7 @@ namespace
         float extra0[4];
         float extra1[4];
         float extra2[4];
+        float extra3[4];
     };
 }
 
@@ -269,7 +270,8 @@ namespace SasamiRenderer
                                                                      const float world[16],
                                                                      const float extra0[4],
                                                                      const float extra1[4],
-                                                                     const float extra2[4])
+                                                                     const float extra2[4],
+                                                                     const float extra3[4])
     {
         if (!frame.cameraCB.IsValid() || !frame.cameraCBPtr || frame.cameraCbCapacity == 0) {
             return 0;
@@ -301,6 +303,11 @@ namespace SasamiRenderer
             std::memcpy(dst->extra2, extra2, sizeof(dst->extra2));
         } else {
             std::memset(dst->extra2, 0, sizeof(dst->extra2));
+        }
+        if (extra3) {
+            std::memcpy(dst->extra3, extra3, sizeof(dst->extra3));
+        } else {
+            std::memset(dst->extra3, 0, sizeof(dst->extra3));
         }
 
         return frame.cameraCB->GetGPUVirtualAddress() + static_cast<UINT64>(cbSize) * static_cast<UINT64>(slot);

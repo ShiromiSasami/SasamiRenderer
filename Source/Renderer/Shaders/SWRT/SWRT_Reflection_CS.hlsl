@@ -224,32 +224,6 @@ float3 SampleReflectionEnvironment(float3 dir, float roughness)
     return skyColor;
 }
 
-float3 EvaluateReflectionHitIndirect(float3 N, float3 V,
-                                     float3 albedo, float roughness, float metallic)
-{
-    const float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
-    const float3 F  = FresnelSchlick(saturate(dot(N, V)), F0);
-    const float3 kd = (1.0f - F) * (1.0f - metallic);
-
-    float3 indirectDiffuse = albedo * g_ambientColor * g_ambientIntensity * kd;
-    float3 indirectSpecular = 0.0f;
-
-    if (g_iblEnabled > 0.5f)
-    {
-        const float maxMip = max(g_iblPrefilterMaxMip, 0.0f);
-        const float3 diffuseEnv =
-            g_iblPrefilter.SampleLevel(LinearClamp, N, maxMip).rgb * g_iblIntensity;
-        const float3 specularEnv =
-            g_iblPrefilter.SampleLevel(LinearClamp, reflect(-V, N), saturate(roughness) * maxMip).rgb
-            * g_iblIntensity;
-
-        indirectDiffuse += diffuseEnv * albedo * kd;
-        indirectSpecular += specularEnv * F;
-    }
-
-    return indirectDiffuse + indirectSpecular;
-}
-
 // --------------------------------------------------------------------------
 // Main
 // --------------------------------------------------------------------------
@@ -425,10 +399,8 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
             float3 V_b = normalize(-reflDir);
             float3 hitDirect = ShadeDirectPBR(hitPos_b, hitNorm_b, V_b,
                                               mat.baseColor.rgb, mat.roughness, mat.metallic);
-            float3 hitIndirect = EvaluateReflectionHitIndirect(hitNorm_b, V_b,
-                                                               mat.baseColor.rgb, mat.roughness, mat.metallic);
             float3 hitFloor  = EvaluateReflectionHitAmbientFloor(mat.baseColor.rgb);
-            sampleColor += throughput * (hitDirect + hitIndirect + hitFloor);
+            sampleColor += throughput * (hitDirect + hitFloor);
 
             // ---- Check whether to continue bouncing ----
             bool lastBounce = (b + 1u >= maxBounces);

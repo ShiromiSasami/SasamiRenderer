@@ -30,6 +30,7 @@ namespace SasamiRenderer
 
         void SetHdrEquirectData(std::vector<float> pixels, UINT width, UINT height);
         void SetLdrEquirectData(std::vector<uint8_t> pixels, UINT width, UINT height);
+        void SetLdrCubemapFaceData(std::vector<std::vector<uint8_t>> facePixels, UINT width, UINT height);
         void SetLoadFormat(SkyboxLoadFormat format) { m_skyboxLoadFormat = format; }
         SkyboxLoadFormat GetLoadFormat() const { return m_skyboxLoadFormat; }
 
@@ -89,6 +90,7 @@ namespace SasamiRenderer
             None = 0,
             HdrRgbFloat = 1,
             LdrRgba8 = 2,
+            LdrCubemapFaces = 3,
         };
 
         bool InitializeGeometry();
@@ -96,6 +98,7 @@ namespace SasamiRenderer
         void ResetSkyboxResources();
         void ResetIblResources();
         bool UploadHdrSkyboxTexture(CommandList* cmdList);
+        bool UploadLdrCubemapTexture(CommandList* cmdList);
         bool UploadFallbackSkyboxTexture(CommandList* cmdList);
         void PublishSkyboxSrv(DXGI_FORMAT format);
         bool GenerateHdrIblData(GeneratedIblData& outData) const;
@@ -116,6 +119,7 @@ namespace SasamiRenderer
         UINT m_sourceHeight = 0;
         std::vector<float> m_sourceHdrRgb;
         std::vector<uint8_t> m_sourceLdrRgba8;
+        std::vector<std::vector<uint8_t>> m_sourceCubemapFaceRgba8;
 
         Resource m_skyboxTexture;
         Resource m_skyboxTextureUpload;

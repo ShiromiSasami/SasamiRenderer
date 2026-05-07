@@ -1,13 +1,11 @@
 #include "Object/MeshComponent.h"
 
 #include <atomic>
-#include <cstdio>
 #include <cstdint>
 #include <filesystem>
 #include <windows.h>
 
 #include "Foundation/Math/MathUtil.h"
-#include "Foundation/Tools/DebugOutput.h"
 #include "Loader/AssetLoader.h"
 #include "Loader/ModelLoader.h"
 
@@ -91,48 +89,6 @@ namespace SasamiRenderer
             return textureData;
         }
 
-        static bool IsTrackedDebugModel(const std::string& assetPath)
-        {
-            return assetPath.find("stanford_bunny") != std::string::npos ||
-                   assetPath.find("Sponza") != std::string::npos;
-        }
-
-        static const char* GetTrackedModelLabel(const std::string& assetPath)
-        {
-            if (assetPath.find("stanford_bunny") != std::string::npos) {
-                return "Bunny";
-            }
-            if (assetPath.find("Sponza") != std::string::npos) {
-                return "Sponza";
-            }
-            return nullptr;
-        }
-
-        static void LogTrackedModelMatrix(const char* stage,
-                                          const char* label,
-                                          float uniformScale,
-                                          const float matrix[16])
-        {
-            if (!stage || !label || !matrix) {
-                return;
-            }
-
-            char buffer[512] = {};
-            std::snprintf(buffer,
-                          sizeof(buffer),
-                          "[ModelScaleProbe] stage=%s model=%s uniformScale=%.8f diag=(%.8f, %.8f, %.8f) translation=(%.8f, %.8f, %.8f)\n",
-                          stage,
-                          label,
-                          uniformScale,
-                          matrix[0],
-                          matrix[5],
-                          matrix[10],
-                          matrix[12],
-                          matrix[13],
-                          matrix[14]);
-            DebugLog(buffer);
-        }
-
     }
 
     bool MeshComponent::LoadModel(const std::string& assetPath, ModelFormat format, float uniformScale)
@@ -182,12 +138,8 @@ namespace SasamiRenderer
             m_staticMeshes.push_back(std::move(src));
         }
 
-        if (!m_staticMeshes.empty() && IsTrackedDebugModel(assetPath)) {
+        if (!m_staticMeshes.empty()) {
             m_debugAssetPath = assetPath;
-            LogTrackedModelMatrix("LoadModel.localTransform",
-                                  GetTrackedModelLabel(assetPath),
-                                  uniformScale,
-                                  m_staticMeshes.front().localTransform);
         }
         return !m_staticMeshes.empty();
     }
@@ -230,12 +182,6 @@ namespace SasamiRenderer
             proxy.debugLabel = m_debugAssetPath;
             // Final model matrix for draw = local mesh transform * component transform.
             Mul4x4(src.localTransform, m_model, proxy.model);
-            if (!proxy.debugLabel.empty()) {
-                LogTrackedModelMatrix("BuildRenderProxies.proxyModel",
-                                      GetTrackedModelLabel(proxy.debugLabel),
-                                      0.0f,
-                                      proxy.model);
-            }
             proxies.push_back(std::move(proxy));
         }
 

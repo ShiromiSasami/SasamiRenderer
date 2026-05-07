@@ -73,10 +73,31 @@ namespace SasamiRenderer
             ImGui::PushID(label);
             ImGui::TextDisabled("%s", label);
             ImGui::Separator();
-            changed |= ImGui::ColorEdit4("Base Color", material.baseColor);
+            int workflowIndex = static_cast<int>(material.workflow);
+            if (ImGui::Combo("Workflow", &workflowIndex, "Metallic-Roughness\0Specular-Glossiness\0")) {
+                if (workflowIndex < 0) {
+                    workflowIndex = 0;
+                } else if (workflowIndex > 1) {
+                    workflowIndex = 1;
+                }
+                material.workflow = static_cast<MaterialWorkflow>(workflowIndex);
+                changed = true;
+            }
+
+            if (material.workflow == MaterialWorkflow::SpecularGlossiness) {
+                changed |= ImGui::ColorEdit4("Diffuse Color", material.baseColor);
+                changed |= ImGui::ColorEdit3("Specular Color", material.specularColor);
+                float glossiness = 1.0f - material.roughness;
+                if (ImGui::SliderFloat("Glossiness", &glossiness, 0.0f, 1.0f)) {
+                    material.roughness = 1.0f - glossiness;
+                    changed = true;
+                }
+            } else {
+                changed |= ImGui::ColorEdit4("Base Color", material.baseColor);
+                changed |= ImGui::SliderFloat("Roughness", &material.roughness, 0.0f, 1.0f);
+                changed |= ImGui::SliderFloat("Metallic", &material.metallic, 0.0f, 1.0f);
+            }
             changed |= ImGui::ColorEdit3("Emissive", material.emissive);
-            changed |= ImGui::SliderFloat("Roughness", &material.roughness, 0.0f, 1.0f);
-            changed |= ImGui::SliderFloat("Metallic", &material.metallic, 0.0f, 1.0f);
             changed |= ImGui::SliderFloat("AO Strength", &material.occlusionStrength, 0.0f, 1.0f);
             changed |= ImGui::SliderFloat("Transmission", &material.transmission, 0.0f, 1.0f);
             changed |= ImGui::SliderFloat("IOR", &material.ior, 1.0f, 2.5f);
@@ -105,6 +126,7 @@ namespace SasamiRenderer
         app.SetRenderNodeSequence({
             ApplicationCore::RenderNodeType::Shadow,
             ApplicationCore::RenderNodeType::Opaque,
+            ApplicationCore::RenderNodeType::RuntimeAO,
             ApplicationCore::RenderNodeType::Lighting,
             ApplicationCore::RenderNodeType::Skybox,
             ApplicationCore::RenderNodeType::Transparent,
@@ -281,11 +303,15 @@ namespace SasamiRenderer
 
     void RenderingApp::RegisterUi(ApplicationCore& app)
     {
-        ImGuiCoordinator::Instance().RegisterWindow("Camera", [this, &app]() {
-            if (!m_camera) {
-                ImGui::TextDisabled("Camera object is not available.");
+        ImGuiCoordinator::Instance().RegisterWindow("PBR Controls", [this, &app]() {
+            if (!ImGui::BeginTabBar("PBRControlTabs")) {
                 return;
             }
+
+            if (ImGui::BeginTabItem("Camera")) {
+            if (!m_camera) {
+                ImGui::TextDisabled("Camera object is not available.");
+            } else {
 
             float speed = m_camera->MoveSpeed();
             if (ImGui::SliderFloat("Move Speed", &speed, 0.01f, 20.0f)) {
@@ -312,9 +338,11 @@ namespace SasamiRenderer
                         proxy.cameraPosition[0],
                         proxy.cameraPosition[1],
                         proxy.cameraPosition[2]);
-        });
+            }
+            ImGui::EndTabItem();
+            }
 
-        ImGuiCoordinator::Instance().RegisterWindow("Lighting", [this, &app]() {
+            if (ImGui::BeginTabItem("Lighting")) {
             auto light = app.GetDirectionalLight();
             bool changed = false;
             changed |= ImGui::SliderAngle("Yaw", &light.yaw, -180.0f, 180.0f);
@@ -462,12 +490,6 @@ namespace SasamiRenderer
                                        15.0f)) {
                     app.SetDirectionalLightOnSkyboxAngularRadius(directionalLightOnSkyboxAngularRadius);
                 }
-            }
-
-            if (app.GetDeltaTime() > 0.0f) {
-                ImGui::Text("FPS: %.1f", 1.0f / app.GetDeltaTime());
-            } else {
-                ImGui::Text("FPS: --");
             }
 
             ImGui::Separator();
@@ -690,7 +712,15 @@ namespace SasamiRenderer
             }
             // ── End Point / Spot gizmos ───────────────────────────────────────
 
+            ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem("Rendering")) {
             int renderPathMode = app.GetRenderPathModeIndex();
+            if (renderPathMode == static_cast<int>(RendererEnums::RenderPathMode::SdfFluid)) {
+                renderPathMode = static_cast<int>(RendererEnums::RenderPathMode::Raster);
+                app.SetRenderPathModeIndex(renderPathMode);
+            }
             if (ImGui::Combo("Render Type", &renderPathMode, "Raster\0Hardware RT\0")) {
                 app.SetRenderPathModeIndex(renderPathMode);
             }
@@ -760,7 +790,7 @@ namespace SasamiRenderer
 
                 int debugMode = app.GetGBufferDebugViewIndex();
                 if (ImGui::Combo("GBuffer Debug", &debugMode,
-                                 "Final Lit\0Albedo\0Normal\0Roughness\0Metallic\0Ambient Occlusion\0Shadow\0Emissive\0SSAO Raw\0SSAO Filtered\0Directional Light Dir\0Directional NdotL\0")) {
+                                 "Final Lit\0Albedo\0Normal\0Roughness\0Metallic\0Ambient Occlusion\0Shadow\0Emissive\0Runtime AO Raw\0Runtime AO Filtered\0Directional Light Dir\0Directional NdotL\0")) {
                     app.SetGBufferDebugViewIndex(debugMode);
                 }
                 ImGui::TextDisabled("Shortcut: F2 (cycle)");
@@ -773,33 +803,46 @@ namespace SasamiRenderer
                 if (ImGui::Checkbox("SWRT Reflections", &softwareReflections)) {
                     app.SetRasterSoftwareRayTracedReflectionEnabled(softwareReflections);
                 }
+                bool screenSpaceReflections = app.GetRasterScreenSpaceReflectionEnabled();
+                if (ImGui::Checkbox("Screen Space Reflections", &screenSpaceReflections)) {
+                    app.SetRasterScreenSpaceReflectionEnabled(screenSpaceReflections);
+                }
+                ImGui::SetItemTooltip("Raster reflection: screen-space depth hit uses previous SceneColor; misses fall back to IBL. SWRT reflections take priority when enabled.");
                 int aoMode = app.GetAmbientOcclusionModeIndex();
-                if (ImGui::Combo("AO Mode", &aoMode, "Material Only\0SSAO Only\0SWRT AO Only\0Hybrid (Material * SSAO)\0")) {
+                if (ImGui::Combo("AO Mode", &aoMode, "Material Only\0Runtime AO Only\0RTAO Only\0Hybrid (Material * Runtime AO)\0")) {
                     app.SetAmbientOcclusionModeIndex(aoMode);
                 }
-                const bool aoUsesSsao = (aoMode == 1 || aoMode == 3);
-                const bool aoUsesSwrt = (aoMode == 2);
-                if (aoUsesSsao || aoUsesSwrt) {
-                    float ssaoRadius = app.GetSSAORadius();
-                    if (ImGui::SliderFloat(aoUsesSwrt ? "SWRT AO Radius" : "SSAO Radius",
-                                           &ssaoRadius,
+                const bool aoUsesRuntimeAo = (aoMode != 0);
+                int runtimeAoMethod = app.GetRuntimeAOMethodIndex();
+                const bool forceRtaoOnly = (aoMode == 2);
+                if (aoUsesRuntimeAo && !forceRtaoOnly) {
+                    if (ImGui::Combo("Runtime AO Method", &runtimeAoMethod, "SSAO\0RTAO\0")) {
+                        app.SetRuntimeAOMethodIndex(runtimeAoMethod);
+                    }
+                }
+                const bool aoUsesRtao = aoUsesRuntimeAo && (forceRtaoOnly || runtimeAoMethod == 1);
+                const bool aoUsesSsao = aoUsesRuntimeAo && !aoUsesRtao;
+                if (aoUsesRuntimeAo) {
+                    float runtimeAoRadius = app.GetRuntimeAORadius();
+                    if (ImGui::SliderFloat("Runtime AO Radius",
+                                           &runtimeAoRadius,
                                            0.05f,
                                            3.0f)) {
-                        app.SetSSAORadius(ssaoRadius);
+                        app.SetRuntimeAORadius(runtimeAoRadius);
                     }
-                    float ssaoBias = app.GetSSAOBias();
-                    if (ImGui::SliderFloat(aoUsesSwrt ? "SWRT AO Bias" : "SSAO Bias",
-                                           &ssaoBias,
+                    float runtimeAoBias = app.GetRuntimeAOBias();
+                    if (ImGui::SliderFloat("Runtime AO Bias",
+                                           &runtimeAoBias,
                                            0.001f,
                                            0.1f)) {
-                        app.SetSSAOBias(ssaoBias);
+                        app.SetRuntimeAOBias(runtimeAoBias);
                     }
-                    float ssaoIntensity = app.GetSSAOIntensity();
-                    if (ImGui::SliderFloat(aoUsesSwrt ? "SWRT AO Power" : "SSAO Intensity",
-                                           &ssaoIntensity,
+                    float runtimeAoIntensity = app.GetRuntimeAOIntensity();
+                    if (ImGui::SliderFloat(aoUsesRtao ? "Runtime AO Power" : "Runtime AO Intensity",
+                                           &runtimeAoIntensity,
                                            0.0f,
                                            4.0f)) {
-                        app.SetSSAOIntensity(ssaoIntensity);
+                        app.SetRuntimeAOIntensity(runtimeAoIntensity);
                     }
                     float aoMinOcc = app.GetAoMinOcclusion();
                     if (ImGui::SliderFloat("AO Min Occlusion", &aoMinOcc, 0.0f, 1.0f,
@@ -807,20 +850,20 @@ namespace SasamiRenderer
                         app.SetAoMinOcclusion(aoMinOcc);
                     }
                     ImGui::SetItemTooltip("Minimum brightness in fully-occluded areas (0=full black, UE-style floor).");
-                    float ssaoThickness = app.GetSSAOThickness();
-                    if (ImGui::SliderFloat(aoUsesSwrt ? "SWRT AO Thickness" : "SSAO Thickness",
-                                           &ssaoThickness,
+                    float runtimeAoThickness = app.GetRuntimeAOThickness();
+                    if (ImGui::SliderFloat("Runtime AO Thickness",
+                                           &runtimeAoThickness,
                                            0.01f,
                                            0.75f)) {
-                        app.SetSSAOThickness(ssaoThickness);
+                        app.SetRuntimeAOThickness(runtimeAoThickness);
                     }
                     if (aoUsesSsao) {
-                        int ssaoQuality = app.GetSSAOQualityIndex();
+                        int ssaoQuality = app.GetRuntimeAOQualityIndex();
                         if (ImGui::Combo("SSAO Quality", &ssaoQuality, "Low\0Medium\0High\0")) {
-                            app.SetSSAOQualityIndex(ssaoQuality);
+                            app.SetRuntimeAOQualityIndex(ssaoQuality);
                         }
                     }
-                    if (aoUsesSwrt) {
+                    if (aoUsesRtao) {
                         const int aoSampleOptions[] = { 4, 8, 12, 16, 24, 32 };
                         int aoSampleIndex = 3;
                         int currentAoSamples = app.GetSwrtAoSampleCount();
@@ -830,7 +873,7 @@ namespace SasamiRenderer
                                 break;
                             }
                         }
-                        if (ImGui::Combo("SWRT AO Samples",
+                        if (ImGui::Combo("RTAO Samples",
                                          &aoSampleIndex,
                                          "4\0""8\0""12\0""16\0""24\0""32\0")) {
                             app.SetSwrtAoSampleCount(aoSampleOptions[aoSampleIndex]);
@@ -862,9 +905,17 @@ namespace SasamiRenderer
                         if (ImGui::Combo("SWRT Max Bounces", &bounceIdx, "1 bounce\0""2 bounces\0""3 bounces\0""4 bounces\0""8 bounces\0")) {
                             app.SetSwrtMaxBounces(bounceValues[bounceIdx]);
                         }
+                        bool denoiserEnabled = app.GetSwrtDenoiserEnabled();
+                        if (ImGui::Checkbox("SWRT Denoiser", &denoiserEnabled)) {
+                            app.SetSwrtDenoiserEnabled(denoiserEnabled);
+                        }
+                        int atrousIterations = app.GetSwrtReflectionAtrousIterations();
+                        if (ImGui::SliderInt("SWRT A-Trous Iterations", &atrousIterations, 0, 5)) {
+                            app.SetSwrtReflectionAtrousIterations(atrousIterations);
+                        }
                     }
                 }
-                if (softwareDirectionalShadow || softwareReflections || aoUsesSwrt) {
+                if (softwareDirectionalShadow || softwareReflections || aoUsesRtao) {
                     int rayTracingPreset = app.GetRayTracingPerformancePresetIndex();
                     if (ImGui::Combo("SWRT Partial RT Preset", &rayTracingPreset, "Balanced\0Performance\0Ultra Fast\0")) {
                         app.SetRayTracingPerformancePresetIndex(rayTracingPreset);
@@ -904,41 +955,7 @@ namespace SasamiRenderer
                 }
             }
 
-            // ── Volumetric Cloud ─────────────────────────────────────────────────
             ImGui::Separator();
-            // ── GI Probe Grid debug ──────────────────────────────────────────────
-            ImGui::Separator();
-            bool probeDebug = app.GetDebugProbeGridEnabled();
-            if (ImGui::Checkbox("Show Probe Grid", &probeDebug)) {
-                app.SetDebugProbeGridEnabled(probeDebug);
-            }
-            ImGui::SameLine();
-            ImGui::TextDisabled("(?)");
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Draw irradiance probe spheres at each grid position.\nSphere color shows the SH-encoded irradiance for that direction.");
-            }
-            if (probeDebug) {
-                int probeGridPreset = m_probeGridPreset;
-                if (ImGui::Combo("Probe Grid Preset", &probeGridPreset,
-                                 "Interior\0Wide\0Very Wide\0")) {
-                    m_probeGridPreset = probeGridPreset;
-                    ApplyProbeGridPreset(app, m_probeGridPreset);
-                }
-                float probeRadius = app.GetDebugProbeRadius();
-                if (ImGui::SliderFloat("Probe Radius", &probeRadius, 0.05f, 2.0f)) {
-                    app.SetDebugProbeRadius(probeRadius);
-                }
-                const auto& grid = app.GetRenderer().GetProbeGrid();
-                ImGui::TextDisabled("Grid: %ux%ux%u  Total: %u probes",
-                                    grid.GetCountX(), grid.GetCountY(), grid.GetCountZ(),
-                                    grid.GetTotalProbeCount());
-                ImGui::TextDisabled("Origin: (%.1f, %.1f, %.1f)  Spacing: %.1fm",
-                                    grid.GetOriginX(), grid.GetOriginY(), grid.GetOriginZ(),
-                                    grid.GetSpacingX());
-                ImGui::TextDisabled("Color: SH irradiance  (XYZ pos when SH=0)");
-                ImGui::TextDisabled("Note: SH baked only in SWRT mode.");
-            }
-
             if (isRayTracingRenderType) {
                 int rayTracingPreset = app.GetRayTracingPerformancePresetIndex();
                 if (ImGui::Combo("RT Preset", &rayTracingPreset, "Balanced\0Performance\0Ultra Fast\0")) {
@@ -983,10 +1000,52 @@ namespace SasamiRenderer
                                     rayTracingStats.resolveMs);
             }
 
-            ImGui::TextDisabled("Mesh Shader Path: TODO (planned comparison target)");
-        });
+            ImGui::TextDisabled("Mesh Shader Path: optional DX12 Ultimate path");
+            ImGui::EndTabItem();
+            }
 
-        ImGuiCoordinator::Instance().RegisterWindow("Primitives", [this, &app]() {
+            if (ImGui::BeginTabItem("Common")) {
+            if (app.GetDeltaTime() > 0.0f) {
+                ImGui::Text("FPS: %.1f", 1.0f / app.GetDeltaTime());
+            } else {
+                ImGui::Text("FPS: --");
+            }
+
+            ImGui::Separator();
+            bool probeDebug = app.GetDebugProbeGridEnabled();
+            if (ImGui::Checkbox("Show Probe Grid", &probeDebug)) {
+                app.SetDebugProbeGridEnabled(probeDebug);
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("(?)");
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Draw irradiance probe spheres at each grid position.\nSphere color shows the SH-encoded irradiance for that direction.");
+            }
+            if (probeDebug) {
+                int probeGridPreset = m_probeGridPreset;
+                if (ImGui::Combo("Probe Grid Preset", &probeGridPreset,
+                                 "Interior\0Wide\0Very Wide\0")) {
+                    m_probeGridPreset = probeGridPreset;
+                    ApplyProbeGridPreset(app, m_probeGridPreset);
+                }
+                float probeRadius = app.GetDebugProbeRadius();
+                if (ImGui::SliderFloat("Probe Radius", &probeRadius, 0.05f, 2.0f)) {
+                    app.SetDebugProbeRadius(probeRadius);
+                }
+                const auto& grid = app.GetRenderer().GetProbeGrid();
+                ImGui::TextDisabled("Grid: %ux%ux%u  Total: %u probes",
+                                    grid.GetCountX(), grid.GetCountY(), grid.GetCountZ(),
+                                    grid.GetTotalProbeCount());
+                ImGui::TextDisabled("Origin: (%.1f, %.1f, %.1f)  Spacing: %.1fm",
+                                    grid.GetOriginX(), grid.GetOriginY(), grid.GetOriginZ(),
+                                    grid.GetSpacingX());
+                ImGui::TextDisabled("Color: SH irradiance  (XYZ pos when SH=0)");
+                ImGui::TextDisabled("Note: SH baked only in SWRT mode.");
+            }
+            ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem("Primitives")) {
             ImGui::TextDisabled("External model assets are not required for this scene.");
 
             bool changed = false;
@@ -1018,6 +1077,10 @@ namespace SasamiRenderer
                 }
                 app.InvalidateRenderObjects();
             }
+            ImGui::EndTabItem();
+            }
+
+            ImGui::EndTabBar();
         });
     }
 }

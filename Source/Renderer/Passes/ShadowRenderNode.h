@@ -33,6 +33,7 @@ namespace SasamiRenderer
                      const float cameraPV[16],
                      bool useSoftwareRayTracedDirectionalShadow,
                      bool useSoftwareRayTracedReflections,
+                     float reflectionMode,
                      bool useTessellationPath,
                      bool iblEnabled,
                      float iblIntensity,

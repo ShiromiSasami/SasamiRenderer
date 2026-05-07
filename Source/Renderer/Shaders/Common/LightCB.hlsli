@@ -72,7 +72,7 @@ cbuffer LightCB : register(b1)
     // y: 反射強度スカラー
     // z: 描画幅（スクリーン座標 → UV 変換用）
     // w: 描画高さ
-    float4 u_reflectionParams; // x: reflection enable, y: strength, z: screen width, w: screen height
+    float4 u_reflectionParams; // x: reflection mode (0 off, 1 SWRT, 2 SSR), y: strength, z/w: screen size
 
     // 拡散照明用の球面調和係数（9 本）。
     // xyz に係数値を格納（w は未使用）。

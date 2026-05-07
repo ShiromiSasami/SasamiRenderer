@@ -576,6 +576,10 @@ namespace SasamiRenderer
         reflectionDesc.maxBounces                 = settings.swrtMaxBounces;
         reflectionDesc.cameraChanged              = cameraChanged;
         reflectionDesc.preserveExistingPixels     = !forceFullRefresh;
+        reflectionDesc.denoiserEnabled            = settings.swrtDenoiserEnabled;
+        reflectionDesc.temporalAlpha              = settings.swrtReflectionTemporalAlpha;
+        reflectionDesc.atrousIterations           = settings.swrtReflectionAtrousIterations;
+        reflectionDesc.atrousPhiDepth             = settings.swrtReflectionAtrousPhiDepth;
         reflectionDesc.iblEnabled                 = m_skybox && m_skybox->IsIblEnabled();
         reflectionDesc.iblIntensity               = settings.iblIntensity;
         reflectionDesc.iblPrefilterMaxMip         = m_skybox ? m_skybox->GetIblPrefilterMaxMip() : 0.0f;
@@ -773,9 +777,9 @@ namespace SasamiRenderer
         aoDesc.gbufferAlbedoTex   = m_renderTargetPool->GetGBufferAlbedo().IsValid()   ? m_renderTargetPool->GetGBufferAlbedo().Get()   : nullptr;
         aoDesc.gbufferWidth  = width;
         aoDesc.gbufferHeight = height;
-        aoDesc.tMin = std::max(1e-4f, settings.ssaoBias);
-        aoDesc.radius = std::max(0.05f, settings.ssaoRadius);
-        aoDesc.power = std::max(0.25f, settings.ssaoIntensity);
+        aoDesc.tMin = std::max(1e-4f, settings.runtimeAoBias);
+        aoDesc.radius = std::max(0.05f, settings.runtimeAoRadius);
+        aoDesc.power = std::max(0.25f, settings.runtimeAoIntensity);
         uint32_t swrtAoSampleCount = settings.swrtAoSampleCount;
         switch (settings.rayTracingPerformancePreset) {
         case RayTracingPerformancePreset::UltraFast:

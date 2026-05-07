@@ -726,7 +726,7 @@ namespace SasamiRenderer
                                           RendererEnums::GBufferDebugView debugView,
                                           uint32_t shadowMapWidth,
                                           uint32_t shadowMapHeight,
-                                          bool reflectionEnabled,
+                                          float reflectionMode,
                                           float reflectionStrength,
                                           uint32_t renderWidth,
                                           uint32_t renderHeight)
@@ -867,7 +867,7 @@ namespace SasamiRenderer
         cb.contactShadowParams[2] = 0.0025f;
         cb.contactShadowParams[3] = 12.0f;
 
-        cb.reflectionParams[0] = reflectionEnabled ? 1.0f : 0.0f;
+        cb.reflectionParams[0] = reflectionMode;
         cb.reflectionParams[1] = reflectionStrength;
         cb.reflectionParams[2] = static_cast<float>(renderWidth);
         cb.reflectionParams[3] = static_cast<float>(renderHeight);
@@ -930,7 +930,7 @@ namespace SasamiRenderer
                                         RendererEnums::GBufferDebugView debugView,
                                         uint32_t shadowMapWidth,
                                         uint32_t shadowMapHeight,
-                                        bool reflectionEnabled,
+                                        float reflectionMode,
                                         float reflectionStrength,
                                         uint32_t renderWidth,
                                         uint32_t renderHeight,
@@ -952,7 +952,7 @@ namespace SasamiRenderer
                             debugView,
                             shadowMapWidth,
                             shadowMapHeight,
-                            reflectionEnabled,
+                            reflectionMode,
                             reflectionStrength,
                             renderWidth,
                             renderHeight);

@@ -1,10 +1,20 @@
 #pragma once
 
+#include <cstdint>
+
 namespace SasamiRenderer
 {
+    enum class MaterialWorkflow : uint32_t
+    {
+        MetallicRoughness = 0,
+        SpecularGlossiness = 1,
+    };
+
     struct SurfaceMaterial
     {
+        MaterialWorkflow workflow = MaterialWorkflow::MetallicRoughness;
         float baseColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        float specularColor[3] = { 0.04f, 0.04f, 0.04f };
         float emissive[3] = { 0.0f, 0.0f, 0.0f };
         float roughness = 0.5f;
         float metallic = 0.0f;

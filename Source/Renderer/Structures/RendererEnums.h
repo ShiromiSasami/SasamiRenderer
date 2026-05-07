@@ -25,11 +25,15 @@ namespace SasamiRenderer
             AmbientOcclusion = 5,
             Shadow = 6,
             Emissive = 7,
-            ScreenSpaceAmbientOcclusionRaw = 8,
-            ScreenSpaceAmbientOcclusionFiltered = 9,
+            RuntimeAmbientOcclusionRaw = 8,
+            RuntimeAmbientOcclusionFiltered = 9,
             DirectionalLightDirection = 10,
             DirectionalLightNdotL = 11,
-            Count
+            Count,
+
+            // Backward compatibility aliases.
+            ScreenSpaceAmbientOcclusionRaw = RuntimeAmbientOcclusionRaw,
+            ScreenSpaceAmbientOcclusionFiltered = RuntimeAmbientOcclusionFiltered,
         };
 
         enum class RenderPathMode
@@ -49,9 +53,19 @@ namespace SasamiRenderer
         enum class AmbientOcclusionMode
         {
             MaterialOnly = 0,
-            SSAOOnly = 1,
-            SWRTAOOnly = 2,
+            RuntimeAOOnly = 1,
+            RayTracedAOOnly = 2,
             Hybrid = 3,
+
+            // Backward compatibility aliases.
+            SSAOOnly = RuntimeAOOnly,
+            SWRTAOOnly = RayTracedAOOnly,
+        };
+
+        enum class RuntimeAmbientOcclusionMethod
+        {
+            SSAO = 0,
+            RayTraced = 1,
         };
 
         enum class RayTracingQualityTier
@@ -78,7 +92,8 @@ namespace SasamiRenderer
             TransparentLighting = 4,
             Skybox = 5,
             PostProcess = 6,
-            SSAO = 7,
+            RuntimeAO = 7,
+            SSAO = RuntimeAO, // backward compatibility alias
             ProceduralSky = 8,
             SdfFluid = 9,
         };

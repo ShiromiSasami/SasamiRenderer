@@ -23,7 +23,7 @@
 //  t1: ShadowMap SRV
 //  t4: Point/SpotLight StructuredBuffer（ライトテーブル）
 //  t5: IBL キューブマップ SRV テーブル
-//  t6: SSAO テクスチャ SRV
+//  t6: Runtime AO テクスチャ SRV（SSAO/RTAO など）
 //  t7: Reflection テクスチャ SRV
 // =============================================================================
 
@@ -72,7 +72,7 @@ namespace SasamiRenderer
         // @param shadowSrv                シャドウマップ SRV GPU ハンドル（t1）
         // @param lightSrvTable    ポイント/スポットライト SRV テーブル先頭（t4）
         // @param iblSrvTable      IBL SRV テーブル先頭（t5）
-        // @param aoSrv            SSAO テクスチャ SRV（t6）
+        // @param aoSrv            Runtime AO テクスチャ SRV（t6）
         // @param reflectionSrv    リフレクションテクスチャ SRV（t7）
         // @param lightCbGpu       LightCB の GPU 仮想アドレス（b3）
         // @param drawCallback     メッシュドローコールを発行するコールバック

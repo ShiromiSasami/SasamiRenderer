@@ -2,7 +2,6 @@
 #include "Renderer/Scene/SceneSubmitter.h"
 
 #include <algorithm>
-#include <cstdio>
 #include <cstring>
 #include <limits>
 
@@ -114,46 +113,6 @@ namespace SasamiRenderer
             }
             std::memcpy(outMin, worldMin, sizeof(worldMin));
             std::memcpy(outMax, worldMax, sizeof(worldMax));
-        }
-
-        static bool IsTrackedDebugModelLabel(const std::string& debugLabel)
-        {
-            return debugLabel.find("stanford_bunny") != std::string::npos ||
-                   debugLabel.find("Sponza") != std::string::npos;
-        }
-
-        static const char* GetTrackedDebugModelShortLabel(const std::string& debugLabel)
-        {
-            if (debugLabel.find("stanford_bunny") != std::string::npos) {
-                return "Bunny";
-            }
-            if (debugLabel.find("Sponza") != std::string::npos) {
-                return "Sponza";
-            }
-            return "Unknown";
-        }
-
-        static void LogTrackedDrawItemMatrix(const char* stage,
-                                             const std::string& debugLabel,
-                                             const float matrix[16])
-        {
-            if (!IsTrackedDebugModelLabel(debugLabel) || !matrix) {
-                return;
-            }
-
-            char buffer[512] = {};
-            std::snprintf(buffer,
-                          sizeof(buffer),
-                          "[ModelScaleProbe] stage=%s model=%s diag=(%.8f, %.8f, %.8f) translation=(%.8f, %.8f, %.8f)\n",
-                          stage,
-                          GetTrackedDebugModelShortLabel(debugLabel),
-                          matrix[0],
-                          matrix[5],
-                          matrix[10],
-                          matrix[12],
-                          matrix[13],
-                          matrix[14]);
-            DebugLog(buffer);
         }
 
     }
@@ -290,7 +249,6 @@ namespace SasamiRenderer
                 DebugLog("SceneSubmitter::SubmitRenderProxies: failed to resolve occlusion texture. AO fallback is bound.\n");
             }
             std::memcpy(item.model, proxy.model, sizeof(item.model));
-            LogTrackedDrawItemMatrix("SceneSubmitter.drawItemModel", item.debugLabel, item.model);
             m_drawItems.push_back(item);
 
             const uint64_t meshHash = ComputeMeshGeometryHash(m_meshes.back());
