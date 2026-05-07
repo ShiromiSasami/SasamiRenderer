@@ -149,9 +149,12 @@ float SampleShadowCascade(float3 worldPos, float3 normal, float3 lightDir, int c
     float2 texel  = max(u_shadowParams.xy, float2(1e-5, 1e-5));
     float  radius = max(u_shadowParams.z,  0.5);  // PCF disk radius in texels (default 2.0)
 
-    // Per-pixel rotation of the disk: breaks the repeating ring pattern that
-    // a fixed Poisson disk produces, giving noise that is easier to filter.
-    float  angle = frac(sin(dot(suv, float2(12.9898f, 78.233f))) * 43758.5453f) * 6.28318f;
+    // Anchor the PCF rotation to the shadow-map texel instead of continuous UV.
+    // Continuous-UV hashing changes whenever the camera-fitted light projection
+    // moves, causing visible shadow shimmer during camera movement.
+    float2 shadowTexel = floor(suv / texel + 0.5f);
+    float2 cascadeSalt = float2(37.0f, 17.0f) * float(cascadeIndex + 1);
+    float  angle = frac(sin(dot(shadowTexel + cascadeSalt, float2(12.9898f, 78.233f))) * 43758.5453f) * 6.28318f;
     float  sa = sin(angle), ca = cos(angle);
 
     float acc = 0.0;
@@ -317,7 +320,7 @@ struct PSOutput
 {
     float4 color    : SV_TARGET0; // SceneColor    — final lit output
     float4 albedo   : SV_TARGET1; // GBufferAlbedo — base color RGB + alpha
-    float4 normal   : SV_TARGET2; // GBufferNormal — world-space normal XYZ (encoded 0-1) + 0
+    float4 normal   : SV_TARGET2; // GBufferNormal — world-space normal XYZ (encoded 0-1) + camera distance
     float4 material : SV_TARGET3; // GBufferMaterial — roughness(R) metallic(G) AO(B) 0(A)
     float4 emissive : SV_TARGET4; // GBufferEmissive — emissive color RGB + 0
 };

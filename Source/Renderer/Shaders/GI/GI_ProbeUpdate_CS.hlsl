@@ -121,11 +121,12 @@ float GGX_V_GI(float NdotL, float NdotV, float roughness)
     return gL * gV;
 }
 
-float3 ShadePBRAtHit(float3 pos, float3 N, float3 V,
-                     float3 albedo, float roughness, float metallic)
+float3 ShadePBRAtHit(float3 pos, float3 N, float3 V, GpuMaterial mat)
 {
-    float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
-    float3 outColor = (float3)0;
+    float roughness = saturate(mat.roughness);
+    float3 F0 = SWRT_MaterialF0(mat);
+    float3 diffuseReflectance = SWRT_MaterialDiffuseReflectance(mat);
+    float3 outColor = max(mat.emissive, 0.0f);
 
     // Directional light NEE
     float3 L = normalize(g_dirLightDir);
@@ -143,14 +144,14 @@ float3 ShadePBRAtHit(float3 pos, float3 N, float3 V,
             float  D     = GGX_D_GI(NdotH, max(roughness, 0.05f));
             float  Vis   = GGX_V_GI(NdotL, NdotV, max(roughness, 0.05f));
             float3 spec  = (F * D * Vis) / max(4.0f * NdotL * NdotV, 0.001f);
-            float3 kd    = (1.0f - F) * (1.0f - metallic);
-            float3 diff  = kd * albedo / 3.14159265f;
+            float3 kd    = (1.0f - F);
+            float3 diff  = kd * diffuseReflectance / 3.14159265f;
             outColor    += (diff + spec) * NdotL * g_dirLightColor * g_dirLightIntensity;
         }
     }
 
     // Sky ambient
-    outColor += albedo * g_ambientColor * g_ambientIntensity;
+    outColor += diffuseReflectance * g_ambientColor * g_ambientIntensity;
     return outColor;
 }
 
@@ -210,8 +211,7 @@ void CS_ProbeUpdate(
         float3 hitPos   = probePos + dir * hit.t;
         float3 hitNorm  = GetWorldNormal(hit);
         if (dot(hitNorm, -dir) < 0.0f) hitNorm = -hitNorm;
-        radiance = ShadePBRAtHit(hitPos, hitNorm, -dir,
-                                  mat.baseColor.rgb, mat.roughness, mat.metallic);
+        radiance = ShadePBRAtHit(hitPos, hitNorm, -dir, mat);
     }
 
     // Project onto SH  (weight = 4π / N for uniform sphere sampling)

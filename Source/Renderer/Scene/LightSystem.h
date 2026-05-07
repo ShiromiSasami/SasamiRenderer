@@ -69,13 +69,18 @@ namespace SasamiRenderer
                                  float reflectionMode,
                                  float reflectionStrength,
                                  uint32_t renderWidth,
-                                 uint32_t renderHeight);
+                                 uint32_t renderHeight,
+                                 bool useStableDirectionalShadowProjection = false);
 
         void BuildShadowPassContext(ShadowPassContext& outContext,
                                     const float cameraPos[3],
                                     const float cameraPV[16],
                                     uint32_t shadowMapWidth,
                                     uint32_t shadowMapHeight) const;
+
+        void BuildStableDirectionalShadowPassContext(ShadowPassContext& outContext,
+                                                     uint32_t shadowMapWidth,
+                                                     uint32_t shadowMapHeight) const;
 
         void ExecuteShadowPass(CommandList* cmdList,
                                FrameResources& frame,

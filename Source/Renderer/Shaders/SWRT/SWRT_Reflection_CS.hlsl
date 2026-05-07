@@ -69,7 +69,7 @@ cbuffer ReflectionFrameConstants : register(b0)
 #define SWRT_SAMPLE_MIS 2u
 
 // ---------- G-Buffer inputs ----------
-// GBufferNormal  (R16G16B16A16_FLOAT): xyz = N*0.5+0.5 (encoded normal), w = NDC depth
+// GBufferNormal  (R16G16B16A16_FLOAT): xyz = N*0.5+0.5 (encoded normal), w = camera distance
 // GBufferMaterial(R8G8B8A8_UNORM):     r = roughness, g = metallic
 // GBufferAlbedo  (R8G8B8A8_UNORM):     rgb = base color
 Texture2D<float4> g_gbufferNormal   : register(t6);
@@ -153,13 +153,13 @@ float GGX_V(float NdotL, float NdotV, float roughness)
 }
 
 // Evaluate PBR (directional light only for reflection shading)
-float3 ShadeDirectPBR(float3 pos, float3 N, float3 V,
-                      float3 albedo, float roughness, float metallic)
+float3 ShadeDirectPBR(float3 pos, float3 N, float3 V, GpuMaterial mat)
 {
-    float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
-    float3 diffColor = albedo * (1.0f - metallic);
+    float roughness = saturate(mat.roughness);
+    float3 F0 = SWRT_MaterialF0(mat);
+    float3 diffuseReflectance = SWRT_MaterialDiffuseReflectance(mat);
 
-    float3 outColor = (float3)0;
+    float3 outColor = max(mat.emissive, 0.0f);
 
     // ---- 直接光 (NEE / MIS) ----------------------------------------
     // IS Only モードのときはスキップ。NEE Only / MIS では全ライトへ shadow ray。
@@ -185,8 +185,8 @@ float3 ShadeDirectPBR(float3 pos, float3 N, float3 V,
                     float  Vis = GGX_V(NdotL, NdotV, max(roughness, 0.05f));
 
                     float3 specular = (F * D * Vis) / max(4.0f * NdotL * NdotV, 0.001f);
-                    float3 diffuse  = diffColor / 3.14159265f;
-                    float3 kd = (1.0f - F) * (1.0f - metallic);
+                    float3 diffuse  = diffuseReflectance / 3.14159265f;
+                    float3 kd = (1.0f - F);
 
                     outColor += (kd * diffuse + specular) * NdotL * g_dirLightColor * g_dirLightIntensity;
                 }
@@ -205,12 +205,12 @@ float3 ShadeDirectPBR(float3 pos, float3 N, float3 V,
     return outColor;
 }
 
-float3 EvaluateReflectionHitAmbientFloor(float3 albedo)
+float3 EvaluateReflectionHitAmbientFloor(GpuMaterial mat)
 {
     // Small floor to avoid fully black traced hits indoors without injecting
     // sky / IBL color before the main PBR pass composites environment lighting.
     static const float kHitAmbientFloor = 0.02f;
-    return albedo * kHitAmbientFloor;
+    return SWRT_MaterialDiffuseReflectance(mat) * kHitAmbientFloor;
 }
 
 float3 SampleReflectionEnvironment(float3 dir, float roughness)
@@ -242,7 +242,7 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
     }
 
     // ---- Read primary surface from G-Buffer (no primary ray needed) ----
-    // GBufferNormal.w stores NDC depth written by PBR_PS.hlsl.
+    // GBufferNormal.w stores camera distance written by CookTorranceGGX_PS.hlsl.
     // depth == 0 means sky / no geometry was rasterised for this pixel.
     //
     // The G-Buffer is at native render resolution (g_gbufferWidth × g_gbufferHeight),
@@ -397,9 +397,8 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
                 hitNorm_b = -hitNorm_b;
 
             float3 V_b = normalize(-reflDir);
-            float3 hitDirect = ShadeDirectPBR(hitPos_b, hitNorm_b, V_b,
-                                              mat.baseColor.rgb, mat.roughness, mat.metallic);
-            float3 hitFloor  = EvaluateReflectionHitAmbientFloor(mat.baseColor.rgb);
+            float3 hitDirect = ShadeDirectPBR(hitPos_b, hitNorm_b, V_b, mat);
+            float3 hitFloor  = EvaluateReflectionHitAmbientFloor(mat);
             sampleColor += throughput * (hitDirect + hitFloor);
 
             // ---- Check whether to continue bouncing ----
@@ -414,7 +413,7 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
                 break;
 
             // Fresnel attenuation for this bounce
-            float3 F0_b  = lerp(float3(0.04f, 0.04f, 0.04f), mat.baseColor.rgb, mat.metallic);
+            float3 F0_b  = SWRT_MaterialF0(mat);
             float3 F_b   = FresnelSchlick(max(dot(hitNorm_b, V_b), 0.0f), F0_b);
             throughput  *= F_b * hitRoughFade;
 

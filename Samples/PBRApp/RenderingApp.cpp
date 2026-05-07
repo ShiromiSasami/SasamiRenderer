@@ -338,6 +338,24 @@ namespace SasamiRenderer
                         proxy.cameraPosition[0],
                         proxy.cameraPosition[1],
                         proxy.cameraPosition[2]);
+
+            ImGui::Separator();
+            const float yawDeg   = m_camera->Yaw()   * (180.0f / 3.14159265f);
+            const float pitchDeg = m_camera->Pitch() * (180.0f / 3.14159265f);
+            ImGui::Text("Yaw:   %.2f deg  (%.4f rad)", yawDeg,   m_camera->Yaw());
+            ImGui::Text("Pitch: %.2f deg  (%.4f rad)", pitchDeg, m_camera->Pitch());
+            ImGui::Text("Forward: (%.3f, %.3f, %.3f)",
+                        proxy.rayMarchCameraForward[0],
+                        proxy.rayMarchCameraForward[1],
+                        proxy.rayMarchCameraForward[2]);
+            ImGui::Text("Right:   (%.3f, %.3f, %.3f)",
+                        proxy.rayMarchCameraRight[0],
+                        proxy.rayMarchCameraRight[1],
+                        proxy.rayMarchCameraRight[2]);
+            ImGui::Text("Up:      (%.3f, %.3f, %.3f)",
+                        proxy.rayMarchCameraUp[0],
+                        proxy.rayMarchCameraUp[1],
+                        proxy.rayMarchCameraUp[2]);
             }
             ImGui::EndTabItem();
             }

@@ -1,4 +1,5 @@
 #include "Renderer/Core/RenderTargetPool.h"
+#include "Renderer/Scene/LightSystem.h"
 #include "d3dx12.h"
 
 namespace SasamiRenderer
@@ -19,8 +20,9 @@ namespace SasamiRenderer
             D3D12_SHADER_RESOURCE_VIEW_DESC nullSrvDesc = {};
             nullSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
             nullSrvDesc.Format = DXGI_FORMAT_R32_FLOAT;
-            nullSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-            nullSrvDesc.Texture2D.MipLevels = 1;
+            nullSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+            nullSrvDesc.Texture2DArray.MipLevels = 1;
+            nullSrvDesc.Texture2DArray.ArraySize = LightSystem::kDirectionalCascadeCount;
             device.CreateShaderResourceView(nullResource, &nullSrvDesc, m_softwareDirectionalShadowSrvCpu);
         }
 
@@ -625,7 +627,7 @@ namespace SasamiRenderer
         shadowDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
         shadowDesc.Width = size;
         shadowDesc.Height = size;
-        shadowDesc.DepthOrArraySize = 1;
+        shadowDesc.DepthOrArraySize = LightSystem::kDirectionalCascadeCount;
         shadowDesc.MipLevels = 1;
         shadowDesc.Format = DXGI_FORMAT_R32_FLOAT;
         shadowDesc.SampleDesc.Count = 1;
@@ -645,8 +647,9 @@ namespace SasamiRenderer
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
-        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-        srvDesc.Texture2D.MipLevels = 1;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+        srvDesc.Texture2DArray.MipLevels = 1;
+        srvDesc.Texture2DArray.ArraySize = LightSystem::kDirectionalCascadeCount;
         device.CreateShaderResourceView(m_softwareDirectionalShadowTexture, &srvDesc, m_softwareDirectionalShadowSrvCpu);
 
         m_softwareDirectionalShadowMapSize = size;

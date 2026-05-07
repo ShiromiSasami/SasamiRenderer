@@ -27,6 +27,8 @@ namespace SasamiRenderer
         {
             uint32_t width  = 0;
             uint32_t height = 0;
+            uint32_t arraySlice = 0;
+            uint32_t constantBufferSlot = 0;
             float depthBias = 0.0035f;
             float lightViewProjection[16] = {
                 1,0,0,0,
@@ -62,7 +64,7 @@ namespace SasamiRenderer
 
             // G-Buffer inputs (t6-t8 in the reflection CS).
             // If null, null SRVs are bound and the shader outputs black for all pixels.
-            ID3D12Resource* gbufferNormalTex   = nullptr; // R16G16B16A16_FLOAT: N*0.5+0.5 + NDC depth in W
+            ID3D12Resource* gbufferNormalTex   = nullptr; // R16G16B16A16_FLOAT: N*0.5+0.5 + camera distance in W
             ID3D12Resource* gbufferMaterialTex = nullptr; // R8G8B8A8_UNORM:    roughness.r, metallic.g
             ID3D12Resource* gbufferAlbedoTex   = nullptr; // R8G8B8A8_UNORM:    base color
             ID3D12Resource* iblPrefilterTex    = nullptr; // TextureCube used for reflection-ray misses
@@ -259,16 +261,20 @@ namespace SasamiRenderer
         };
         static_assert(sizeof(GpuInstanceInfo) == 176u, "GpuInstanceInfo must be 176 bytes to match HLSL");
 
-        // ---- Material (matches HLSL GpuMaterial, 32 bytes) ----
+        // ---- Material (matches HLSL GpuMaterial, 64 bytes) ----
         struct GpuMaterial
         {
             float    baseColor[4];
             float    roughness;
             float    metallic;
-            float    pad0;
-            float    pad1;
+            float    transmission;
+            float    ior;
+            float    specularColor[3];
+            float    workflow;
+            float    emissive[3];
+            float    occlusionStrength;
         };
-        static_assert(sizeof(GpuMaterial) == 32u, "GpuMaterial must be 32 bytes to match HLSL");
+        static_assert(sizeof(GpuMaterial) == 64u, "GpuMaterial must be 64 bytes to match HLSL");
 
         // ---- Per-mesh CPU acceleration structure ----
         struct MeshAcceleration
@@ -279,7 +285,7 @@ namespace SasamiRenderer
             uint32_t triOffset  = 0;
         };
 
-        // ---- Shadow cbuffer (matches HLSL ShadowFrameConstants, 144 bytes) ----
+        // ---- Shadow cbuffer (matches HLSL ShadowFrameConstants, 148 bytes) ----
         struct alignas(256) ShadowFrameConstants
         {
             float    invLightVP[16];
@@ -288,8 +294,9 @@ namespace SasamiRenderer
             uint32_t height;
             float    tMin;
             float    depthBias;
+            uint32_t arraySlice;
         };
-        static_assert(sizeof(ShadowFrameConstants) >= 144u);
+        static_assert(sizeof(ShadowFrameConstants) >= 148u);
 
         // ---- Reflection cbuffer (matches HLSL ReflectionFrameConstants) ----
         struct alignas(256) ReflectionFrameConstants
@@ -325,6 +332,17 @@ namespace SasamiRenderer
             uint32_t maxBounces;     // max reflection bounces per sample (1 = single-bounce)
         };
         static_assert(sizeof(ReflectionFrameConstants) >= 208u);
+
+        struct alignas(256) ReflectionTemporalReprojectionConstants
+        {
+            float invVP[16];
+            float prevVP[16];
+            float cameraPos[3];
+            float pad0;
+            float prevCameraPos[3];
+            float pad1;
+        };
+        static_assert(sizeof(ReflectionTemporalReprojectionConstants) == 256u);
 
         struct alignas(256) AmbientOcclusionFrameConstants
         {
@@ -453,16 +471,26 @@ namespace SasamiRenderer
         ComPtr<ID3D12PipelineState> m_reflAtrousPso;
         Resource m_reflHistoryA;     // R16G16B16A16_FLOAT, ping-pong A
         Resource m_reflHistoryB;     // R16G16B16A16_FLOAT, ping-pong B
+        Resource m_reflHistoryMetaA; // R16G16B16A16_FLOAT, encoded normal + camera distance
+        Resource m_reflHistoryMetaB; // R16G16B16A16_FLOAT, encoded normal + camera distance
+        Resource m_reflHistoryMaterialA; // R16G16B16A16_FLOAT, roughness + metallic + AO
+        Resource m_reflHistoryMaterialB; // R16G16B16A16_FLOAT, roughness + metallic + AO
         Resource m_reflAtrousScratch; // R16G16B16A16_FLOAT, spatial filter scratch
         uint32_t m_reflHistoryWidth  = 0;
         uint32_t m_reflHistoryHeight = 0;
         bool     m_reflHistoryPingA  = true;   // true = A is write side this frame
-        // Descriptor slots 14-16 (first 3 of the ReSTIR range, unused in Legacy mode):
+        // Descriptor slots 14-22 (ReSTIR range is unused in Legacy mode):
         //   14 = SRV current-frame reflection (t0)
         //   15 = SRV history read side        (t1)
-        //   16 = UAV history write side       (u0)
-        static constexpr UINT kTemporalSrvBase = 14u;  // t0, t1
-        static constexpr UINT kTemporalUavBase = 16u;  // u0
+        //   16 = SRV current surface metadata (t2)
+        //   17 = SRV history surface metadata (t3)
+        //   18 = SRV current material metadata (t4)
+        //   19 = SRV history material metadata (t5)
+        //   20 = UAV history write side       (u0)
+        //   21 = UAV surface metadata write   (u1)
+        //   22 = UAV material metadata write  (u2)
+        static constexpr UINT kTemporalSrvBase = 14u;  // t0-t5
+        static constexpr UINT kTemporalUavBase = 20u;  // u0-u2
 
         // ---- ReSTIR root signature + PSOs ----
         ComPtr<ID3D12RootSignature> m_restirRootSignature;
@@ -512,6 +540,7 @@ namespace SasamiRenderer
         bool     m_restirPipelineReady = false;
         bool     m_nrdReady            = false;
         float    m_prevVP[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
+        float    m_prevReflectionCameraPos[3] = {};
 
         // ---- NRD integration ----
         std::unique_ptr<nrd::Integration> m_nrdIntegration;
@@ -530,7 +559,7 @@ namespace SasamiRenderer
                                   const void* data, UINT64 byteSize,
                                   Resource& outBuffer);
         void UpdateTextureUav(ID3D12Device* dev, Resource& texture,
-                              DXGI_FORMAT format, UINT slotIndex);
+                              DXGI_FORMAT format, UINT slotIndex, UINT arraySize = 1u);
         void FillShadowConstants(const DirectionalShadowMapDesc& desc,
                                  ShadowFrameConstants& out) const;
         void FillReflectionConstants(const ReflectionTextureDesc& desc,

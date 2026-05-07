@@ -420,8 +420,7 @@ namespace SasamiRenderer
         const bool resourceChanged   = !m_cache.shadowValid || m_cache.shadowMapSize != shadowMapSize;
         const bool sceneChanged      = (m_cache.shadowSceneVersion != sceneVersion);
         const bool lightChanged      = (m_cache.shadowLightHash != lightHash);
-        const bool viewChanged       = projectionChanged;
-        const bool shouldUpdate      = resourceChanged || sceneChanged || lightChanged || viewChanged;
+        const bool shouldUpdate      = resourceChanged || sceneChanged || lightChanged || projectionChanged;
 
         outStats.shadowMapSize          = shadowMapSize;
         outStats.shadowUpdateInterval   = behavior.shadowUpdateInterval;
@@ -437,16 +436,6 @@ namespace SasamiRenderer
             return true;
         }
 
-        GpuSoftwareRayTracer::DirectionalShadowMapDesc shadowDesc{};
-        shadowDesc.width  = shadowMapSize;
-        shadowDesc.height = shadowMapSize;
-        shadowDesc.depthBias = 0.0f;
-        std::memcpy(shadowDesc.lightViewProjection, shadowContext.lightViewProjection,
-                    sizeof(shadowDesc.lightViewProjection));
-        if (!Math::Invert4x4(shadowContext.lightViewProjection, shadowDesc.inverseLightViewProjection)) {
-            return false;
-        }
-
         m_gpuSoftwareRayTracer->UpdateScene(*m_rayTracingScene, *m_device, *cmdList);
 
         const auto shadowToUav = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -456,11 +445,42 @@ namespace SasamiRenderer
         cmdList->ResourceBarrier(1u, &shadowToUav);
 
         RayTracingRuntimeStats runtimeStats{};
-        const bool shadowOk = m_gpuSoftwareRayTracer->RenderDirectionalShadowMap(shadowDesc,
-                                                                                  *m_device,
-                                                                                  *cmdList,
-                                                                                  m_renderTargetPool->GetSWRTShadowTexture(),
-                                                                                  runtimeStats);
+        bool shadowOk = true;
+        const uint32_t cascadeCount = std::max(1u, std::min(shadowContext.cascadeCount,
+                                                            LightSystem::kDirectionalCascadeCount));
+        for (uint32_t cascadeIndex = 0u; cascadeIndex < cascadeCount; ++cascadeIndex)
+        {
+            GpuSoftwareRayTracer::DirectionalShadowMapDesc shadowDesc{};
+            shadowDesc.width  = shadowMapSize;
+            shadowDesc.height = shadowMapSize;
+            shadowDesc.arraySlice = cascadeIndex;
+            shadowDesc.constantBufferSlot = 2u + cascadeIndex;
+            shadowDesc.depthBias = 0.0f;
+            std::memcpy(shadowDesc.lightViewProjection,
+                        shadowContext.cascadeLightViewProjection[cascadeIndex],
+                        sizeof(shadowDesc.lightViewProjection));
+            if (!Math::Invert4x4(shadowDesc.lightViewProjection, shadowDesc.inverseLightViewProjection))
+            {
+                shadowOk = false;
+                break;
+            }
+
+            RayTracingRuntimeStats cascadeStats{};
+            if (!m_gpuSoftwareRayTracer->RenderDirectionalShadowMap(shadowDesc,
+                                                                     *m_device,
+                                                                     *cmdList,
+                                                                     m_renderTargetPool->GetSWRTShadowTexture(),
+                                                                     cascadeStats))
+            {
+                shadowOk = false;
+                break;
+            }
+
+            runtimeStats.bvhNodeCount = std::max(runtimeStats.bvhNodeCount, cascadeStats.bvhNodeCount);
+            runtimeStats.traceMs += cascadeStats.traceMs;
+            runtimeStats.copyMs += cascadeStats.copyMs;
+            runtimeStats.lastFrameMs += cascadeStats.lastFrameMs;
+        }
 
         const auto shadowToSrv = CD3DX12_RESOURCE_BARRIER::Transition(
             m_renderTargetPool->GetSWRTShadowTexture().Get(),

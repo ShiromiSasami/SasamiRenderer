@@ -17,9 +17,10 @@ cbuffer ShadowFrameConstants : register(b0)
     uint  g_height;
     float g_tMin;
     float g_depthBias;
+    uint  g_arraySlice;
 };
 
-RWTexture2D<float> g_output : register(u0);
+RWTexture2DArray<float> g_output : register(u0);
 
 // --------------------------------------------------------------------------
 // Entry point
@@ -39,7 +40,7 @@ void CS_Shadow(uint3 id : SV_DispatchThreadID)
     float4 farH  = mul(float4(ndcX, ndcY, 1.0f, 1.0f), g_invLightVP);
     if (abs(nearH.w) < 1e-7f || abs(farH.w) < 1e-7f)
     {
-        g_output[id.xy] = 1.0f;
+        g_output[uint3(id.xy, g_arraySlice)] = 1.0f;
         return;
     }
     float3 nearPt = nearH.xyz / nearH.w;
@@ -49,7 +50,7 @@ void CS_Shadow(uint3 id : SV_DispatchThreadID)
     float  rayLen = length(delta);
     if (rayLen < 1e-6f)
     {
-        g_output[id.xy] = 1.0f;
+        g_output[uint3(id.xy, g_arraySlice)] = 1.0f;
         return;
     }
 
@@ -65,7 +66,7 @@ void CS_Shadow(uint3 id : SV_DispatchThreadID)
 
     if (!hit.hit)
     {
-        g_output[id.xy] = 1.0f;
+        g_output[uint3(id.xy, g_arraySlice)] = 1.0f;
         return;
     }
 
@@ -73,5 +74,5 @@ void CS_Shadow(uint3 id : SV_DispatchThreadID)
     float4 hitClip  = mul(float4(hitWorld, 1.0f), g_lightVP);
     float  depth    = hitClip.z / hitClip.w;
     depth += g_depthBias;
-    g_output[id.xy] = saturate(depth);
+    g_output[uint3(id.xy, g_arraySlice)] = saturate(depth);
 }

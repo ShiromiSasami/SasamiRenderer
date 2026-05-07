@@ -81,9 +81,36 @@ struct GpuMaterial
     float4 baseColor;   // rgba
     float  roughness;
     float  metallic;
-    float  pad0;
-    float  pad1;
+    float  transmission;
+    float  ior;
+    float3 specularColor;
+    float  workflow;    // 0=metallic-roughness, 1=specular-glossiness
+    float3 emissive;
+    float  occlusionStrength;
 };
+
+bool SWRT_UseSpecularGlossiness(GpuMaterial mat)
+{
+    return mat.workflow > 0.5f;
+}
+
+float3 SWRT_MaterialF0(GpuMaterial mat)
+{
+    return SWRT_UseSpecularGlossiness(mat)
+        ? saturate(mat.specularColor)
+        : lerp(float3(0.04f, 0.04f, 0.04f), mat.baseColor.rgb, saturate(mat.metallic));
+}
+
+float3 SWRT_MaterialDiffuseReflectance(GpuMaterial mat)
+{
+    const float transmissionScale = 1.0f - saturate(mat.transmission);
+    if (SWRT_UseSpecularGlossiness(mat))
+    {
+        float specMax = max(max(mat.specularColor.r, mat.specularColor.g), mat.specularColor.b);
+        return mat.baseColor.rgb * saturate(1.0f - specMax) * transmissionScale;
+    }
+    return mat.baseColor.rgb * (1.0f - saturate(mat.metallic)) * transmissionScale;
+}
 
 // --------------------------------------------------------------------------
 // Bindings (shared by all SWRT compute shaders)

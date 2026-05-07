@@ -703,6 +703,43 @@ namespace SasamiRenderer
         outContext.activeCascadeIndex = 0u;
     }
 
+    void LightSystem::BuildStableDirectionalShadowPassContext(ShadowPassContext& outContext,
+                                                              uint32_t shadowMapWidth,
+                                                              uint32_t shadowMapHeight) const
+    {
+        float lightForward[3] = {};
+
+        const float stableOrthoHalf = (std::max)(m_lightOrthoHalf, m_shadowDistance * 0.5f);
+        const float stableNear = (std::max)(0.001f,
+                                            (std::min)(m_lightNear, m_lightDistance - m_shadowDistance));
+        const float stableFar = (std::max)((std::max)(m_lightFar, stableNear + 1.0f),
+                                           m_lightDistance + m_shadowDistance);
+
+        Math::BuildDirectionalLightViewProjection(m_lightYaw,
+                                                  m_lightPitch,
+                                                  m_lightDistance,
+                                                  stableOrthoHalf,
+                                                  stableNear,
+                                                  stableFar,
+                                                  outContext.lightViewProjection,
+                                                  lightForward);
+
+        outContext.cascadeCount = 1u;
+        outContext.activeCascadeIndex = 0u;
+        outContext.cascadeBlendFraction = 0.0f;
+
+        const float texelWorld = (stableOrthoHalf * 2.0f) /
+            static_cast<float>((std::max)(1u, (std::max)(shadowMapWidth, shadowMapHeight)));
+        for (uint32_t cascadeIndex = 0; cascadeIndex < kDirectionalCascadeCount; ++cascadeIndex) {
+            std::memcpy(outContext.cascadeLightViewProjection[cascadeIndex],
+                        outContext.lightViewProjection,
+                        sizeof(outContext.lightViewProjection));
+            outContext.cascadeSplitDepths[cascadeIndex] = 1.0f;
+            outContext.cascadeTexelSize[cascadeIndex][0] = texelWorld;
+            outContext.cascadeTexelSize[cascadeIndex][1] = texelWorld;
+        }
+    }
+
     // =========================================================================
     // UpdateFrameLighting
     // 毎フレーム呼び、全ライトデータを CPU アップロードバッファに書き込む。
@@ -729,7 +766,8 @@ namespace SasamiRenderer
                                           float reflectionMode,
                                           float reflectionStrength,
                                           uint32_t renderWidth,
-                                          uint32_t renderHeight)
+                                          uint32_t renderHeight,
+                                          bool useStableDirectionalShadowProjection)
     {
         if (!frame.lightCB.IsValid() || frame.lightCBPtr == nullptr) {
             return;
@@ -737,7 +775,11 @@ namespace SasamiRenderer
 
         // --- ステップ1: シャドウ VP 行列を計算 ---
         ShadowPassContext shadowContext{};
-        BuildShadowPassContext(shadowContext, cameraPos, cameraPV, shadowMapWidth, shadowMapHeight);
+        if (useStableDirectionalShadowProjection) {
+            BuildStableDirectionalShadowPassContext(shadowContext, shadowMapWidth, shadowMapHeight);
+        } else {
+            BuildShadowPassContext(shadowContext, cameraPos, cameraPV, shadowMapWidth, shadowMapHeight);
+        }
 
         // --- ステップ2: ディレクショナルライトの方向ベクトルを計算 ---
         // yaw/pitch から単位ベクトルを生成する（MathUtil の汎用関数を使用）
@@ -862,7 +904,7 @@ namespace SasamiRenderer
         cb.shadowCascadeParams[2] = m_shadowNormalBias;
         cb.shadowCascadeParams[3] = static_cast<float>(shadowContext.cascadeCount);
 
-        cb.contactShadowParams[0] = 1.0f;
+        cb.contactShadowParams[0] = useStableDirectionalShadowProjection ? 0.0f : 1.0f;
         cb.contactShadowParams[1] = 0.75f;
         cb.contactShadowParams[2] = 0.0025f;
         cb.contactShadowParams[3] = 12.0f;

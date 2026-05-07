@@ -2,6 +2,7 @@
 #include "Renderer/RayTracing/GpuSoftwareRayTracer.h"
 
 #include "Renderer/Scene/RenderLightProxy.h"
+#include "Renderer/Scene/LightSystem.h"
 #include "Renderer/Utilities/ResourceUploadUtility.h"
 
 #include "Foundation/Math/MathUtil.h"
@@ -600,9 +601,13 @@ namespace SasamiRenderer
             CreateNullStructuredSrv(dev, cpu);
         }
 
-        // ---- Frame constants buffer: 2 slots of 256 bytes (shadow + legacy reflection) ----
+        // ---- Frame constants buffer:
+        // Slot 0: shared/legacy shadow or AO
+        // Slot 1: legacy reflection
+        // Slots 2-5: SWRT directional shadow cascades
+        // ----
         constexpr UINT64 kCbufSlotSize = 256u;
-        constexpr UINT64 kCbufTotalSize = kCbufSlotSize * 2u;
+        constexpr UINT64 kCbufTotalSize = kCbufSlotSize * (2u + LightSystem::kDirectionalCascadeCount);
         if (!ResourceUploadUtility::CreateUploadBuffer(device, kCbufTotalSize,
                                                         m_frameConstantsBuffer,
                                                         reinterpret_cast<void**>(&m_frameConstantsMapped))) {
@@ -771,29 +776,30 @@ namespace SasamiRenderer
         }
 
         // ---- Temporal EMA root signature ----
-        // Root[0]: 4 root constants  b0  (alpha_bits, width, height, pad)
-        // Root[1]: Descriptor table  t0-t1  (current frame SRV, history SRV)
-        // Root[2]: Descriptor table  u0     (history write UAV)
+        // Root[0]: 7 root constants  b0  (alpha_bits, size, validation flags, gbuffer size)
+        // Root[1]: Descriptor table  t0-t5  (current/history reflection + surface/material metadata)
+        // Root[2]: Descriptor table  u0-u2  (history + surface/material metadata write UAVs)
+        // Root[3]: Reprojection CBV  b1     (current invVP + previous VP)
         {
             D3D12_DESCRIPTOR_RANGE srvRange2{};
             srvRange2.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-            srvRange2.NumDescriptors                    = 2;
+            srvRange2.NumDescriptors                    = 6;
             srvRange2.BaseShaderRegister                = 0;
             srvRange2.RegisterSpace                     = 0;
             srvRange2.OffsetInDescriptorsFromTableStart = 0;
 
             D3D12_DESCRIPTOR_RANGE uavRange1{};
             uavRange1.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-            uavRange1.NumDescriptors                    = 1;
+            uavRange1.NumDescriptors                    = 3;
             uavRange1.BaseShaderRegister                = 0;
             uavRange1.RegisterSpace                     = 0;
             uavRange1.OffsetInDescriptorsFromTableStart = 0;
 
-            D3D12_ROOT_PARAMETER tparams[3]{};
+            D3D12_ROOT_PARAMETER tparams[4]{};
             tparams[0].ParameterType            = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
             tparams[0].Constants.ShaderRegister = 0;
             tparams[0].Constants.RegisterSpace  = 0;
-            tparams[0].Constants.Num32BitValues = 4;
+            tparams[0].Constants.Num32BitValues = 7;
             tparams[0].ShaderVisibility         = D3D12_SHADER_VISIBILITY_ALL;
 
             tparams[1].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
@@ -806,8 +812,13 @@ namespace SasamiRenderer
             tparams[2].DescriptorTable.pDescriptorRanges   = &uavRange1;
             tparams[2].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_ALL;
 
+            tparams[3].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
+            tparams[3].Descriptor.ShaderRegister = 1;
+            tparams[3].Descriptor.RegisterSpace  = 0;
+            tparams[3].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
+
             D3D12_ROOT_SIGNATURE_DESC trsDesc{};
-            trsDesc.NumParameters = 3;
+            trsDesc.NumParameters = 4;
             trsDesc.pParameters   = tparams;
             trsDesc.Flags         = D3D12_ROOT_SIGNATURE_FLAG_NONE;
 
@@ -1022,6 +1033,7 @@ namespace SasamiRenderer
         m_restirFrameIndex = 0;
         memset(m_prevVP, 0, sizeof(m_prevVP));
         m_prevVP[0] = m_prevVP[5] = m_prevVP[10] = m_prevVP[15] = 1.0f;
+        memset(m_prevReflectionCameraPos, 0, sizeof(m_prevReflectionCameraPos));
 
         return true;
     }
@@ -1343,6 +1355,16 @@ namespace SasamiRenderer
             gm.baseColor[3] = mat.material.baseColor[3];
             gm.roughness = mat.material.roughness;
             gm.metallic  = mat.material.metallic;
+            gm.transmission = mat.material.transmission;
+            gm.ior = mat.material.ior;
+            gm.specularColor[0] = mat.material.specularColor[0];
+            gm.specularColor[1] = mat.material.specularColor[1];
+            gm.specularColor[2] = mat.material.specularColor[2];
+            gm.workflow = static_cast<float>(static_cast<uint32_t>(mat.material.workflow));
+            gm.emissive[0] = mat.material.emissive[0];
+            gm.emissive[1] = mat.material.emissive[1];
+            gm.emissive[2] = mat.material.emissive[2];
+            gm.occlusionStrength = mat.material.occlusionStrength;
             matBuf.push_back(gm);
         }
 
@@ -1391,14 +1413,23 @@ namespace SasamiRenderer
     // =========================================================================
 
     void GpuSoftwareRayTracer::UpdateTextureUav(ID3D12Device* dev, Resource& texture,
-                                                 DXGI_FORMAT format, UINT slotIndex)
+                                                 DXGI_FORMAT format, UINT slotIndex, UINT arraySize)
     {
         D3D12_CPU_DESCRIPTOR_HANDLE dest = m_descHeap.GetCPUDescriptorHandleForHeapStart();
         dest.ptr += slotIndex * m_descIncrementSize;
 
         D3D12_UNORDERED_ACCESS_VIEW_DESC d{};
         d.Format        = format;
-        d.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        if (arraySize > 1u)
+        {
+            d.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+            d.Texture2DArray.ArraySize = arraySize;
+            d.Texture2DArray.FirstArraySlice = 0u;
+        }
+        else
+        {
+            d.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        }
         dev->CreateUnorderedAccessView(texture.Get(), nullptr, &d, dest);
     }
 
@@ -1416,6 +1447,7 @@ namespace SasamiRenderer
         out.height  = desc.height;
         out.tMin    = 0.001f;
         out.depthBias = std::max(0.0f, desc.depthBias);
+        out.arraySlice = desc.arraySlice;
     }
 
     void GpuSoftwareRayTracer::FillReflectionConstants(const ReflectionTextureDesc& desc,
@@ -1510,13 +1542,15 @@ namespace SasamiRenderer
         if (!dev || !cl) return false;
 
         // Update UAV slot [6] for shadow output
-        UpdateTextureUav(dev, outTexture, DXGI_FORMAT_R32_FLOAT, kShadowUavSlot);
+        UpdateTextureUav(dev, outTexture, DXGI_FORMAT_R32_FLOAT, kShadowUavSlot,
+                         LightSystem::kDirectionalCascadeCount);
 
         // Fill shadow constants into slot 0 of the frame constants buffer
         {
+            const UINT64 cbufOffset = static_cast<UINT64>(desc.constantBufferSlot) * 256u;
             ShadowFrameConstants sc{};
             FillShadowConstants(desc, sc);
-            memcpy(m_frameConstantsMapped, &sc, sizeof(sc));
+            memcpy(m_frameConstantsMapped + cbufOffset, &sc, sizeof(sc));
         }
 
         // Bind compute pipeline
@@ -1528,7 +1562,9 @@ namespace SasamiRenderer
         cl->SetDescriptorHeaps(1, heaps);
 
         // Root[0]: inline CBV (slot 0 of frame constants buffer)
-        cl->SetComputeRootConstantBufferView(0, m_frameConstantsBuffer.GetGPUVirtualAddress());
+        cl->SetComputeRootConstantBufferView(0,
+            m_frameConstantsBuffer.GetGPUVirtualAddress() +
+            static_cast<UINT64>(desc.constantBufferSlot) * 256u);
 
         // Root[1]: SRV table (t0-t5, starts at heap offset 0)
         cl->SetComputeRootDescriptorTable(1, m_descHeap.GetGPUDescriptorHandleForHeapStart());
@@ -2179,6 +2215,9 @@ namespace SasamiRenderer
         // =========================================================================
         ++m_restirFrameIndex;
         Math::Invert4x4(desc.frameDesc.inverseViewProjection, m_prevVP);
+        m_prevReflectionCameraPos[0] = desc.frameDesc.cameraPosition[0];
+        m_prevReflectionCameraPos[1] = desc.frameDesc.cameraPosition[1];
+        m_prevReflectionCameraPos[2] = desc.frameDesc.cameraPosition[2];
 
         outStats.usingHardwarePath = false;
         outStats.renderWidth  = desc.width;
@@ -2392,12 +2431,24 @@ namespace SasamiRenderer
                     const auto kSrv = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
                     m_reflHistoryA.Reset();
                     m_reflHistoryB.Reset();
+                    m_reflHistoryMetaA.Reset();
+                    m_reflHistoryMetaB.Reset();
+                    m_reflHistoryMaterialA.Reset();
+                    m_reflHistoryMaterialB.Reset();
                     m_reflAtrousScratch.Reset();
                     const bool allocOk =
                         CreateUavTexture2D(device, desc.width, desc.height,
                                        DXGI_FORMAT_R16G16B16A16_FLOAT, kSrv, m_reflHistoryA) &&
                         CreateUavTexture2D(device, desc.width, desc.height,
                                        DXGI_FORMAT_R16G16B16A16_FLOAT, kSrv, m_reflHistoryB) &&
+                        CreateUavTexture2D(device, desc.width, desc.height,
+                                       DXGI_FORMAT_R16G16B16A16_FLOAT, kSrv, m_reflHistoryMetaA) &&
+                        CreateUavTexture2D(device, desc.width, desc.height,
+                                       DXGI_FORMAT_R16G16B16A16_FLOAT, kSrv, m_reflHistoryMetaB) &&
+                        CreateUavTexture2D(device, desc.width, desc.height,
+                                       DXGI_FORMAT_R16G16B16A16_FLOAT, kSrv, m_reflHistoryMaterialA) &&
+                        CreateUavTexture2D(device, desc.width, desc.height,
+                                       DXGI_FORMAT_R16G16B16A16_FLOAT, kSrv, m_reflHistoryMaterialB) &&
                         CreateUavTexture2D(device, desc.width, desc.height,
                                        DXGI_FORMAT_R16G16B16A16_FLOAT, kSrv, m_reflAtrousScratch);
                 if (allocOk)
@@ -2413,11 +2464,17 @@ namespace SasamiRenderer
                 }
             }
 
-            if (m_reflHistoryA.IsValid() && m_reflHistoryB.IsValid())
+            if (m_reflHistoryA.IsValid() && m_reflHistoryB.IsValid() &&
+                m_reflHistoryMetaA.IsValid() && m_reflHistoryMetaB.IsValid() &&
+                m_reflHistoryMaterialA.IsValid() && m_reflHistoryMaterialB.IsValid())
             {
                 // Ping-pong assignment: one side is read (SRV), the other is written (UAV)
                 Resource& histRead  = m_reflHistoryPingA ? m_reflHistoryB : m_reflHistoryA;
                 Resource& histWrite = m_reflHistoryPingA ? m_reflHistoryA : m_reflHistoryB;
+                Resource& metaRead  = m_reflHistoryPingA ? m_reflHistoryMetaB : m_reflHistoryMetaA;
+                Resource& metaWrite = m_reflHistoryPingA ? m_reflHistoryMetaA : m_reflHistoryMetaB;
+                Resource& materialRead  = m_reflHistoryPingA ? m_reflHistoryMaterialB : m_reflHistoryMaterialA;
+                Resource& materialWrite = m_reflHistoryPingA ? m_reflHistoryMaterialA : m_reflHistoryMaterialB;
 
                 // Keep some history during camera motion instead of fully resetting.
                 // A hard reset exposes the raw 1spp/low-res reflection and causes
@@ -2427,10 +2484,18 @@ namespace SasamiRenderer
                 // ---- Barriers: prepare textures for temporal CS ----
                 // outTexture: UAV (just written by reflection CS) → NON_PIXEL_SHADER_RESOURCE (SRV t0)
                 // histWrite:  NON_PIXEL_SHADER_RESOURCE → UAV (u0)
-                D3D12_RESOURCE_BARRIER preBarriers[2] = {
+                D3D12_RESOURCE_BARRIER preBarriers[4] = {
                     CD3DX12_RESOURCE_BARRIER::UAV(outTexture.Get()),
                     CD3DX12_RESOURCE_BARRIER::Transition(
                         histWrite.Get(),
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
+                    CD3DX12_RESOURCE_BARRIER::Transition(
+                        metaWrite.Get(),
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
+                    CD3DX12_RESOURCE_BARRIER::Transition(
+                        materialWrite.Get(),
                         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                         D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
                 };
@@ -2443,10 +2508,16 @@ namespace SasamiRenderer
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
                 cl->ResourceBarrier(1u, &outToSrv);
 
-                // ---- Populate temporal descriptor slots (14-16) ----
+                // ---- Populate temporal descriptor slots (14-22) ----
                 // Slot 14: SRV → outTexture   (t0 = current frame)
                 // Slot 15: SRV → histRead     (t1 = previous EMA)
-                // Slot 16: UAV → histWrite    (u0 = EMA write)
+                // Slot 16: SRV → current meta (t2 = current surface metadata)
+                // Slot 17: SRV → history meta (t3 = previous surface metadata)
+                // Slot 18: SRV → current material (t4 = current material metadata)
+                // Slot 19: SRV → history material (t5 = previous material metadata)
+                // Slot 20: UAV → histWrite    (u0 = EMA write)
+                // Slot 21: UAV → metaWrite    (u1 = surface metadata write)
+                // Slot 22: UAV → materialWrite (u2 = material metadata write)
                 {
                     auto cpuBase = m_descHeap.GetCPUDescriptorHandleForHeapStart();
                     auto writeSrv = [&](ID3D12Resource* res, DXGI_FORMAT fmt, UINT slot)
@@ -2464,7 +2535,13 @@ namespace SasamiRenderer
 
                     writeSrv(outTexture.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, kTemporalSrvBase + 0u);
                     writeSrv(histRead.Get(),   DXGI_FORMAT_R16G16B16A16_FLOAT, kTemporalSrvBase + 1u);
+                    writeSrv(desc.gbufferNormalTex, DXGI_FORMAT_R16G16B16A16_FLOAT, kTemporalSrvBase + 2u);
+                    writeSrv(metaRead.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, kTemporalSrvBase + 3u);
+                    writeSrv(desc.gbufferMaterialTex, DXGI_FORMAT_R8G8B8A8_UNORM, kTemporalSrvBase + 4u);
+                    writeSrv(materialRead.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, kTemporalSrvBase + 5u);
                     writeUav(histWrite.Get(),  DXGI_FORMAT_R16G16B16A16_FLOAT, kTemporalUavBase + 0u);
+                    writeUav(metaWrite.Get(),  DXGI_FORMAT_R16G16B16A16_FLOAT, kTemporalUavBase + 1u);
+                    writeUav(materialWrite.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, kTemporalUavBase + 2u);
                 }
 
                 // ---- Bind temporal pipeline ----
@@ -2472,15 +2549,34 @@ namespace SasamiRenderer
                 cl->SetComputeRootSignature(m_reflTemporalRootSignature.Get());
                 // Descriptor heap is already bound from the reflection CS dispatch above
 
-                // Root[0]: 4 root constants (alpha as float bits, width, height, 0)
+                // Root[0]: constants (alpha, reflection size, validation flags, GBuffer size)
                 {
-                    uint32_t constants[4] = {
+                    const uint32_t gbufferWidth = desc.gbufferWidth != 0u ? desc.gbufferWidth : desc.width;
+                    const uint32_t gbufferHeight = desc.gbufferHeight != 0u ? desc.gbufferHeight : desc.height;
+                    ReflectionTemporalReprojectionConstants reprojection{};
+                    memcpy(reprojection.invVP, desc.frameDesc.inverseViewProjection, 64);
+                    memcpy(reprojection.prevVP, m_prevVP, 64);
+                    reprojection.cameraPos[0] = desc.frameDesc.cameraPosition[0];
+                    reprojection.cameraPos[1] = desc.frameDesc.cameraPosition[1];
+                    reprojection.cameraPos[2] = desc.frameDesc.cameraPosition[2];
+                    reprojection.prevCameraPos[0] = m_prevReflectionCameraPos[0];
+                    reprojection.prevCameraPos[1] = m_prevReflectionCameraPos[1];
+                    reprojection.prevCameraPos[2] = m_prevReflectionCameraPos[2];
+                    if (m_restirConstantsMapped)
+                    {
+                        memcpy(m_restirConstantsMapped, &reprojection, sizeof(reprojection));
+                    }
+
+                    uint32_t constants[7] = {
                         *reinterpret_cast<const uint32_t*>(&alpha),
                         desc.width,
                         desc.height,
-                        0u
+                        desc.gbufferNormalTex ? 1u : 0u,
+                        gbufferWidth,
+                        gbufferHeight,
+                        desc.gbufferMaterialTex ? 1u : 0u
                     };
-                    cl->SetComputeRoot32BitConstants(0, 4, constants, 0);
+                    cl->SetComputeRoot32BitConstants(0, 7, constants, 0);
                 }
 
                 // Root[1]: SRV table starting at slot 14
@@ -2488,10 +2584,16 @@ namespace SasamiRenderer
                 srvGpu.ptr += kTemporalSrvBase * m_descIncrementSize;
                 cl->SetComputeRootDescriptorTable(1, srvGpu);
 
-                // Root[2]: UAV table starting at slot 16
+                // Root[2]: UAV table starting at slot 20
                 D3D12_GPU_DESCRIPTOR_HANDLE uavGpu2 = m_descHeap.GetGPUDescriptorHandleForHeapStart();
                 uavGpu2.ptr += kTemporalUavBase * m_descIncrementSize;
                 cl->SetComputeRootDescriptorTable(2, uavGpu2);
+
+                // Root[3]: reprojection constants (b1)
+                if (m_restirConstantsBuffer.IsValid())
+                {
+                    cl->SetComputeRootConstantBufferView(3, m_restirConstantsBuffer.GetGPUVirtualAddress());
+                }
 
                 // ---- Dispatch ----
                 const UINT tgx = (desc.width  + 15u) / 16u;
@@ -2500,7 +2602,7 @@ namespace SasamiRenderer
 
                 // ---- Copy EMA result (histWrite) back into outTexture ----
                 // Barriers: histWrite UAV→COPY_SOURCE, outTexture SRV→COPY_DEST
-                D3D12_RESOURCE_BARRIER copyPre[2] = {
+                D3D12_RESOURCE_BARRIER copyPre[4] = {
                     CD3DX12_RESOURCE_BARRIER::Transition(
                         histWrite.Get(),
                         D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
@@ -2509,13 +2611,21 @@ namespace SasamiRenderer
                         outTexture.Get(),
                         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                         D3D12_RESOURCE_STATE_COPY_DEST),
+                    CD3DX12_RESOURCE_BARRIER::Transition(
+                        metaWrite.Get(),
+                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+                    CD3DX12_RESOURCE_BARRIER::Transition(
+                        materialWrite.Get(),
+                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
                 };
                 cl->ResourceBarrier(_countof(copyPre), copyPre);
 
                 cl->CopyResource(outTexture.Get(), histWrite.Get());
 
                 // Restore states: outTexture→UAV (SWRTExecutor will transition UAV→PSR),
-                //                 histWrite→NON_PIXEL_SHADER_RESOURCE (next frame's SRV)
+                //                 histWrite/metaWrite→NON_PIXEL_SHADER_RESOURCE (next frame's SRVs)
                 D3D12_RESOURCE_BARRIER copyPost[2] = {
                     CD3DX12_RESOURCE_BARRIER::Transition(
                         outTexture.Get(),
@@ -2629,6 +2739,10 @@ namespace SasamiRenderer
         // Legacy SWRT also uses this frame index for per-frame GGX jitter.
         // Without advancing it, rough reflections keep reusing the same sample.
         ++m_restirFrameIndex;
+        Math::Invert4x4(desc.frameDesc.inverseViewProjection, m_prevVP);
+        m_prevReflectionCameraPos[0] = desc.frameDesc.cameraPosition[0];
+        m_prevReflectionCameraPos[1] = desc.frameDesc.cameraPosition[1];
+        m_prevReflectionCameraPos[2] = desc.frameDesc.cameraPosition[2];
         return true;
     }
 

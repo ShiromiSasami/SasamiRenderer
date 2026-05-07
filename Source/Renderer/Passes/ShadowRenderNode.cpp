@@ -103,7 +103,8 @@ namespace SasamiRenderer
                                             reflectionMode,
                                             1.0f,
                                             renderWidth,
-                                            renderHeight);
+                                            renderHeight,
+                                            true);
 
             if (!softwareShadowCallback) {
                 DebugLog("ShadowRenderNode::Execute: software shadow callback is missing.\n");
@@ -111,11 +112,9 @@ namespace SasamiRenderer
             }
 
             LightSystem::ShadowPassContext shadowContext{};
-            lightSystem.BuildShadowPassContext(shadowContext,
-                                              cameraPos,
-                                              cameraPV,
-                                              softwareRayTracedShadowMapSize,
-                                              softwareRayTracedShadowMapSize);
+            lightSystem.BuildStableDirectionalShadowPassContext(shadowContext,
+                                                                softwareRayTracedShadowMapSize,
+                                                                softwareRayTracedShadowMapSize);
             if (!softwareShadowCallback(shadowContext)) {
                 DebugLog("ShadowRenderNode::Execute: software shadow callback failed.\n");
             }
