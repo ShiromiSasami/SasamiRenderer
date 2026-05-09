@@ -12,7 +12,7 @@
 //   t7  : g_prevGBuffer  (prev frame GBuffer   – scratch SRV[1])
 //   t14 : g_reservoirIn  (current-frame initial reservoirs from Pass1, inline SRV)
 //   t15 : g_prevTemporal (prev-frame temporal output – ping-pong, inline SRV)
-//   u2  : g_reservoirOut (temporal output this frame,              inline UAV)
+//   u3  : g_reservoirOut (temporal output this frame,              inline UAV)
 //
 
 #include "SWRT/SWRT_Common.hlsli"
@@ -54,7 +54,7 @@ Texture2D<float4> g_rasterMaterial : register(t8);  // scratch SRV[2]: rasterize
 
 StructuredBuffer<Reservoir>   g_reservoirIn  : register(t14);  // current-frame initial (Pass1 output)
 StructuredBuffer<Reservoir>   g_prevTemporal : register(t15);  // prev-frame temporal output (ping-pong)
-RWStructuredBuffer<Reservoir> g_reservoirOut : register(u2);
+RWStructuredBuffer<Reservoir> g_reservoirOut : register(u3);
 
 // --------------------------------------------------------------------------
 // Light structures (identical to Initial pass – needed for p_hat)

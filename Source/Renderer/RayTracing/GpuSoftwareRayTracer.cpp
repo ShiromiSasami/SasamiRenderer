@@ -849,6 +849,61 @@ namespace SasamiRenderer
                     &tpso, IID_PPV_ARGS(m_reflTemporalPso.ReleaseAndGetAddressOf())))) {
                 return false;
             }
+        }
+
+        // ---- A-Trous root signature ----
+        // Root[0]: 4 root constants b0  (step width, width, height, phi depth)
+        // Root[1]: Descriptor table t0-t2 (source reflection + normal/depth + material)
+        // Root[2]: Descriptor table u0    (filtered reflection output)
+        {
+            D3D12_DESCRIPTOR_RANGE srvRange{};
+            srvRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+            srvRange.NumDescriptors                    = 3;
+            srvRange.BaseShaderRegister                = 0;
+            srvRange.RegisterSpace                     = 0;
+            srvRange.OffsetInDescriptorsFromTableStart = 0;
+
+            D3D12_DESCRIPTOR_RANGE uavRange{};
+            uavRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+            uavRange.NumDescriptors                    = 1;
+            uavRange.BaseShaderRegister                = 0;
+            uavRange.RegisterSpace                     = 0;
+            uavRange.OffsetInDescriptorsFromTableStart = 0;
+
+            D3D12_ROOT_PARAMETER params[3]{};
+            params[0].ParameterType            = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+            params[0].Constants.ShaderRegister = 0;
+            params[0].Constants.RegisterSpace  = 0;
+            params[0].Constants.Num32BitValues = 4;
+            params[0].ShaderVisibility         = D3D12_SHADER_VISIBILITY_ALL;
+
+            params[1].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+            params[1].DescriptorTable.NumDescriptorRanges = 1;
+            params[1].DescriptorTable.pDescriptorRanges   = &srvRange;
+            params[1].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_ALL;
+
+            params[2].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+            params[2].DescriptorTable.NumDescriptorRanges = 1;
+            params[2].DescriptorTable.pDescriptorRanges   = &uavRange;
+            params[2].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_ALL;
+
+            D3D12_ROOT_SIGNATURE_DESC rsDesc{};
+            rsDesc.NumParameters = 3;
+            rsDesc.pParameters   = params;
+            rsDesc.Flags         = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+
+            ComPtr<ID3DBlob> rsBlob, rsError;
+            if (FAILED(D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1,
+                                                   rsBlob.ReleaseAndGetAddressOf(),
+                                                   rsError.ReleaseAndGetAddressOf()))) {
+                if (rsError) OutputDebugStringA((char*)rsError->GetBufferPointer());
+                return false;
+            }
+            if (FAILED(dev->CreateRootSignature(0,
+                    rsBlob->GetBufferPointer(), rsBlob->GetBufferSize(),
+                    IID_PPV_ARGS(m_reflAtrousRootSignature.ReleaseAndGetAddressOf())))) {
+                return false;
+            }
 
             ComPtr<ID3DBlob> acs;
             if (!CompileComputeShader(L"SWRT/SWRT_Reflection_ATrous_CS.hlsl",
@@ -857,7 +912,7 @@ namespace SasamiRenderer
                 return false;
             }
             D3D12_COMPUTE_PIPELINE_STATE_DESC apso{};
-            apso.pRootSignature = m_reflTemporalRootSignature.Get();
+            apso.pRootSignature = m_reflAtrousRootSignature.Get();
             apso.CS             = { acs->GetBufferPointer(), acs->GetBufferSize() };
             if (FAILED(dev->CreateComputePipelineState(
                     &apso, IID_PPV_ARGS(m_reflAtrousPso.ReleaseAndGetAddressOf())))) {
@@ -885,7 +940,7 @@ namespace SasamiRenderer
         // [4]: Root SRV  (t12) point lights inline
         // [5]: Root SRV  (t13) spot lights inline
         // [6]: Root SRV  (t14) reservoir input inline
-        // [7]: Root UAV  (u2)  reservoir output inline
+        // [7]: Root UAV  (u3)  reservoir output inline
         D3D12_DESCRIPTOR_RANGE bvhRange{};
         bvhRange.RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
         bvhRange.NumDescriptors     = kSrvCount;
@@ -936,9 +991,9 @@ namespace SasamiRenderer
         params[6].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
         params[6].Descriptor.ShaderRegister = 14;
         params[6].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
-        // [7] Reservoir output UAV inline (u2)
+        // [7] Reservoir output UAV inline (u3)
         params[7].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_UAV;
-        params[7].Descriptor.ShaderRegister = 2;
+        params[7].Descriptor.ShaderRegister = 3;
         params[7].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
         // [8] Prev-temporal reservoir SRV inline (t15) — previous frame's temporal output for ping-pong
         params[8].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
@@ -1189,10 +1244,13 @@ namespace SasamiRenderer
         m_scene = scene;
 
         const bool geoDirty  = (scene.geometryVersion != m_bvhGeometryVersion);
+        const bool matDirty  = (scene.materialVersion != m_bvhMaterialVersion);
         const bool instDirty = (scene.instanceVersion  != m_bvhInstanceVersion);
-        if (!geoDirty && !instDirty) return;
+        if (!geoDirty && !matDirty && !instDirty) return;
 
-        RebuildAccelerationStructures();
+        if (geoDirty || instDirty) {
+            RebuildAccelerationStructures();
+        }
         UploadBvhBuffers(device);
     }
 
@@ -1404,7 +1462,9 @@ namespace SasamiRenderer
         CreateStructuredSrv(dev, m_materialBuffer,  (UINT)matBuf.size(),    sizeof(GpuMaterial),   srv(5));
 
         m_uploadedGeometryVersion = m_scene.geometryVersion;
+        m_uploadedMaterialVersion = m_scene.materialVersion;
         m_uploadedInstanceVersion = m_scene.instanceVersion;
+        m_bvhMaterialVersion      = m_scene.materialVersion;
         return true;
     }
 
@@ -1502,6 +1562,7 @@ namespace SasamiRenderer
         out.gbufferWidth  = (desc.gbufferWidth  > 0) ? desc.gbufferWidth  : desc.width;
         out.gbufferHeight = (desc.gbufferHeight > 0) ? desc.gbufferHeight : desc.height;
         out.maxBounces    = std::max(1u, desc.maxBounces);
+        out.debugView     = desc.debugView;
     }
 
     void GpuSoftwareRayTracer::FillAmbientOcclusionConstants(const AmbientOcclusionTextureDesc& desc,
@@ -1892,7 +1953,7 @@ namespace SasamiRenderer
 
         // =========================================================================
         // Pass 1: GBuffer capture + Initial Reservoir (WRS M=8)
-        // u0 = gBuffer (scratch UAV[0]),  u2 = reservoirBuffer[0] (inline UAV)
+        // u0 = gBuffer (scratch UAV[0]),  u3 = reservoirBuffer[0] (inline UAV)
         // t12/t13 = lights,  BVH t0-t5 used for primary rays
         // =========================================================================
         {
@@ -1920,7 +1981,7 @@ namespace SasamiRenderer
         // t6  = gBuffer (scratch SRV[0]),  t7 = prevGBuffer (scratch SRV[1])
         // t14 = reservoirBuffer[0] (current-frame initial, inline SRV)
         // t15 = reservoirBuffer[prevTemporalIdx] (prev-frame temporal output, inline SRV)
-        // u2  = reservoirBuffer[temporalWriteIdx] (temporal output, inline UAV)
+        // u3  = reservoirBuffer[temporalWriteIdx] (temporal output, inline UAV)
         //
         // Ping-pong:  even frame → write [2], prev = [1]
         //             odd  frame → write [1], prev = [2]
@@ -1951,7 +2012,7 @@ namespace SasamiRenderer
         // Pass 3: Spatial Reservoir Reuse
         // t6  = gBuffer (scratch SRV[0])
         // t14 = reservoirBuffer[temporalWriteIdx] (temporal output, inline SRV)
-        // u2  = reservoirBuffer[0] (spatial output → shade input, inline UAV)
+        // u3  = reservoirBuffer[0] (spatial output -> shade input, inline UAV)
         // =========================================================================
             D3D12_RESOURCE_BARRIER pre3[] = {
                 MakeTransition(m_reservoirBuffer[0].Get(), kSrv, kUav),
@@ -2314,10 +2375,6 @@ namespace SasamiRenderer
         if (!m_initialized || !outTexture.IsValid()) return false;
         if (desc.width == 0 || desc.height == 0) return false;
 
-        // Route through ReSTIR + SVGF pipeline when mode is ReSTIR and pipeline is ready
-        if (m_swrtMode == SwrtMode::ReSTIR && m_restirPipelineReady)
-            return RenderReflectionTextureReSTIR(desc, device, cmdList, outTexture, outStats);
-
         if (!m_reflectionPso) return false;
 
         ID3D12Device* dev = device.GetDevice();
@@ -2647,6 +2704,7 @@ namespace SasamiRenderer
             m_reflAtrousPso &&
             m_reflAtrousScratch.IsValid() &&
             desc.gbufferNormalTex &&
+            desc.gbufferMaterialTex &&
             desc.updatePhaseCount == 1u &&
             desc.atrousIterations > 0u)
         {
@@ -2667,13 +2725,14 @@ namespace SasamiRenderer
             ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
             cl->SetDescriptorHeaps(1, heaps);
             cl->SetPipelineState(m_reflAtrousPso.Get());
-            cl->SetComputeRootSignature(m_reflTemporalRootSignature.Get());
+            cl->SetComputeRootSignature(m_reflAtrousRootSignature.Get());
 
             const uint32_t iterations = std::min(desc.atrousIterations, 5u);
             for (uint32_t iter = 0; iter < iterations; ++iter)
             {
                 writeSrv(outTexture.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, kTemporalSrvBase + 0u);
                 writeSrv(desc.gbufferNormalTex, DXGI_FORMAT_R16G16B16A16_FLOAT, kTemporalSrvBase + 1u);
+                writeSrv(desc.gbufferMaterialTex, DXGI_FORMAT_R8G8B8A8_UNORM, kTemporalSrvBase + 2u);
                 writeUav(m_reflAtrousScratch.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, kTemporalUavBase + 0u);
 
                 D3D12_RESOURCE_BARRIER pre[] = {
@@ -2744,6 +2803,18 @@ namespace SasamiRenderer
         m_prevReflectionCameraPos[1] = desc.frameDesc.cameraPosition[1];
         m_prevReflectionCameraPos[2] = desc.frameDesc.cameraPosition[2];
         return true;
+    }
+
+    bool GpuSoftwareRayTracer::PrepareReSTIRFrame(const ReflectionTextureDesc& desc,
+                                                  IRHIDevice& device,
+                                                  CommandList& cmdList,
+                                                  Resource& scratchTexture,
+                                                  RayTracingRuntimeStats& outStats)
+    {
+        if (m_swrtMode != SwrtMode::ReSTIR || !m_restirPipelineReady) {
+            return false;
+        }
+        return RenderReflectionTextureReSTIR(desc, device, cmdList, scratchTexture, outStats);
     }
 
 } // namespace SasamiRenderer

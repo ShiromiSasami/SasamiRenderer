@@ -63,6 +63,15 @@ namespace SasamiRenderer
             return UsesRuntimeAmbientOcclusionMode(mode) &&
                    !UsesRayTracedRuntimeAmbientOcclusion(mode, method);
         }
+
+        bool UsesReflectionDebugView(RendererEnums::GBufferDebugView view)
+        {
+            return view == RendererEnums::GBufferDebugView::FinalLit ||
+                   view == RendererEnums::GBufferDebugView::ReflectionRadiance ||
+                   view == RendererEnums::GBufferDebugView::ReflectionAlpha ||
+                   view == RendererEnums::GBufferDebugView::SwrtReflectionHitDistance ||
+                   view == RendererEnums::GBufferDebugView::SwrtReflectionComposite;
+        }
     }
 
     Renderer::Renderer()
@@ -501,8 +510,7 @@ namespace SasamiRenderer
         policy.useSoftwareRayTracedReflections =
             (m_settings.renderPathMode == RenderPathMode::Raster) &&
             m_settings.rasterSoftwareRayTracedReflectionEnabled &&
-            m_renderTargetPool.GetSWRTReflectionTexture().IsValid() &&
-            m_swrtExecutor.IsReflectionCacheValid();
+            m_renderTargetPool.GetSWRTReflectionTexture().IsValid();
         const bool useScreenSpaceReflections =
             (m_settings.renderPathMode == RenderPathMode::Raster) &&
             !policy.useSoftwareRayTracedReflections &&
@@ -515,7 +523,7 @@ namespace SasamiRenderer
         policy.softwareRayTracedShadowMapSize =
             policy.useSoftwareRayTracedDirectionalShadow
                 ? partialBehavior.shadowMapSize
-                : 1024u;
+                : 4096u;
         policy.renderWidth = static_cast<uint32_t>(std::max(0.0f, m_viewport.Width));
         policy.renderHeight = static_cast<uint32_t>(std::max(0.0f, m_viewport.Height));
         policy.iblIntensity = m_settings.iblIntensity;
@@ -565,8 +573,7 @@ namespace SasamiRenderer
         const bool useSwrtReflection =
             (m_settings.renderPathMode == RenderPathMode::Raster) &&
             m_settings.rasterSoftwareRayTracedReflectionEnabled &&
-            m_renderTargetPool.GetSWRTReflectionTexture().IsValid() &&
-            m_swrtExecutor.IsReflectionCacheValid();
+            m_renderTargetPool.GetSWRTReflectionTexture().IsValid();
         const bool useScreenSpaceReflection =
             (m_settings.renderPathMode == RenderPathMode::Raster) &&
             !useSwrtReflection &&
@@ -905,10 +912,13 @@ namespace SasamiRenderer
             }
         }
         if (useSoftwareRayTracedReflections) {
+            const float reflectionScale = UsesReflectionDebugView(m_settings.gBufferDebugView)
+                ? 1.0f
+                : partialBehavior.reflectionResolutionScale;
             const uint32_t reflectionWidth  = ComputeScaledDimension(
-                static_cast<uint32_t>(m_viewport.Width),  partialBehavior.reflectionResolutionScale);
+                static_cast<uint32_t>(m_viewport.Width),  reflectionScale);
             const uint32_t reflectionHeight = ComputeScaledDimension(
-                static_cast<uint32_t>(m_viewport.Height), partialBehavior.reflectionResolutionScale);
+                static_cast<uint32_t>(m_viewport.Height), reflectionScale);
             bool reflCacheInvalidated = false;
             if (!m_renderTargetPool.EnsureSWRTReflection(*m_device, reflectionWidth, reflectionHeight, reflCacheInvalidated)) {
                 DebugLog("Renderer::Render: failed to prepare software reflection resources. Disabling SWRT reflections for this frame.\n");
@@ -1047,6 +1057,10 @@ namespace SasamiRenderer
                 },
                 PhaseCompletionMode::Deterministic,
                 {});
+            executionServices.compositeSoftwareReflections =
+                [this, cmdList, backIndex, lightCbGpu]() -> bool {
+                    return CompositeSoftwareReflections(cmdList, backIndex, lightCbGpu);
+                };
         }
 
         RenderGraphExecuteContext executeContext{};
@@ -1446,6 +1460,66 @@ namespace SasamiRenderer
         barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
         barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
         cmdList->ResourceBarrier(1, &barrier);
+    }
+
+    bool Renderer::CompositeSoftwareReflections(CommandList* cmdList,
+                                                UINT backIndex,
+                                                D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu)
+    {
+        if (!cmdList || lightCbGpu == 0) {
+            return true;
+        }
+        if (!m_renderTargetPool.GetSWRTReflectionTexture().IsValid() ||
+            !m_renderTargetPool.GetGBufferAlbedo().IsValid() ||
+            !m_renderTargetPool.GetGBufferNormal().IsValid() ||
+            !m_renderTargetPool.GetGBufferMaterial().IsValid()) {
+            return true;
+        }
+
+        D3D12_RESOURCE_BARRIER toSrv[] = {
+            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool.GetGBufferAlbedo().Get(),
+                D3D12_RESOURCE_STATE_RENDER_TARGET,
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
+            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool.GetGBufferNormal().Get(),
+                D3D12_RESOURCE_STATE_RENDER_TARGET,
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
+            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool.GetGBufferMaterial().Get(),
+                D3D12_RESOURCE_STATE_RENDER_TARGET,
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
+        };
+        cmdList->ResourceBarrier(_countof(toSrv), toSrv);
+
+        cmdList->SetGraphicsRootSignature(m_pipelineStateCache.GetRootSignature());
+        cmdList->SetPipelineState(m_pipelineStateCache.GetSwrtReflectionCompositePipelineState());
+        cmdList->RSSetViewports(1, &m_viewport);
+        cmdList->RSSetScissorRects(1, &m_scissorRect);
+
+        auto rtv = m_renderTargetPool.GetBackBufferRtv(backIndex);
+        cmdList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+
+        DescriptorHeap* heaps[] = { m_srvAllocator.GetHeap() };
+        cmdList->SetDescriptorHeaps(1, heaps);
+        cmdList->SetGraphicsRootDescriptorTable(0, m_renderTargetPool.GetGBufferAlbedoSrv());
+        cmdList->SetGraphicsRootConstantBufferView(3, lightCbGpu);
+        cmdList->SetGraphicsRootDescriptorTable(6, m_renderTargetPool.GetGBufferMaterialSrv());
+        cmdList->SetGraphicsRootDescriptorTable(7, m_renderTargetPool.GetSWRTReflectionSrv());
+        cmdList->SetGraphicsRootDescriptorTable(8, m_renderTargetPool.GetGBufferNormalSrv());
+        cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        cmdList->DrawInstanced(3u, 1u, 0u, 0u);
+
+        D3D12_RESOURCE_BARRIER toRenderTarget[] = {
+            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool.GetGBufferAlbedo().Get(),
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_RENDER_TARGET),
+            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool.GetGBufferNormal().Get(),
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_RENDER_TARGET),
+            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool.GetGBufferMaterial().Get(),
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_RENDER_TARGET),
+        };
+        cmdList->ResourceBarrier(_countof(toRenderTarget), toRenderTarget);
+        return true;
     }
 
     void Renderer::CaptureSceneColorHistory(CommandList* cmdList, UINT backIndex)

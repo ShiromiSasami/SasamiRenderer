@@ -19,6 +19,11 @@ namespace SasamiRenderer
         if (!context.IsSatisfied()) {
             return false;
         }
+        const RenderNodeExecutionServices& services = context.Services();
+        if (services.compositeSoftwareReflections &&
+            !services.compositeSoftwareReflections()) {
+            return false;
+        }
         Execute({});
         return true;
     }

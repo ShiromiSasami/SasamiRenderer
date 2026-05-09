@@ -808,7 +808,7 @@ namespace SasamiRenderer
 
                 int debugMode = app.GetGBufferDebugViewIndex();
                 if (ImGui::Combo("GBuffer Debug", &debugMode,
-                                 "Final Lit\0Albedo\0Normal\0Roughness\0Metallic\0Ambient Occlusion\0Shadow\0Emissive\0Runtime AO Raw\0Runtime AO Filtered\0Directional Light Dir\0Directional NdotL\0")) {
+                                 "Final Lit\0Albedo\0Normal\0Roughness\0Metallic\0Ambient Occlusion\0Shadow\0Emissive\0Runtime AO Raw\0Runtime AO Filtered\0Directional Light Dir\0Directional NdotL\0Reflection Radiance\0Reflection Alpha\0SWRT Reflection Hit Distance\0SWRT Reflection Composite\0")) {
                     app.SetGBufferDebugViewIndex(debugMode);
                 }
                 ImGui::TextDisabled("Shortcut: F2 (cycle)");

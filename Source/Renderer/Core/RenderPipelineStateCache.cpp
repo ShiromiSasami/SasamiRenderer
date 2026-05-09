@@ -782,6 +782,7 @@ namespace SasamiRenderer
         ComPtr<ID3DBlob> rayMarchPS;
         ComPtr<ID3DBlob> volumetricCloudVS;
         ComPtr<ID3DBlob> volumetricCloudPS;
+        ComPtr<ID3DBlob> swrtReflectionCompositePS;
         auto loadOrCompileShader = [&](const ShaderSpec& spec) -> bool
         {
             const std::filesystem::path sourcePath = ResolveShaderPath(spec.sourceRelativePath);
@@ -846,7 +847,7 @@ namespace SasamiRenderer
         const std::string hullProfile = "hs_" + shaderModel;
         const std::string domainProfile = "ds_" + shaderModel;
         const std::string geometryProfile = "gs_" + shaderModel;
-        const std::array<ShaderSpec, 24> shaderSpecs{ {
+        const std::array<ShaderSpec, 25> shaderSpecs{ {
             { L"CookTorranceGGX_VS.hlsl", "VSMain", vertexProfile.c_str(), &vertexShader },
             { L"CookTorranceGGX_PS.hlsl", "PSMain", pixelProfile.c_str(), &pixelShader },
             { L"Opaque_VS.hlsl", "VSMain", vertexProfile.c_str(), &basicVertexShader },
@@ -869,6 +870,7 @@ namespace SasamiRenderer
             { L"SdfFluid/SdfFluid_PS.hlsl", "PSMain", pixelProfile.c_str(), &sdfFluidPS },
             { L"VolumetricCloud/VolumetricCloud_VS.hlsl", "VSMain", vertexProfile.c_str(), &volumetricCloudVS },
             { L"VolumetricCloud/VolumetricCloud_PS.hlsl", "PSMain", pixelProfile.c_str(), &volumetricCloudPS },
+            { L"SWRT/SWRT_ReflectionComposite_PS.hlsl", "PSMain", pixelProfile.c_str(), &swrtReflectionCompositePS },
             { L"RayMarch/RayMarch_VS.hlsl", "VSMain", vertexProfile.c_str(), &rayMarchVS },
             { L"RayMarch/RayMarch_PS.hlsl", "PSMain", pixelProfile.c_str(), &rayMarchPS },
         } };
@@ -980,6 +982,26 @@ namespace SasamiRenderer
         psoTransparentBasic.BlendState = transparentBlend;
         psoTransparentBasic.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
         if (!createPipelineState("OpaqueTransparent", psoTransparentBasic, m_transparentBasicPipelineState)) { return false; }
+
+        D3D12_BLEND_DESC additiveBlend = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+        additiveBlend.RenderTarget[0].BlendEnable = TRUE;
+        additiveBlend.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
+        additiveBlend.RenderTarget[0].DestBlend = D3D12_BLEND_ONE;
+        additiveBlend.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+        additiveBlend.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ZERO;
+        additiveBlend.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ONE;
+        additiveBlend.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+        additiveBlend.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoSwrtReflectionComposite = psoBasic;
+        psoSwrtReflectionComposite.InputLayout = { nullptr, 0 };
+        psoSwrtReflectionComposite.VS = { ssaoVS->GetBufferPointer(), ssaoVS->GetBufferSize() };
+        psoSwrtReflectionComposite.PS = { swrtReflectionCompositePS->GetBufferPointer(), swrtReflectionCompositePS->GetBufferSize() };
+        psoSwrtReflectionComposite.BlendState = additiveBlend;
+        psoSwrtReflectionComposite.DepthStencilState.DepthEnable = FALSE;
+        psoSwrtReflectionComposite.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+        psoSwrtReflectionComposite.DepthStencilState.StencilEnable = FALSE;
+        if (!createPipelineState("SWRTReflectionComposite", psoSwrtReflectionComposite, m_swrtReflectionCompositePipelineState)) { return false; }
 
         // Shadow pipeline (depth-only, reuse VS; no PS)
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoShadow = {};

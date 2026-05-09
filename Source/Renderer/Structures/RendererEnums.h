@@ -29,6 +29,10 @@ namespace SasamiRenderer
             RuntimeAmbientOcclusionFiltered = 9,
             DirectionalLightDirection = 10,
             DirectionalLightNdotL = 11,
+            ReflectionRadiance = 12,
+            ReflectionAlpha = 13,
+            SwrtReflectionHitDistance = 14,
+            SwrtReflectionComposite = 15,
             Count,
 
             // Backward compatibility aliases.

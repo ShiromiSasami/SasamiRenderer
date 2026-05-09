@@ -136,7 +136,7 @@ namespace SasamiRenderer
         Resource m_shadowMap;
         DescriptorHeap m_dsvHeapShadow;
         CpuDescriptorHandle m_shadowSrvCpu{};
-        UINT m_shadowMapSize = 2048;
+        UINT m_shadowMapSize = 4096;
         Viewport m_shadowViewport{};
         Rect m_shadowScissor{};
         GpuDescriptorHandle m_shadowSrv{};

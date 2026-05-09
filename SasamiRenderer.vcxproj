@@ -313,6 +313,14 @@
       <Outputs>$(OutDir)Shaders\SSAO\SSAO_Blur_PS.PSMain.ps_$(RendererShaderModel).cso</Outputs>
       <AdditionalInputs>%(FullPath)</AdditionalInputs>
     </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\SWRT\SWRT_ReflectionComposite_PS.hlsl">
+      <FileType>Document</FileType>
+      <Message>DXC %(Filename)%(Extension)</Message>
+      <Command>if not exist "$(OutDir)Shaders\SWRT" mkdir "$(OutDir)Shaders\SWRT"
+"$(DxcExecutable)" -E PSMain -T ps_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\SWRT\SWRT_ReflectionComposite_PS.PSMain.ps_$(RendererShaderModel).cso" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Shaders\SWRT\SWRT_ReflectionComposite_PS.PSMain.ps_$(RendererShaderModel).cso</Outputs>
+      <AdditionalInputs>%(FullPath);$(ProjectDir)Source\Renderer\Shaders\Common\LightCB.hlsli</AdditionalInputs>
+    </CustomBuild>
     <CustomBuild Include="Source\Renderer\Shaders\RayMarch\RayMarch_VS.hlsl">
       <FileType>Document</FileType>
       <Message>DXC %(Filename)%(Extension)</Message>

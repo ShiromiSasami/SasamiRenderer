@@ -23,9 +23,9 @@ namespace SasamiRenderer
         // Quality/update settings resolved from the current performance preset.
         struct PartialBehavior
         {
-            uint32_t shadowMapSize           = 384u;
+            uint32_t shadowMapSize           = 4096u;
             uint32_t shadowUpdateInterval    = 1u;
-            float    reflectionResolutionScale = 0.35f;
+            float    reflectionResolutionScale = 1.0f;
             uint32_t reflectionUpdateInterval  = 2u;
             uint32_t reflectionPhaseCount      = 2u;
             float    reflectionMaxRoughness    = 1.0f;

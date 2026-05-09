@@ -10,7 +10,7 @@
 //   t0-t5 : BVH SRVs (not accessed – bound for root-sig compatibility)
 //   t6  : g_gbuffer  (current frame GBuffer – scratch SRV[0])
 //   t14 : g_reservoirIn  (temporal reservoirs from Pass2, inline SRV)
-//   u2  : g_reservoirOut (spatial output,                 inline UAV)
+//   u3  : g_reservoirOut (spatial output,                 inline UAV)
 //
 
 #include "SWRT/SWRT_Common.hlsli"
@@ -56,7 +56,7 @@ StructuredBuffer<GpuPointLightRT> g_pointLights : register(t12);
 StructuredBuffer<GpuSpotLightRT>  g_spotLights  : register(t13);
 
 StructuredBuffer<Reservoir>   g_reservoirIn  : register(t14);
-RWStructuredBuffer<Reservoir> g_reservoirOut : register(u2);
+RWStructuredBuffer<Reservoir> g_reservoirOut : register(u3);
 
 float EvalPhat(uint i, float3 pos, float3 N)
 {

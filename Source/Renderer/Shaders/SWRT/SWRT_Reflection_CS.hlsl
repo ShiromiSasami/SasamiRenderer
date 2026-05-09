@@ -62,11 +62,17 @@ cbuffer ReflectionFrameConstants : register(b0)
     uint  g_gbufferWidth;     // native G-Buffer resolution (full render res, >= g_renderWidth)
     uint  g_gbufferHeight;    // native G-Buffer resolution (full render res, >= g_renderHeight)
     uint  g_maxBounces;       // max reflection bounces per sample (1 = single-bounce, up to 8)
+    uint  g_debugView;        // RendererEnums::GBufferDebugView
+    uint  g_padDebug0;
+    uint  g_padDebug1;
+    uint  g_padDebug2;
 };
 
 #define SWRT_SAMPLE_IS  0u
 #define SWRT_SAMPLE_NEE 1u
 #define SWRT_SAMPLE_MIS 2u
+
+#define DEBUG_VIEW_SWRT_REFLECTION_HIT_DISTANCE 14u
 
 // ---------- G-Buffer inputs ----------
 // GBufferNormal  (R16G16B16A16_FLOAT): xyz = N*0.5+0.5 (encoded normal), w = camera distance
@@ -164,7 +170,6 @@ float3 ShadeDirectPBR(float3 pos, float3 N, float3 V, GpuMaterial mat)
     // ---- 直接光 (NEE / MIS) ----------------------------------------
     // IS Only モードのときはスキップ。NEE Only / MIS では全ライトへ shadow ray。
     if (g_samplingMode != SWRT_SAMPLE_IS)
-    if (g_samplingMode != SWRT_SAMPLE_IS)
     {
         // Directional light
         {
@@ -172,7 +177,7 @@ float3 ShadeDirectPBR(float3 pos, float3 N, float3 V, GpuMaterial mat)
             float  NdotL = max(dot(N, L), 0.0f);
             if (NdotL > 0.0f)
             {
-                bool inShadow = TraceAnyHit(OffsetRay(pos, N), L, 0.0f, 200.0f);
+                bool inShadow = TraceAnyHit(OffsetRay(pos, N), L, g_tMin, 200.0f);
                 if (!inShadow)
                 {
                     float3 H     = normalize(L + V);
@@ -201,16 +206,44 @@ float3 ShadeDirectPBR(float3 pos, float3 N, float3 V, GpuMaterial mat)
     // ---- Ambient/Sky (IS Only / MIS) ----------------------------------------
     // NEE Only モードのときはスキップ。
     if (g_samplingMode != SWRT_SAMPLE_NEE)
-    return outColor;
+    {
+        float3 diffuseIblRadiance = g_ambientColor * g_ambientIntensity;
+        float3 specularIblRadiance = diffuseIblRadiance;
+        if (g_iblEnabled > 0.5f)
+        {
+            diffuseIblRadiance += g_iblPrefilter.SampleLevel(
+                LinearClamp, N, max(g_iblPrefilterMaxMip, 0.0f)).rgb * g_iblIntensity;
+
+            float3 R = reflect(-V, N);
+            float  specularMip = saturate(roughness) * max(g_iblPrefilterMaxMip, 0.0f);
+            specularIblRadiance = g_iblPrefilter.SampleLevel(
+                LinearClamp, R, specularMip).rgb * g_iblIntensity;
+        }
+
+        float  NdotV = saturate(dot(N, V));
+        float3 F_ibl = FresnelSchlick(NdotV, F0);
+        float  smoothness = 1.0f - roughness;
+        float  dielectricVisibility = 0.08f * smoothness * smoothness;
+        float3 specularVisibility = max(F_ibl, float3(dielectricVisibility,
+                                                       dielectricVisibility,
+                                                       dielectricVisibility));
+
+        outColor += diffuseReflectance * diffuseIblRadiance;
+        outColor += specularVisibility * specularIblRadiance;
+    }
+
     return outColor;
 }
 
 float3 EvaluateReflectionHitAmbientFloor(GpuMaterial mat)
 {
     // Small floor to avoid fully black traced hits indoors without injecting
-    // sky / IBL color before the main PBR pass composites environment lighting.
-    static const float kHitAmbientFloor = 0.02f;
-    return SWRT_MaterialDiffuseReflectance(mat) * kHitAmbientFloor;
+    // sky color. Use the visible material color rather than diffuse-only color
+    // so metallic reflection hits do not collapse to black.
+    static const float kHitAmbientFloor = 0.06f;
+    float3 diffuseColor = SWRT_MaterialDiffuseReflectance(mat);
+    float3 visibleColor = lerp(diffuseColor, mat.baseColor.rgb, saturate(mat.metallic));
+    return visibleColor * kHitAmbientFloor;
 }
 
 float3 SampleReflectionEnvironment(float3 dir, float roughness)
@@ -259,6 +292,11 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
 
     if (linearDepth <= 0.0f)
     {
+        if (g_debugView == DEBUG_VIEW_SWRT_REFLECTION_HIT_DISTANCE)
+        {
+            g_reflOutput[id.xy] = float4(1.0f, 1.0f, 1.0f, 1.0f);
+            return;
+        }
         g_reflOutput[id.xy] = float4(0, 0, 0, 0); // sky pixel
         return;
     }
@@ -266,6 +304,11 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
     // Check TLAS is valid (needed for reflection ray)
     if (g_tlasNodes[0].leftChild == 0 && g_tlasNodes[0].rightOrCount == 0)
     {
+        if (g_debugView == DEBUG_VIEW_SWRT_REFLECTION_HIT_DISTANCE)
+        {
+            g_reflOutput[id.xy] = float4(1.0f, 1.0f, 1.0f, 1.0f);
+            return;
+        }
         g_reflOutput[id.xy] = float4(0, 0, 0, 0);
         return;
     }
@@ -296,10 +339,30 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
     float  metallic     = gbufMaterial.g;
     float3 albedo       = gbufAlbedo.rgb;
 
-    // Roughness-based fade: smooth falloff instead of hard cutoff.
+    if (g_debugView == DEBUG_VIEW_SWRT_REFLECTION_HIT_DISTANCE)
+    {
+        float3 reflDir = reflect(rayDir, hitNorm);
+        HitResult hit = TraceClosestHit(
+            OffsetRay(hitPos, hitNorm), reflDir, g_tMin, g_maxReflectionDistance);
+
+        // Miss is the far end of the ramp. Use a practical near-field range and
+        // soften the ramp so small hit distances do not collapse into solid black.
+        float debugRange = min(max(g_maxReflectionDistance, 1e-4f), 5.0f);
+        float distance01 = hit.hit
+            ? pow(saturate(max(hit.t, 0.0f) / debugRange), 0.45f)
+            : 1.0f;
+        g_reflOutput[id.xy] = float4(distance01.xxx, 1.0f);
+        return;
+    }
+
+    // Roughness-based fade: smooth falloff instead of hard cutoff, but keep a
+    // small metallic tail so rough metal still contributes blurred reflection.
     float roughnessFade = 1.0f - smoothstep(g_maxSurfaceRoughness * 0.7f,
                                             g_maxSurfaceRoughness,
                                             roughness);
+    float roughnessTail = saturate((roughness - g_maxSurfaceRoughness) /
+                                   max(1.0f - g_maxSurfaceRoughness, 1e-4f));
+    roughnessFade = max(roughnessFade, roughnessTail * lerp(0.08f, 0.22f, metallic));
     // Energy estimate for early-out (metallic surfaces have more energy)
     float energyEstimate = roughnessFade * lerp(0.04f, 1.0f, metallic);
     if (energyEstimate < g_minReflectionEnergy)
@@ -379,7 +442,7 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
             // distance-adaptive bias because it derives the minimum safe offset from
             // the ULP of the hit position, correctly scaling with world-space magnitude.
             HitResult hit = TraceClosestHit(
-                OffsetRay(pathOrigin, pathNorm), reflDir, 0.0f, g_maxReflectionDistance);
+                OffsetRay(pathOrigin, pathNorm), reflDir, g_tMin, g_maxReflectionDistance);
 
             if (!hit.hit)
             {

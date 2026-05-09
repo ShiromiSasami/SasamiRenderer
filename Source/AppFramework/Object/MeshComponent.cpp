@@ -166,6 +166,9 @@ namespace SasamiRenderer
 
     std::vector<RenderProxy> MeshComponent::BuildRenderProxies() const
     {
+        static constexpr float kOpaqueAlphaThreshold = 0.5f;
+        static constexpr float kTransparentTransmissionThreshold = 0.5f;
+
         std::vector<RenderProxy> proxies;
         proxies.reserve(m_staticMeshes.size());
 
@@ -177,8 +180,8 @@ namespace SasamiRenderer
             proxy.usesMetallicRoughnessTexture = src.usesMetallicRoughnessTexture;
             proxy.material = src.material;
             proxy.transparent =
-                (src.material.baseColor[3] < 0.999f) ||
-                (src.material.transmission > 0.001f);
+                (src.material.baseColor[3] < kOpaqueAlphaThreshold) ||
+                (src.material.transmission > kTransparentTransmissionThreshold);
             proxy.debugLabel = m_debugAssetPath;
             // Final model matrix for draw = local mesh transform * component transform.
             Mul4x4(src.localTransform, m_model, proxy.model);

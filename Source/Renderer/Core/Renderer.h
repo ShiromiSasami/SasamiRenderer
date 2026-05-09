@@ -396,6 +396,9 @@ namespace SasamiRenderer
         void ClearAndBindMainTargets(CommandList* cmdList, UINT backIndex);
         void BindMainTargets(CommandList* cmdList, UINT backIndex);
         void TransitionBackBufferToPresent(CommandList* cmdList, UINT backIndex);
+        bool CompositeSoftwareReflections(CommandList* cmdList,
+                                          UINT backIndex,
+                                          D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu);
         void CaptureSceneColorHistory(CommandList* cmdList, UINT backIndex);
         void SubmitAndPresent(CommandList* cmdList, UINT frameIndex);
         Texture* CreateTextureFromRgba8Data(const CpuTextureRgba8& src, CommandList* cmdList,

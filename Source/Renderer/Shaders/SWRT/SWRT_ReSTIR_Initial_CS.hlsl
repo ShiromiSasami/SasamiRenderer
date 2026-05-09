@@ -14,7 +14,7 @@
 //   u0  : g_gbufferOut   (RWTexture2D<float4>, scratch UAV[0])
 //   t12 : g_pointLights  (StructuredBuffer, inline SRV)
 //   t13 : g_spotLights   (StructuredBuffer, inline SRV)
-//   u2  : g_reservoirOut (RWStructuredBuffer<Reservoir>, inline UAV)
+//   u3  : g_reservoirOut (RWStructuredBuffer<Reservoir>, inline UAV)
 //
 
 #include "SWRT/SWRT_Common.hlsli"
@@ -65,7 +65,7 @@ StructuredBuffer<GpuSpotLightRT>  g_spotLights  : register(t13);
 
 // Outputs
 RWTexture2D<float4>           g_gbufferOut    : register(u0);  // normal.xyz + NDC depth
-RWStructuredBuffer<Reservoir> g_reservoirOut  : register(u2);
+RWStructuredBuffer<Reservoir> g_reservoirOut  : register(u3);
 
 // --------------------------------------------------------------------------
 // Helpers

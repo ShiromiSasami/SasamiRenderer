@@ -29,6 +29,7 @@ namespace SasamiRenderer
         inline PipelineState& GetSdfFluidPipelineState() { return m_sdfFluidPipelineState; }
         inline PipelineState& GetRayMarchPipelineState() { return m_rayMarchPipelineState; }
         inline PipelineState& GetVolumetricCloudPipelineState() { return m_volumetricCloudPipelineState; }
+        inline PipelineState& GetSwrtReflectionCompositePipelineState() { return m_swrtReflectionCompositePipelineState; }
         inline RootSignature& GetRootSignature() { return m_rootSignature; }
         inline RootSignature& GetSdfFluidRootSignature() { return m_sdfFluidRootSignature; }
         inline RootSignature& GetRayMarchRootSignature()  { return m_rayMarchRootSignature;  }
@@ -61,6 +62,7 @@ namespace SasamiRenderer
         PipelineState m_sdfFluidPipelineState;
         PipelineState m_rayMarchPipelineState;
         PipelineState m_volumetricCloudPipelineState;
+        PipelineState m_swrtReflectionCompositePipelineState;
         RootSignature m_rootSignature;
         RootSignature m_sdfFluidRootSignature;
         RootSignature m_rayMarchRootSignature;

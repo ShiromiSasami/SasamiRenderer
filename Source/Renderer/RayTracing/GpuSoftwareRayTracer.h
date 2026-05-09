@@ -78,6 +78,7 @@ namespace SasamiRenderer
 
             // Maximum number of reflection bounces per sample ray (1 = single bounce).
             uint32_t maxBounces = 1;
+            uint32_t debugView = 0;
 
             // True when the camera moved since the last frame.
             // Causes forceFullRefresh and disables temporal history accumulation.
@@ -163,12 +164,19 @@ namespace SasamiRenderer
                                         RayTracingRuntimeStats& outStats);
 
         // Dispatches reflection compute shader; same UAV state contract as shadow.
-        // Routes through ReSTIR pipeline when mode==ReSTIR and ReSTIR pipeline is ready.
         bool RenderReflectionTexture(const ReflectionTextureDesc& desc,
                                      IRHIDevice& device,
                                      CommandList& cmdList,
                                      Resource& outTexture,
                                      RayTracingRuntimeStats& outStats);
+
+        // Populates the internal ReSTIR frame data used by RenderShadowReSTIR.
+        // scratchTexture must be in UAV state on entry and is left in UAV state.
+        bool PrepareReSTIRFrame(const ReflectionTextureDesc& desc,
+                                IRHIDevice& device,
+                                CommandList& cmdList,
+                                Resource& scratchTexture,
+                                RayTracingRuntimeStats& outStats);
 
         bool RenderAmbientOcclusionTexture(const AmbientOcclusionTextureDesc& desc,
                                            IRHIDevice& device,
@@ -330,6 +338,10 @@ namespace SasamiRenderer
             uint32_t gbufferWidth;   // native G-Buffer width  (may differ from renderWidth)
             uint32_t gbufferHeight;  // native G-Buffer height (may differ from renderHeight)
             uint32_t maxBounces;     // max reflection bounces per sample (1 = single-bounce)
+            uint32_t debugView;
+            uint32_t pad1;
+            uint32_t pad2;
+            uint32_t pad3;
         };
         static_assert(sizeof(ReflectionFrameConstants) >= 208u);
 
@@ -416,6 +428,7 @@ namespace SasamiRenderer
         std::vector<TlasNode>         m_topLevelNodes;
         std::vector<uint32_t>         m_topLevelInstanceOrder;
         uint64_t m_bvhGeometryVersion  = 0;
+        uint64_t m_bvhMaterialVersion  = 0;
         uint64_t m_bvhInstanceVersion  = 0;
 
         void RebuildAccelerationStructures();
@@ -433,6 +446,7 @@ namespace SasamiRenderer
         uint8_t* m_frameConstantsMapped = nullptr;
 
         uint64_t m_uploadedGeometryVersion = UINT64_MAX;
+        uint64_t m_uploadedMaterialVersion = UINT64_MAX;
         uint64_t m_uploadedInstanceVersion  = UINT64_MAX;
 
         // ---- Descriptor heap (GPU-visible CBV_SRV_UAV) ----
@@ -468,6 +482,7 @@ namespace SasamiRenderer
         // ---- Temporal EMA pass (Legacy reflection only) ----
         ComPtr<ID3D12RootSignature> m_reflTemporalRootSignature;
         ComPtr<ID3D12PipelineState> m_reflTemporalPso;
+        ComPtr<ID3D12RootSignature> m_reflAtrousRootSignature;
         ComPtr<ID3D12PipelineState> m_reflAtrousPso;
         Resource m_reflHistoryA;     // R16G16B16A16_FLOAT, ping-pong A
         Resource m_reflHistoryB;     // R16G16B16A16_FLOAT, ping-pong B

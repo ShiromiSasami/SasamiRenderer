@@ -361,6 +361,9 @@
     <CustomBuild Include="Source\Renderer\Shaders\SSAO\SSAO_PS.hlsl">
       <Filter>Shader Files\SSAO</Filter>
     </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\SWRT\SWRT_ReflectionComposite_PS.hlsl">
+      <Filter>Shader Files</Filter>
+    </CustomBuild>
     <CustomBuild Include="Source\Renderer\Shaders\VolumetricCloud\VolumetricCloud_VS.hlsl">
       <Filter>Shader Files\VolumetricCloud</Filter>
     </CustomBuild>

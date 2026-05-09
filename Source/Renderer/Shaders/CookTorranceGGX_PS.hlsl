@@ -501,6 +501,8 @@ PSOutput PSMain(PSInput i)
     float3 localReflection = 0.0;
     float roughnessAtten = 0.0;
     bool allowSpecularIblFallback = false;
+    bool useSwrtReflection = false;
+    float specularAo = 1.0;
     if (u_reflectionParams.x > 0.5 && u_reflectionParams.z > 0.5 && u_reflectionParams.w > 0.5) {
         if (u_reflectionParams.x > 1.5) {
             float2 reflectionUv = 0.0;
@@ -516,8 +518,11 @@ PSOutput PSMain(PSInput i)
             float2 reflectionUv = saturate(i.position.xy / u_reflectionParams.zw);
             float4 reflectionSample = ReflectionTex.SampleLevel(LinearWrap, reflectionUv, 0);
             localReflection = reflectionSample.rgb;
-            // Alpha carries SWRT roughnessAtten only; apply user intensity scale here.
-            roughnessAtten = saturate(reflectionSample.a * u_reflectionParams.y);
+            // SWRT is generated after this lighting pass in the current render graph.
+            // FinalLit receives the current-frame result in the post reflection composite.
+            // Debug views below still sample ReflectionTex directly.
+            roughnessAtten = 0.0;
+            useSwrtReflection = false;
         }
     }
     if (u_iblParams.x > 0.5) {
@@ -540,8 +545,11 @@ PSOutput PSMain(PSInput i)
 
         // AO-driven occlusion for indirect light:
         // - Diffuse IBL uses linear AO.
-        // - Specular IBL uses squared AO (ao^2) so reflection vanishes quickly in occluded areas.
-        float specularAo = rawAo * rawAo;
+        // - Specular AO is relaxed for metallic surfaces so they keep a visible
+        //   reflection response instead of disappearing under occlusion.
+        specularAo = lerp(rawAo * rawAo,
+                          saturate(SpecularOcclusion(rawAo, NdotV, roughness)),
+                          saturate(metallic));
         float3 indirectDiffuse = kdIbl * diffuseIBL * rawAo * u_iblParams.y;
         // Specular IBL is the fallback for untraced reflection rays. When SWRT
         // reflection is present, its RGB already encodes either traced-hit radiance
@@ -550,18 +558,29 @@ PSOutput PSMain(PSInput i)
             ? 0.0
             : (allowSpecularIblFallback ? specIBL * specularAo * u_iblParams.y : 0.0);
         if (roughnessAtten > 0.0) {
-            // Per-channel Fresnel: colored metals (gold, copper, etc.) must tint the
-            // reflection correctly. Using a scalar luminance of F here would cause
-            // green/blue bleed on surfaces whose F0 is dominated by red/gold.
-            // SWRT reflection contains traced-hit light or miss-time sky. IBL color
-            // should only enter through that miss path, not through an unoccluded floor.
-            float3 F_refl = FresnelSchlick(saturate(NdotV), F0);
-            indirectSpecular = F_refl * localReflection * roughnessAtten * specularAo;
+            if (useSwrtReflection) {
+                // Apply the current surface's split-sum specular BRDF to the traced
+                // incoming radiance. This keeps SWRT in the same linear-lighting path
+                // as regular specular IBL instead of additively compositing final color.
+                float3 reflectionBrdf = F0 * envBrdf.x + envBrdf.y;
+                indirectSpecular = localReflection * reflectionBrdf * roughnessAtten * specularAo;
+            } else {
+                // SSR samples screen color, so keep the existing Fresnel-style weight.
+                float3 F_refl = FresnelSchlick(saturate(NdotV), F0);
+                float smoothness = 1.0 - roughness;
+                float dielectricFloor = 0.20 * smoothness * smoothness;
+                float3 visibleReflectionFresnel = lerp(
+                    max(F_refl, float3(dielectricFloor, dielectricFloor, dielectricFloor)),
+                    F_refl,
+                    saturate(metallic));
+                float visibleReflectionAo = max(specularAo, 0.35);
+                indirectSpecular = visibleReflectionFresnel * localReflection * roughnessAtten * visibleReflectionAo;
+            }
         }
         ambient = indirectDiffuse + indirectSpecular;
     } else if (roughnessAtten > 0.0) {
         float3 F_refl = FresnelSchlick(saturate(NdotV), F0);
-        ambient += F_refl * localReflection * roughnessAtten * (rawAo * rawAo);
+        ambient += localReflection * F_refl * roughnessAtten * (rawAo * rawAo);
     }
     // Ambient floor: even in fully-occluded areas, retain a minimum bounce-light contribution
     // so indoor surfaces never go completely black. 0.04 ≈ dark interior scatter floor.
@@ -620,6 +639,28 @@ PSOutput PSMain(PSInput i)
     }
     if (debugMode == 11) { // Directional NdotL
         o.color = float4(NdotL.xxx, 1.0);
+        return o;
+    }
+    if (debugMode == 12) { // Reflection radiance
+        float2 reflectionUv = saturate(i.position.xy / max(u_reflectionParams.zw, float2(1.0, 1.0)));
+        float4 reflectionSample = ReflectionTex.SampleLevel(LinearWrap, reflectionUv, 0);
+        o.color = float4(saturate(reflectionSample.rgb), 1.0);
+        return o;
+    }
+    if (debugMode == 13) { // Reflection alpha / roughness attenuation
+        float2 reflectionUv = saturate(i.position.xy / max(u_reflectionParams.zw, float2(1.0, 1.0)));
+        float reflectionAlpha = ReflectionTex.SampleLevel(LinearWrap, reflectionUv, 0).a;
+        o.color = float4(saturate(reflectionAlpha).xxx, 1.0);
+        return o;
+    }
+    if (debugMode == 14) { // SWRT reflection hit distance
+        float2 reflectionUv = saturate(i.position.xy / max(u_reflectionParams.zw, float2(1.0, 1.0)));
+        float hitDistance = ReflectionTex.SampleLevel(LinearWrap, reflectionUv, 0).r;
+        o.color = float4(saturate(hitDistance).xxx, 1.0);
+        return o;
+    }
+    if (debugMode == 15) { // SWRT reflection composite only
+        o.color = float4(0.0, 0.0, 0.0, 1.0);
         return o;
     }
 

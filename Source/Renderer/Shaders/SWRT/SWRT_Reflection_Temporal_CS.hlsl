@@ -113,7 +113,7 @@ float MaterialValidationWeight(float4 curMaterial, float4 histMaterial)
     const float metallicDiff = abs(curMaterial.g - histMaterial.g);
     const float aoDiff = abs(curMaterial.b - histMaterial.b);
 
-    const float roughnessWeight = 1.0f - smoothstep(0.08f, 0.22f, roughnessDiff);
+    const float roughnessWeight = 1.0f - smoothstep(0.05f, 0.18f, roughnessDiff);
     const float metallicWeight = 1.0f - smoothstep(0.04f, 0.16f, metallicDiff);
     const float aoWeight = 1.0f - smoothstep(0.15f, 0.35f, aoDiff);
     return roughnessWeight * metallicWeight * aoWeight;
@@ -147,10 +147,24 @@ void CS_ReflectionTemporal(uint3 id : SV_DispatchThreadID)
     float4 histSurface = g_historySurface.Load(int3(prevHistoryPx, 0));
     float4 histMaterial = g_historyMaterial.Load(int3(prevHistoryPx, 0));
 
+    if (cur.a <= 0.0f || hist.a <= 0.0f)
+    {
+        g_outHist[id.xy] = cur;
+        g_outSurface[id.xy] = curSurface;
+        g_outMaterial[id.xy] = curMaterial;
+        return;
+    }
+
     const float surfaceWeight = reprojected ? HistoryValidationWeight(curSurface, histSurface, expectedPrevDepth) : 0.0f;
     const float materialWeight = reprojected ? MaterialValidationWeight(curMaterial, histMaterial) : 0.0f;
     const float historyWeight = surfaceWeight * materialWeight;
-    const float effectiveAlpha = lerp(1.0f, g_alpha, historyWeight);
+
+    // Rougher surfaces tend to be blurrier and tolerate more history, while
+    // smoother surfaces benefit from a slightly more reactive blend.
+    const float roughness = saturate(curMaterial.r);
+    const float roughnessHistoryScale = lerp(0.85f, 1.25f, roughness);
+    const float weightedHistory = saturate(historyWeight * roughnessHistoryScale);
+    const float effectiveAlpha = lerp(1.0f, g_alpha, weightedHistory);
     float4 blended = lerp(hist, cur, effectiveAlpha);
 
     g_outHist[id.xy] = blended;

@@ -2,10 +2,11 @@
 // SWRT_Reflection_ATrous_CS.hlsl
 // Edge-aware spatial denoiser for noisy SWRT reflection radiance.
 //
-// Bindings reuse the legacy temporal root signature:
+// Bindings use the dedicated A-Trous root signature:
 //   b0 = FilterCB
 //   t0 = source reflection radiance (RGBA16F)
 //   t1 = GBuffer normal/depth (RGBA16F, normal encoded as N*0.5+0.5, w=linear depth)
+//   t2 = GBuffer material (roughness, metallic, AO)
 //   u0 = filtered reflection radiance (RGBA16F)
 //
 
@@ -19,6 +20,7 @@ cbuffer FilterCB : register(b0)
 
 Texture2D<float4> g_source      : register(t0);
 Texture2D<float4> g_normalDepth : register(t1);
+Texture2D<float4> g_material     : register(t2);
 RWTexture2D<float4> g_output    : register(u0);
 
 float3 DecodeNormal(float3 encodedNormal)
@@ -35,8 +37,10 @@ void CS_ReflectionATrous(uint3 id : SV_DispatchThreadID)
     const int2 pixel = int2(id.xy);
     const float4 centerRadiance = g_source.Load(int3(pixel, 0));
     const float4 centerGBuffer = g_normalDepth.Load(int3(pixel, 0));
+    const float4 centerMaterial = g_material.Load(int3(pixel, 0));
     const float3 centerNormal = DecodeNormal(centerGBuffer.xyz);
     const float centerDepth = centerGBuffer.w;
+    const float centerRoughness = saturate(centerMaterial.r);
 
     if (centerDepth <= 0.0f || centerRadiance.a <= 0.0f)
     {
@@ -47,6 +51,9 @@ void CS_ReflectionATrous(uint3 id : SV_DispatchThreadID)
     static const float kernel[5] = { 1.0f / 16.0f, 4.0f / 16.0f, 6.0f / 16.0f, 4.0f / 16.0f, 1.0f / 16.0f };
 
     const int stepWidth = max(1, int(g_stepWidth + 0.5f));
+    const float normalPow = lerp(96.0f, 24.0f, centerRoughness);
+    const float depthScale = max(g_phiDepth, 1e-4f) * lerp(0.75f, 1.75f, centerRoughness);
+    const float roughnessScale = lerp(0.06f, 0.22f, centerRoughness);
     float4 sum = 0.0f;
     float weightSum = 0.0f;
 
@@ -61,14 +68,17 @@ void CS_ReflectionATrous(uint3 id : SV_DispatchThreadID)
                                            int2(int(g_width) - 1, int(g_height) - 1));
             const float4 sampleRadiance = g_source.Load(int3(samplePixel, 0));
             const float4 sampleGBuffer = g_normalDepth.Load(int3(samplePixel, 0));
+            const float4 sampleMaterial = g_material.Load(int3(samplePixel, 0));
             const float3 sampleNormal = DecodeNormal(sampleGBuffer.xyz);
             const float sampleDepth = sampleGBuffer.w;
+            const float sampleRoughness = saturate(sampleMaterial.r);
 
-            const float normalWeight = pow(saturate(dot(centerNormal, sampleNormal)), 32.0f);
-            const float depthWeight = exp(-abs(sampleDepth - centerDepth) / max(g_phiDepth, 1e-4f));
+            const float normalWeight = pow(saturate(dot(centerNormal, sampleNormal)), normalPow);
+            const float depthWeight = exp(-abs(sampleDepth - centerDepth) / depthScale);
+            const float roughnessWeight = exp(-abs(sampleRoughness - centerRoughness) / max(roughnessScale, 1e-4f));
             const float kernelWeight = kernel[ox + 2] * kernel[oy + 2];
             const float alphaWeight = saturate(sampleRadiance.a * 4.0f);
-            const float w = kernelWeight * normalWeight * depthWeight * alphaWeight;
+            const float w = kernelWeight * normalWeight * depthWeight * roughnessWeight * alphaWeight;
 
             sum += sampleRadiance * w;
             weightSum += w;

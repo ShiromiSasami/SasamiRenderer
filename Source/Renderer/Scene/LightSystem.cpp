@@ -709,7 +709,7 @@ namespace SasamiRenderer
     {
         float lightForward[3] = {};
 
-        const float stableOrthoHalf = (std::max)(m_lightOrthoHalf, m_shadowDistance * 0.5f);
+        const float stableOrthoHalf = (std::max)(m_lightOrthoHalf, m_shadowDistance * 0.25f);
         const float stableNear = (std::max)(0.001f,
                                             (std::min)(m_lightNear, m_lightDistance - m_shadowDistance));
         const float stableFar = (std::max)((std::max)(m_lightFar, stableNear + 1.0f),
@@ -886,7 +886,7 @@ namespace SasamiRenderer
         // シャドウマップの逆解像度（PCF テクスチャ座標オフセット計算用）
         cb.shadowParams[0] = (shadowMapWidth  > 0u) ? (1.0f / static_cast<float>(shadowMapWidth))  : 0.0f;
         cb.shadowParams[1] = (shadowMapHeight > 0u) ? (1.0f / static_cast<float>(shadowMapHeight)) : 0.0f;
-        cb.shadowParams[2] = 2.0f;              // Poisson-disk PCF radius in texels
+        cb.shadowParams[2] = useStableDirectionalShadowProjection ? 1.25f : 2.0f; // SWRTは少し細かくする
         cb.shadowParams[3] = m_aoMinOcclusion;  // AO minimum occlusion (UE-style floor)
         for (uint32_t cascadeIndex = 0; cascadeIndex < kDirectionalCascadeCount; ++cascadeIndex) {
             cb.shadowCascadeSplits[cascadeIndex] = shadowContext.cascadeSplitDepths[cascadeIndex];

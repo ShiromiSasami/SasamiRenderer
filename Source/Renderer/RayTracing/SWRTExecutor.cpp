@@ -7,6 +7,7 @@
 #include <cstring>
 #include <limits>
 
+#include "Foundation/Tools/DebugOutput.h"
 #include "Foundation/Math/MathUtil.h"
 #include "Renderer/Core/RenderTargetPool.h"
 #include "Renderer/RayTracing/GpuSoftwareRayTracer.h"
@@ -27,6 +28,15 @@ namespace SasamiRenderer
     namespace
     {
         constexpr float kTargetRayTracingFrameMs = 1000.0f / 64.0f;
+
+        bool UsesReflectionDebugView(RendererEnums::GBufferDebugView view)
+        {
+            return view == RendererEnums::GBufferDebugView::FinalLit ||
+                   view == RendererEnums::GBufferDebugView::ReflectionRadiance ||
+                   view == RendererEnums::GBufferDebugView::ReflectionAlpha ||
+                   view == RendererEnums::GBufferDebugView::SwrtReflectionHitDistance ||
+                   view == RendererEnums::GBufferDebugView::SwrtReflectionComposite;
+        }
 
         void HashBytes(uint64_t& hash, const void* data, size_t size)
         {
@@ -198,6 +208,7 @@ namespace SasamiRenderer
         HashBytes(hash, &iblEnabled,       sizeof(iblEnabled));
         HashBytes(hash, &settings.iblIntensity, sizeof(settings.iblIntensity));
         HashBytes(hash, &iblPrefilterMaxMip, sizeof(iblPrefilterMaxMip));
+        HashBytes(hash, &settings.gBufferDebugView, sizeof(settings.gBufferDebugView));
         return hash;
     }
 
@@ -476,6 +487,10 @@ namespace SasamiRenderer
                 break;
             }
 
+            const auto cascadeUavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(
+                m_renderTargetPool->GetSWRTShadowTexture().Get());
+            cmdList->ResourceBarrier(1u, &cascadeUavBarrier);
+
             runtimeStats.bvhNodeCount = std::max(runtimeStats.bvhNodeCount, cascadeStats.bvhNodeCount);
             runtimeStats.traceMs += cascadeStats.traceMs;
             runtimeStats.copyMs += cascadeStats.copyMs;
@@ -529,7 +544,8 @@ namespace SasamiRenderer
             return false;
         }
 
-        const float    reflectionScale  = behavior.reflectionResolutionScale;
+        const bool reflectionDebugView = UsesReflectionDebugView(settings.gBufferDebugView);
+        const float reflectionScale = reflectionDebugView ? 1.0f : behavior.reflectionResolutionScale;
         const uint32_t reflectionWidth  = ComputeScaledDimension(static_cast<uint32_t>(ctx.viewportWidth),  reflectionScale);
         const uint32_t reflectionHeight = ComputeScaledDimension(static_cast<uint32_t>(ctx.viewportHeight), reflectionScale);
         {
@@ -550,9 +566,10 @@ namespace SasamiRenderer
         const bool sceneChanged       = (m_cache.reflectionSceneVersion  != sceneVersion);
         const bool lightingChanged    = (m_cache.reflectionLightingHash   != lightingHash);
         const bool cameraChanged      = m_cache.reflectionValid && HasReflectionCameraChanged(ctx.cameraPos, ctx.cameraInvPV);
-        const bool forceFullRefresh   = resourceChanged || sceneChanged || lightingChanged || cameraChanged;
+        const bool forceFullRefresh   = resourceChanged || sceneChanged || lightingChanged || cameraChanged || reflectionDebugView;
         const bool needsRefresh       = forceFullRefresh || m_cache.reflectionPendingPhasePasses > 0u;
-        const bool intervalSatisfied  = (m_cache.framesSinceReflectionUpdate + 1u) >= behavior.reflectionUpdateInterval;
+        const bool intervalSatisfied  = reflectionDebugView ||
+                                        (m_cache.framesSinceReflectionUpdate + 1u) >= behavior.reflectionUpdateInterval;
 
         outStats.reflectionWidth           = reflectionWidth;
         outStats.reflectionHeight          = reflectionHeight;
@@ -594,11 +611,12 @@ namespace SasamiRenderer
         reflectionDesc.samplesPerPixel            = settings.swrtSamplesPerPixel;
         reflectionDesc.samplingMode               = settings.swrtSamplingMode;
         reflectionDesc.maxBounces                 = settings.swrtMaxBounces;
+        reflectionDesc.debugView                  = static_cast<uint32_t>(settings.gBufferDebugView);
         reflectionDesc.cameraChanged              = cameraChanged;
         reflectionDesc.preserveExistingPixels     = !forceFullRefresh;
-        reflectionDesc.denoiserEnabled            = settings.swrtDenoiserEnabled;
+        reflectionDesc.denoiserEnabled            = reflectionDebugView ? false : settings.swrtDenoiserEnabled;
         reflectionDesc.temporalAlpha              = settings.swrtReflectionTemporalAlpha;
-        reflectionDesc.atrousIterations           = settings.swrtReflectionAtrousIterations;
+        reflectionDesc.atrousIterations           = reflectionDebugView ? 0u : settings.swrtReflectionAtrousIterations;
         reflectionDesc.atrousPhiDepth             = settings.swrtReflectionAtrousPhiDepth;
         reflectionDesc.iblEnabled                 = m_skybox && m_skybox->IsIblEnabled();
         reflectionDesc.iblIntensity               = settings.iblIntensity;
@@ -644,20 +662,22 @@ namespace SasamiRenderer
             }
         }
 
-        // Transition G-Buffer textures to NON_PIXEL_SHADER_RESOURCE for compute shader access.
+        // Reflections run as a Scene phase completion node after the lighting pass.
+        // At this point the G-Buffer is still bound as render targets in the render
+        // graph, so transition from RENDER_TARGET rather than PIXEL_SHADER_RESOURCE.
         if (m_renderTargetPool->GetGBufferNormal().IsValid() &&
             m_renderTargetPool->GetGBufferMaterial().IsValid() &&
             m_renderTargetPool->GetGBufferAlbedo().IsValid())
         {
             D3D12_RESOURCE_BARRIER toNps[] = {
                 CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool->GetGBufferNormal().Get(),
-                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_RENDER_TARGET,
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
                 CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool->GetGBufferMaterial().Get(),
-                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_RENDER_TARGET,
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
                 CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool->GetGBufferAlbedo().Get(),
-                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_RENDER_TARGET,
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
             };
             cmdList->ResourceBarrier(_countof(toNps), toNps);
@@ -685,31 +705,7 @@ namespace SasamiRenderer
             D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
         cmdList->ResourceBarrier(1u, &reflectionToSrv);
 
-        // Restore G-Buffer textures to PIXEL_SHADER_RESOURCE state.
-        if (m_renderTargetPool->GetGBufferNormal().IsValid() &&
-            m_renderTargetPool->GetGBufferMaterial().IsValid() &&
-            m_renderTargetPool->GetGBufferAlbedo().IsValid())
-        {
-            D3D12_RESOURCE_BARRIER toPsr[] = {
-                CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool->GetGBufferNormal().Get(),
-                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
-                CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool->GetGBufferMaterial().Get(),
-                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
-                CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool->GetGBufferAlbedo().Get(),
-                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
-            };
-            cmdList->ResourceBarrier(_countof(toPsr), toPsr);
-        }
-
-        if (!reflOk) {
-            return false;
-        }
-
-        // ReSTIR Shadow pass (only when ReSTIR mode is active)
-        if (settings.swrtUseReSTIR)
+        if (reflOk && settings.swrtUseReSTIR)
         {
             if (m_renderTargetPool->EnsureReSTIRShadow(*m_device, reflectionWidth, reflectionHeight))
             {
@@ -719,12 +715,27 @@ namespace SasamiRenderer
                     D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                 cmdList->ResourceBarrier(1u, &shadowToUav);
 
-                RayTracingRuntimeStats shadowStats{};
-                m_gpuSoftwareRayTracer->RenderShadowReSTIR(reflectionDesc,
-                                                           *m_device,
-                                                           *cmdList,
-                                                           m_renderTargetPool->GetReSTIRShadowTexture(),
-                                                           shadowStats);
+                RayTracingRuntimeStats restirPrepStats{};
+                const bool restirPrepared = m_gpuSoftwareRayTracer->PrepareReSTIRFrame(
+                    reflectionDesc,
+                    *m_device,
+                    *cmdList,
+                    m_renderTargetPool->GetReSTIRShadowTexture(),
+                    restirPrepStats);
+
+                if (restirPrepared)
+                {
+                    RayTracingRuntimeStats shadowStats{};
+                    m_gpuSoftwareRayTracer->RenderShadowReSTIR(reflectionDesc,
+                                                               *m_device,
+                                                               *cmdList,
+                                                               m_renderTargetPool->GetReSTIRShadowTexture(),
+                                                               shadowStats);
+                }
+                else
+                {
+                    DebugLog("SWRTExecutor::ExecuteReflections: ReSTIR frame preparation failed; skipping ReSTIR shadow.\n");
+                }
 
                 const auto shadowToSrv = CD3DX12_RESOURCE_BARRIER::Transition(
                     m_renderTargetPool->GetReSTIRShadowTexture().Get(),
@@ -732,6 +743,31 @@ namespace SasamiRenderer
                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
                 cmdList->ResourceBarrier(1u, &shadowToSrv);
             }
+        }
+
+        // Restore the render graph's expected state. Final graph cleanup will later
+        // transition these resources to PIXEL_SHADER_RESOURCE for the next frame.
+        if (m_renderTargetPool->GetGBufferNormal().IsValid() &&
+            m_renderTargetPool->GetGBufferMaterial().IsValid() &&
+            m_renderTargetPool->GetGBufferAlbedo().IsValid())
+        {
+            D3D12_RESOURCE_BARRIER toRenderTarget[] = {
+                CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool->GetGBufferNormal().Get(),
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_RENDER_TARGET),
+                CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool->GetGBufferMaterial().Get(),
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_RENDER_TARGET),
+                CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool->GetGBufferAlbedo().Get(),
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_RENDER_TARGET),
+            };
+            cmdList->ResourceBarrier(_countof(toRenderTarget), toRenderTarget);
+        }
+
+        if (!reflOk) {
+            DebugLog("SWRTExecutor::ExecuteReflections: RenderReflectionTexture failed.\n");
+            return false;
         }
 
         outStats.hardwareSupported       = IsHardwareSupported();
