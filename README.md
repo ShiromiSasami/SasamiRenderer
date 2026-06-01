@@ -204,7 +204,34 @@ msbuild RayMarchApp.vcxproj /p:Configuration=Debug /p:Platform=x64
 
 出力先は各 `.vcxproj` の設定により `Build/bin/<Platform>/<Configuration>/` です。
 
-## Run
+### RHI バックエンドビルド設定
+
+`RhiBuild.props` は `SasamiRenderer.vcxproj`、`AppFramework.vcxproj`、
+`PBRApp.vcxproj`、`RayMarchApp.vcxproj` から import される共通 MSBuild
+設定ファイルです。ローカル生成物ではないため、ソース管理対象として保持します。
+
+既定では DirectX 12 パスをビルドします。
+
+- `RHI_DIRECTX12=1`
+- `RHI_DIRECTX11=0`
+- `RHI_VULKAN=0`
+- `RHI_OPENGL=0`
+
+バックエンド別ビルドは MSBuild プロパティで選択します。
+
+```bat
+msbuild SasamiRenderer.sln /p:Configuration=Debug /p:Platform=x64 /p:EnableVulkanBackend=true
+msbuild SasamiRenderer.sln /p:Configuration=Debug /p:Platform=x64 /p:EnableDirectX11Backend=true
+msbuild SasamiRenderer.sln /p:Configuration=Debug /p:Platform=x64 /p:EnableOpenGLBackend=true
+```
+
+これらのスイッチは対応する `RHI_*` プリプロセッサ定義を設定し、non-DX12
+ビルドでは既定の DX12 マクロを無効化します。さらにバックエンド固有のライブラリ
+を追加し、`Build/bin/x64/Debug/Vulkan/` のように出力先を分離します。Vulkan
+ビルドでは `VULKAN_SDK` が必要です。`EnableVulkanBackend=true` が指定され、
+`VULKAN_SDK` が未設定の場合は、`RhiBuild.props` が早い段階でビルドを失敗させます。
+
+## 実行
 
 ### PBRApp
 
@@ -241,9 +268,9 @@ msbuild RayMarchApp.vcxproj /p:Configuration=Debug /p:Platform=x64
   - wave LOD debug
   - cone march debug
 
-## Architecture
+## アーキテクチャ
 
-### PBR Transparency / BSDF Status
+### PBR 透明 / BSDF 状況
 
 SasamiRenderer の標準メッシュ材質は、まだ主に Cook-Torrance GGX BRDF パスです。ラスタ透過は BSDF 方向への初期拡張であり、完全な BTDF/BSDF レンダラーではありません。
 
@@ -308,7 +335,7 @@ flowchart TD
 
 `ApplicationCore` は `SObject` を所有し、`EcsRegistry` に型タグと `ObjectRefComponent` を登録します。モデルとライトは毎フレーム `RenderProxy` / `RenderLightProxy` に変換され、`Renderer` に同期されます。
 
-## Important Files
+## 重要ファイル
 
 | パス | 内容 |
 | --- | --- |
@@ -354,92 +381,99 @@ flowchart TD
 - `Source/Renderer/Shaders/Shadow/`: VSM シャドウ PS・ガウスブラー CS
 - `Source/Renderer/Shaders/SkinnedMesh_VS.hlsl`: GPU スキニング頂点シェーダ（4 ボーンインフルエンス）
 
-## Development Notes
+## 開発メモ
 
 - 変更前に `git status --short` で作業ツリーを確認してください。現時点では README 以外にも未コミット変更があります。
 - `x64/`, `.vs/`, `*.user`, 生成済みバイナリはコミット対象にしない方針です。
 - シェーダは Debug/Release の両方で `/WX` 相当の警告エラー扱いを維持してください。
 - D3D12 の不具合調査では Debug Layer と GPU-based validation を有効化してください。
-## Native Backend Bootstrap
+## ネイティブバックエンド初期化
 
-DirectX 12 remains the default runtime path. Additional graphics APIs are
-available as explicit build paths through `RhiBuild.props`:
+DirectX 12 は現在も既定の実行経路です。追加グラフィックス API は
+`RhiBuild.props` の明示的なビルド経路として選択します。
 
-- `/p:EnableVulkanBackend=true` sets `RHI_VULKAN=1`, disables
-  `RHI_DIRECTX12`, adds the Vulkan SDK include/library paths, and links
-  `vulkan-1.lib`.
-- `/p:EnableDirectX11Backend=true` sets `RHI_DIRECTX11=1`, disables
-  `RHI_DIRECTX12`, and links `d3d11.lib`.
-- `/p:EnableOpenGLBackend=true` sets `RHI_OPENGL=1`, disables
-  `RHI_DIRECTX12`, and links `opengl32.lib` / `gdi32.lib`.
+- `/p:EnableVulkanBackend=true` は `RHI_VULKAN=1` を設定し、
+  `RHI_DIRECTX12` を無効化します。Vulkan SDK の include/library path を追加し、
+  `vulkan-1.lib` をリンクします。
+- `/p:EnableDirectX11Backend=true` は `RHI_DIRECTX11=1` を設定し、
+  `RHI_DIRECTX12` を無効化して `d3d11.lib` をリンクします。
+- `/p:EnableOpenGLBackend=true` は `RHI_OPENGL=1` を設定し、
+  `RHI_DIRECTX12` を無効化して `opengl32.lib` / `gdi32.lib` をリンクします。
 
-Implemented native backend scope:
+プラットフォーム選択とバックエンド選択は別レイヤーです。`GraphicsDevice.h` は
+`PLATFORM_WINDOWS`、`PLATFORM_LINUX`、`PLATFORM_MACOS`、`PLATFORM_ANDROID`
+を自動判定し、コンパイル時に少なくとも 1 つの `PLATFORM_*` マクロと 1 つの
+`RHI_*` バックエンドマクロが有効であることを要求します。互換性のため、
+`PLATFORM_DX12`、`PLATFORM_DX11`、`PLATFORM_VULKAN`、`PLATFORM_OPENGL`
+のような旧バックエンドマクロ名も、新しい `RHI_*` マクロの alias として受け付けます。
 
-- `Source/Renderer/Core/VulkanGraphicsDevice.h/.cpp`: Vulkan instance, Win32
-  surface, physical/logical device, queues, swapchain, command buffers,
-  synchronization, native clear/submit/present frame path, and capability query.
-- `Source/Renderer/Core/Dx11GraphicsDevice.h/.cpp`: D3D11 device/context,
-  DXGI swapchain, back-buffer RTV, native clear/present frame path, and
-  capability query.
-- `Source/Renderer/Core/OpenGLGraphicsDevice.h/.cpp`: Win32 HDC/WGL context,
-  double-buffered pixel format, native clear/swap frame path, and capability
-  query.
-- API-neutral RHI descriptors in `RhiTypes.h` for textures, buffers,
-  render-pass attachments, graphics/compute pipelines, shader modules, and
-  backend frame execution.
-- API-neutral `IRhiDevice` / `IRhiCommandEncoder` boundary in `RhiDevice.h`
-  so future passes do not depend on D3D12, Vulkan, OpenGL, Metal, or DX11
-  native command/resource types.
-- runtime factory routing via `CreateRHIDevice(GraphicsRuntime::...)` for
-  DirectX12, Vulkan, DirectX11, and OpenGL when the matching macro is enabled.
+実装済みのネイティブバックエンド範囲:
 
-Current limitation: non-DX12 backends still default to the native clear/present
-path, but the feature render path migration has started. Static and skinned mesh
-buffers can upload through neutral RHI buffers, `RenderGraph` can bind/clear RHI
-RTV/DSV descriptors, DX11/OpenGL can bind RHI descriptor-backed targets, and
-Vulkan/DX11/OpenGL can bind RHI vertex/index buffers. The remaining work is to
-move `RenderPipelineStateCache`, shader artifacts, and the remaining render-node
-root-signature/descriptor-table setup away from D3D12-shaped compatibility
-objects.
+- `Source/Renderer/Core/VulkanGraphicsDevice.h/.cpp`: Vulkan instance、
+  Win32 surface、physical/logical device、queue、swapchain、command buffer、
+  同期、ネイティブ clear/submit/present frame path、capability query。
+- `Source/Renderer/Core/Dx11GraphicsDevice.h/.cpp`: D3D11 device/context、
+  DXGI swapchain、back-buffer RTV、ネイティブ clear/present frame path、
+  capability query。
+- `Source/Renderer/Core/OpenGLGraphicsDevice.h/.cpp`: Win32 HDC/WGL context、
+  double-buffered pixel format、ネイティブ clear/swap frame path、capability query。
+- `RhiTypes.h` に texture、buffer、render-pass attachment、graphics/compute
+  pipeline、shader module、backend frame execution 用の API-neutral RHI descriptor。
+- `RhiDevice.h` に API-neutral な `IRhiDevice` / `IRhiCommandEncoder` 境界。
+  将来の pass が D3D12 / Vulkan / OpenGL / Metal / DX11 のネイティブ
+  command/resource 型へ直接依存しないようにするための境界です。
+- 対応 macro が有効な場合に `CreateRHIDevice(GraphicsRuntime::...)` で
+  DirectX12 / Vulkan / DirectX11 / OpenGL へ routing する runtime factory。
 
-The migration boundary is explicit in `RhiBackendCapabilities`:
+現在の制限: RHI レイヤーはクロスプラットフォームな OS/バックエンド選択マクロを持っていますが、
+application/window 統合と確認済みバックエンド実装はまだ Windows/Win32 寄りです。
+Vulkan は現在 Win32 surface を作成し、OpenGL は Win32 HDC/WGL を使います。
+sample app framework も Win32 input と ImGui platform message を処理します。
+non-DX12 バックエンドはまだネイティブ clear/present path が中心ですが、feature render path
+移行は開始済みです。static/skinned mesh buffer は neutral RHI buffer へ upload でき、
+`RenderGraph` は RHI RTV/DSV descriptor の bind/clear に対応しています。
+DX11/OpenGL は RHI descriptor-backed target を bind でき、Vulkan/DX11/OpenGL は
+RHI vertex/index buffer bind に対応しています。今後は `RenderPipelineStateCache`、
+shader artifact、残りの render-node root-signature/descriptor-table setup を
+D3D12-shaped compatibility object から切り離し、その後 non-Win32 window/surface
+creation path を追加する必要があります。Linux/macOS/Android の完全な実行時対応は
+まだ未完了です。
 
-- `supportsNativeFrame`: the backend can initialize a native device/swapchain
-  and present at least a clear frame.
-- `supportsFeatureRenderPasses`: the backend can execute the engine render
-  graph and feature render nodes.
-- `supportsD3D12CompatibilitySurface`: legacy D3D12 wrapper calls are available.
-- `supportsRhiResourceCreation` / `supportsRhiDescriptorCreation`: neutral
-  `Rhi*Desc` resource and view creation is implemented.
-- `supportsRhiPipelineCreation`: neutral shader module, pipeline layout, and
-  graphics/compute pipeline creation is implemented for the backend's accepted
-  shader input format.
-- `supportsRhiCommandEncoding`: neutral command encoder creation/submission is
-  implemented.
+移行境界は `RhiBackendCapabilities` で明示します。
 
-DX12 currently supports the full feature path and the neutral resource/view
-surface, descriptor allocation/view creation, shader/layout/pipeline creation,
-and basic command encoding. Vulkan, DX11, and OpenGL support native frame
-execution plus neutral texture/buffer resources, views, shader modules, layouts,
-graphics/compute pipeline handles, and backend command encoders for pipeline
-bind, viewport/scissor, draw indexed, dispatch, and submission/flush. They still
-declare the feature pass surface unavailable until render-node binding and pass
-setup are translated away from D3D12 wrapper calls.
-Non-DX12 backends initialize ImGui as Win32 input/platform only; the DX12 ImGui
-render backend is used only when `supportsD3D12CompatibilitySurface=true`.
+- `supportsNativeFrame`: backend が native device/swapchain を初期化し、少なくとも
+  clear frame を present できる。
+- `supportsFeatureRenderPasses`: backend が engine render graph と feature render node
+  を実行できる。
+- `supportsD3D12CompatibilitySurface`: legacy D3D12 wrapper call が利用できる。
+- `supportsRhiResourceCreation` / `supportsRhiDescriptorCreation`: neutral な
+  `Rhi*Desc` resource / view creation が実装済み。
+- `supportsRhiPipelineCreation`: backend が受け付ける shader input format に対して、
+  neutral shader module、pipeline layout、graphics/compute pipeline creation が実装済み。
+- `supportsRhiCommandEncoding`: neutral command encoder の作成と submission が実装済み。
 
-Windows x64 backend build matrix verified on 2026-05-25:
+DX12 は現在、full feature path と neutral resource/view surface、descriptor allocation /
+view creation、shader/layout/pipeline creation、basic command encoding に対応しています。
+Vulkan / DX11 / OpenGL は native frame execution に加え、neutral texture/buffer
+resource、view、shader module、layout、graphics/compute pipeline handle、pipeline bind、
+viewport/scissor、draw indexed、dispatch、submission/flush 用の backend command encoder
+を持っています。ただし render-node binding と pass setup が D3D12 wrapper call から
+切り離されるまでは、feature pass surface は未対応として扱います。
 
-| Backend | Debug | Release | MSBuild property | Output directory |
+non-DX12 backend の ImGui は Win32 input/platform のみ初期化します。DX12 ImGui render
+backend は `supportsD3D12CompatibilitySurface=true` の場合のみ使います。
+
+Windows x64 バックエンドビルドマトリクスは 2026-05-25 に確認済みです。
+
+| バックエンド | Debug | Release | MSBuild プロパティ | 出力先 |
 | --- | --- | --- | --- | --- |
 | DirectX 12 | Pass | Pass | default | `Build/bin/x64/<Configuration>/` |
 | Vulkan | Pass | Pass | `/p:EnableVulkanBackend=true` | `Build/bin/x64/<Configuration>/Vulkan/` |
 | DirectX 11 | Pass | Pass | `/p:EnableDirectX11Backend=true` | `Build/bin/x64/<Configuration>/DirectX11/` |
 | OpenGL | Pass | Pass | `/p:EnableOpenGLBackend=true` | `Build/bin/x64/<Configuration>/OpenGL/` |
 
-The backend-specific output directories are intentional; they prevent
-incremental object files and libraries compiled with different `RHI_*` macros
-from being reused across backend builds.
+バックエンド別の出力 directory は意図的な分離です。異なる `RHI_*` マクロでコンパイルされた
+incremental object file や library が、バックエンド間で再利用されることを防ぎます。
 
 ## Source File Structure (2026-05)
 
