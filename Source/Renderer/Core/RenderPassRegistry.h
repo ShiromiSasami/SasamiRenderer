@@ -28,7 +28,7 @@ namespace SasamiRenderer
         };
 
         static constexpr size_t kBuiltinNodeCount =
-            static_cast<size_t>(RendererEnums::RenderNodeType::SdfFluid) + 1u;
+            static_cast<size_t>(RendererEnums::RenderNodeType::TransparentComposite) + 1u;
 
         void SetBuiltinNodes(std::array<std::shared_ptr<IRenderNode>, kBuiltinNodeCount> nodes);
 

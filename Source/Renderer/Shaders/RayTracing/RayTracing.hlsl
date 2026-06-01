@@ -38,6 +38,8 @@ struct MaterialData
     float roughness;
     float4 baseColor;
     float4 emissiveOcclusionStrength;
+    float4 transmissionParams; // x: transmission, y: ior, z: shell strength, w: thickness
+    float4 volumeParams;       // rgb: attenuation color, w: attenuation distance
 };
 
 struct InstanceData
@@ -64,6 +66,8 @@ struct SpotLightData
 
 static const uint MAX_POINT_LIGHTS = 16;
 static const uint MAX_SPOT_LIGHTS = 16;
+static const uint INSTANCE_MASK_RADIANCE = 0xFFu;
+static const uint INSTANCE_MASK_OPAQUE_SHADOW = 0xFEu;
 
 struct FrameConstants
 {
@@ -157,15 +161,15 @@ float2 WrapUv(float2 uv)
     return frac(uv);
 }
 
-float3 SampleAlbedo(MaterialData material, float2 uv, float3 fallbackColor)
+float4 SampleBaseColor(MaterialData material, float2 uv, float4 fallbackColor)
 {
-    const float3 baseColor = fallbackColor * material.baseColor.rgb;
+    const float4 baseColor = fallbackColor * material.baseColor;
     if (material.albedoDescriptorIndex < 0) {
         return baseColor;
     }
 
     Texture2D<float4> texture = ResourceDescriptorHeap[NonUniformResourceIndex(material.albedoDescriptorIndex)];
-    return texture.SampleLevel(LinearWrapSampler, WrapUv(uv), 0).rgb * baseColor;
+    return texture.SampleLevel(LinearWrapSampler, WrapUv(uv), 0) * baseColor;
 }
 
 float SampleAmbientOcclusion(MaterialData material, float2 uv)
@@ -246,7 +250,7 @@ RadiancePayload TraceRadianceRay(RayDesc ray, uint bounceIndex)
 
     TraceRay(SceneBVH,
              RAY_FLAG_FORCE_OPAQUE,
-             0xFF,
+             INSTANCE_MASK_RADIANCE,
              0,
              1,
              0,
@@ -304,7 +308,7 @@ void ClosestHitShader(inout RadiancePayload payload, in Attributes attributes)
     const float baryW = 1.0 - baryU - baryV;
 
     const float2 uv = v0.uv * baryW + v1.uv * baryU + v2.uv * baryV;
-    const float3 vertexColor = v0.color.rgb * baryW + v1.color.rgb * baryU + v2.color.rgb * baryV;
+    const float4 vertexColor = v0.color * baryW + v1.color * baryU + v2.color * baryV;
     const float3 localNormal = v0.normal * baryW + v1.normal * baryU + v2.normal * baryV;
     const float3 localGeometricNormal = cross(v1.position - v0.position, v2.position - v0.position);
     const float3 worldPosition = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
@@ -320,13 +324,22 @@ void ClosestHitShader(inout RadiancePayload payload, in Attributes attributes)
     }
 
     const MaterialData material = materials[instance.materialIndex];
-    const float3 albedo = SampleAlbedo(material, uv, vertexColor);
+    const float4 baseColor = SampleBaseColor(material, uv, vertexColor);
+    const float3 albedo = baseColor.rgb;
+    const float materialAlpha = Saturate(baseColor.a);
     const float ao = SampleAmbientOcclusion(material, uv);
     const float roughness = saturate(material.roughness);
     const float metallic = saturate(material.metallic);
+    const float transmission = saturate(material.transmissionParams.x);
+    const float materialIor = max(material.transmissionParams.y, 1.0);
+    const float shellStrength = max(material.transmissionParams.z, 0.0);
+    const float materialThickness = max(material.transmissionParams.w, 0.0);
+    const float3 attenuationColor = saturate(material.volumeParams.rgb);
+    const float attenuationDistance = max(material.volumeParams.w, 1e-4);
     const float3 emissive = material.emissiveOcclusionStrength.rgb;
     const float NdotV = Saturate(dot(normal, view));
     const float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
+    const float effectiveTransmission = transmission * (1.0 - metallic);
     float3 result = emissive;
     if (payload.bounceIndex <= 1u) {
         result += 0.08 * ao * albedo;
@@ -348,7 +361,7 @@ void ClosestHitShader(inout RadiancePayload payload, in Attributes attributes)
         shadowRay.TMax = 1000.0;
         TraceRay(SceneBVH,
                  RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
-                 0xFF,
+                 INSTANCE_MASK_OPAQUE_SHADOW,
                  0,
                  1,
                  1,
@@ -393,7 +406,7 @@ void ClosestHitShader(inout RadiancePayload payload, in Attributes attributes)
             pointShadowRay.TMax      = distance - 0.01;
             TraceRay(SceneBVH,
                      RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
-                     0xFF, 0, 1, 1,
+                     INSTANCE_MASK_OPAQUE_SHADOW, 0, 1, 1,
                      pointShadowRay, pointShadow);
             if (pointShadow.occluded != 0u) continue;
         }
@@ -435,7 +448,7 @@ void ClosestHitShader(inout RadiancePayload payload, in Attributes attributes)
             spotShadowRay.TMax      = distance - 0.01;
             TraceRay(SceneBVH,
                      RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
-                     0xFF, 0, 1, 1,
+                     INSTANCE_MASK_OPAQUE_SHADOW, 0, 1, 1,
                      spotShadowRay, spotShadow);
             if (spotShadow.occluded != 0u) continue;
         }
@@ -468,6 +481,43 @@ void ClosestHitShader(inout RadiancePayload payload, in Attributes attributes)
     }
 
     float3 outputColor = result;
+    if (gFrame.debugView == 0u &&
+        payload.bounceIndex < maxBounceCount &&
+        (materialAlpha < 0.999 || effectiveTransmission > 0.001)) {
+        const float3 viewFresnel = FresnelSchlick(NdotV, F0);
+        const float fresnelStrength = Saturate(max(viewFresnel.r, max(viewFresnel.g, viewFresnel.b)));
+        const float fresnelEdge = pow(1.0 - NdotV, 5.0);
+
+        float3 transmissionDir = refract(WorldRayDirection(), normal, 1.0 / materialIor);
+        if (dot(transmissionDir, transmissionDir) <= 1e-6) {
+            transmissionDir = WorldRayDirection();
+        }
+        transmissionDir = SafeNormalize(transmissionDir);
+
+        RayDesc transmissionRay;
+        transmissionRay.Origin = worldPosition + transmissionDir * 0.03;
+        transmissionRay.Direction = transmissionDir;
+        transmissionRay.TMin = 0.01;
+        transmissionRay.TMax = 10000.0;
+
+        const RadiancePayload transmissionPayload =
+            TraceRadianceRay(transmissionRay, payload.bounceIndex + 1u);
+        float3 transmittedRadiance =
+            transmissionPayload.color * lerp(1.0.xxx, albedo, effectiveTransmission * 0.35);
+        if (materialThickness > 0.0) {
+            transmittedRadiance *= pow(max(attenuationColor, float3(0.001, 0.001, 0.001)),
+                                       materialThickness / attenuationDistance);
+        }
+
+        const float alphaTransparency = 1.0 - materialAlpha;
+        const float opticalTransmission = effectiveTransmission * (1.0 - fresnelStrength);
+        const float transmissionWeight = Saturate(max(alphaTransparency, opticalTransmission));
+        const float shellAlpha = effectiveTransmission * shellStrength * (0.04 + 0.28 * fresnelEdge);
+
+        outputColor = lerp(result, transmittedRadiance, transmissionWeight);
+        outputColor += result * shellAlpha;
+    }
+
     switch (gFrame.debugView) {
     case 1u:
         outputColor = saturate(albedo);
@@ -527,7 +577,7 @@ void RayGenShader()
 
     TraceRay(SceneBVH,
              RAY_FLAG_FORCE_OPAQUE,
-             0xFF,
+             INSTANCE_MASK_RADIANCE,
              0,
              1,
              0,

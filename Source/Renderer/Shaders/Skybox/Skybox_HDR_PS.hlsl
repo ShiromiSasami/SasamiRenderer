@@ -38,7 +38,5 @@ float4 PSMain(PSInput i) : SV_TARGET
     float3 color = SkyboxTex.Sample(LinearWrap, sampleDir).rgb;
     color = ApplyDirectionalLightMarker(color, sampleDir);
 
-    color = color / (color + 1.0);
-    color = pow(color, 1.0 / 2.2);
     return float4(color, 1.0);
 }

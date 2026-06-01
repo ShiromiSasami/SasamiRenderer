@@ -8,9 +8,11 @@
 #include "Foundation/Tools/DebugOutput.h"
 #include "Foundation/Math/MathUtil.h"
 #include "Renderer/Scene/MeshBuffer.h"
+#include "Renderer/Scene/SkinnedMeshBuffer.h"
 #include "Renderer/RayTracing/RayTracingScene.h"
 #include "Renderer/RayTracing/DxrRayTracer.h"
 #include "Renderer/Utilities/ResourceUploadUtility.h"
+#include "Renderer/Structures/Skeleton.h"
 
 namespace SasamiRenderer
 {
@@ -119,12 +121,13 @@ namespace SasamiRenderer
 
     void SceneSubmitter::Initialize(const InitParams& params)
     {
-        m_device          = params.device;
-        m_meshBuffer      = params.meshBuffer;
-        m_rayTracingScene = params.rayTracingScene;
-        m_dxrRayTracer    = params.dxrRayTracer;
-        m_srvAllocFn      = params.srvAllocFn;
-        m_srvIndexFn      = params.srvIndexFn;
+        m_device             = params.device;
+        m_meshBuffer         = params.meshBuffer;
+        m_skinnedMeshBuffer  = params.skinnedMeshBuffer;
+        m_rayTracingScene    = params.rayTracingScene;
+        m_dxrRayTracer       = params.dxrRayTracer;
+        m_srvAllocFn         = params.srvAllocFn;
+        m_srvIndexFn         = params.srvIndexFn;
     }
 
     Texture* SceneSubmitter::CreateTextureFromRgba8Data(const CpuTextureRgba8& src,
@@ -321,5 +324,50 @@ namespace SasamiRenderer
         if (m_device) {
             m_dxrRayTracer->UpdateScene(*m_device, *m_rayTracingScene);
         }
+    }
+
+    void SceneSubmitter::SubmitSkinnedRenderProxies(std::vector<SkinnedRenderProxy>&& proxies,
+                                                    RendererFrameCoordinator& frameCoord,
+                                                    RendererFrameCoordinator::FrameContext& frame)
+    {
+        if (!m_device || !m_skinnedMeshBuffer || proxies.empty()) return;
+
+        // Ensure enough bone CB slots for this frame's skinned objects
+        frameCoord.EnsureBoneBuffers(frame, static_cast<UINT>(proxies.size()));
+
+        m_skinnedDrawItems.clear();
+        m_skinnedMeshes.clear();
+        m_skinnedMeshes.reserve(proxies.size());
+        m_skinnedDrawItems.reserve(proxies.size());
+
+        for (auto& proxy : proxies) {
+            const size_t meshIndex = m_skinnedMeshes.size();
+            m_skinnedMeshes.push_back(std::move(proxy.mesh));
+
+            SkinnedDrawItem item;
+            item.meshIndex       = meshIndex;
+            item.texture         = ResolveSceneTexture(proxy.albedoTexture);
+            item.occlusionTexture = ResolveSceneTexture(proxy.occlusionTexture);
+            item.material        = proxy.material;
+            item.transparent     = proxy.transparent;
+            std::memcpy(item.model, proxy.model, sizeof(item.model));
+
+            // Evaluate bone matrices and upload to per-frame CB
+            if (proxy.animController && proxy.animController->HasSkeleton()) {
+                float boneMatrices[Skeleton::kMaxBones * 16];
+                proxy.animController->GetBoneMatrices(boneMatrices);
+                item.boneMatricesCbGpu = frameCoord.PushBoneCB(frame, boneMatrices);
+            }
+
+            m_skinnedDrawItems.push_back(item);
+        }
+
+        m_skinnedMeshBuffer->Upload(*m_device, m_skinnedMeshes);
+    }
+
+    void SceneSubmitter::ClearSkinnedRenderProxies()
+    {
+        m_skinnedDrawItems.clear();
+        m_skinnedMeshes.clear();
     }
 }

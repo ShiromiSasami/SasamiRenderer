@@ -4,6 +4,8 @@
 #include "Renderer/Scene/SurfaceMaterial.h"
 #include "Renderer/Structures/Vertex.h"
 #include "Renderer/Structures/Mesh.h"
+#include "Renderer/Structures/Skeleton.h"
+#include "Renderer/Structures/SkeletonAnimation.h"
 
 namespace SasamiRenderer
 {
@@ -50,6 +52,9 @@ namespace SasamiRenderer
         bool alphaBlend = false;
         float transmissionFactor = 0.0f;
         float ior = 1.5f;
+        float thicknessFactor = 0.0f;
+        float attenuationColor[3] = { 1.0f, 1.0f, 1.0f };
+        float attenuationDistance = 1.0f;
     };
 
     struct GltfPrimitiveInstance {
@@ -74,11 +79,26 @@ namespace SasamiRenderer
         std::vector<GltfTexture> textures;
     };
 
+    struct SkinnedModelData
+    {
+        std::vector<SkinnedMesh>       meshes;
+        Skeleton                       skeleton;
+        std::vector<SkeletonAnimation> animations;
+
+        // Per-mesh texture paths (parallel to meshes)
+        std::vector<std::string>       albedoTexturePaths;
+        std::vector<std::string>       occlusionTexturePaths;
+        std::vector<SurfaceMaterial>   materials;
+    };
+
     // Minimal glTF 2.0 loader for static meshes with baseColor/occlusion textures.
     bool LoadGLTFStatic(const std::string& path, GltfScene& outScene);
     bool LoadStaticModel(const std::string& path,
                          StaticModelFormat format,
                          float uniformScale,
                          std::vector<LoadedStaticMesh>& outMeshes);
+
+    // glTF 2.0 loader for skinned meshes with skeleton and animations.
+    bool LoadGLTFSkinned(const std::string& path, SkinnedModelData& outData);
 }
 

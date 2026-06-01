@@ -21,84 +21,7 @@ struct PSInput
     float3 dir      : TEXCOORD0;
 };
 
-static const float PI = 3.14159265358979f;
-
-// ---------------------------------------------------------------------------
-// Value noise + FBM
-// ---------------------------------------------------------------------------
-float Hash3(float3 p)
-{
-    p = frac(p * float3(443.8975f, 441.423f, 437.195f));
-    p += dot(p, p.yxz + 19.19f);
-    return frac((p.x + p.y) * p.z);
-}
-
-float SmoothNoise(float3 p)
-{
-    float3 i = floor(p);
-    float3 f = frac(p);
-    f = f * f * (3.0f - 2.0f * f); // cubic smoothstep
-    return lerp(
-        lerp(lerp(Hash3(i),                  Hash3(i + float3(1,0,0)), f.x),
-             lerp(Hash3(i + float3(0,1,0)),  Hash3(i + float3(1,1,0)), f.x), f.y),
-        lerp(lerp(Hash3(i + float3(0,0,1)),  Hash3(i + float3(1,0,1)), f.x),
-             lerp(Hash3(i + float3(0,1,1)),  Hash3(i + float3(1,1,1)), f.x), f.y), f.z);
-}
-
-float FBM5(float3 p)
-{
-    float v = 0.0f;
-    float a = 0.5f;
-    [unroll]
-    for (int i = 0; i < 5; i++) {
-        v += a * SmoothNoise(p);
-        p = p * 2.02f + float3(73.1f, 61.4f, 53.7f);
-        a *= 0.5f;
-    }
-    return v;
-}
-
-// ---------------------------------------------------------------------------
-// Atmospheric sky (analytic Rayleigh + Mie approximation)
-// ---------------------------------------------------------------------------
-float3 ComputeSkyColor(float3 rd, float3 sunDir, float3 sunColor, float sunIntensity)
-{
-    float cosTheta   = dot(rd, sunDir);
-    float elevation  = rd.y; // +1 = zenith, -1 = nadir
-
-    // Sky gradient (zenith blue -> horizon haze -> ground)
-    float3 zenithColor  = float3(0.05f, 0.15f, 0.65f) * 2.0f;
-    float3 horizonColor = float3(0.50f, 0.68f, 0.88f) * 1.5f;
-    float3 groundColor  = float3(0.08f, 0.06f, 0.04f);
-
-    float3 skyBase;
-    if (elevation >= 0.0f) {
-        skyBase = lerp(horizonColor, zenithColor, pow(saturate(elevation), 0.4f));
-    } else {
-        skyBase = lerp(horizonColor, groundColor, saturate(-elevation * 5.0f));
-    }
-
-    // Warm tint near sun direction
-    float sunInfluence = saturate(cosTheta * 0.5f + 0.5f);
-    float3 warmTint = lerp(float3(1,1,1), sunColor * float3(1.1f, 0.9f, 0.7f), sunInfluence * 0.4f);
-    skyBase *= warmTint;
-
-    // Mie forward-scattering (sun halo)
-    float mie = pow(max(cosTheta, 0.0f), 6.0f) * 0.3f;
-    float3 mieColor = sunColor * mie * sunIntensity;
-
-    // Horizon glow along sun azimuth
-    float horizonFactor = pow(saturate(1.0f - abs(elevation)), 3.0f);
-    float3 horizGlow = sunColor
-        * lerp(float3(1.0f, 0.7f, 0.4f), float3(1.0f, 0.9f, 0.7f), sunIntensity)
-        * horizonFactor * max(cosTheta, 0.0f) * 0.4f * sunIntensity;
-
-    // Sun disc
-    float sunDisc = smoothstep(0.9996f, 1.0f, cosTheta);
-    float3 disc = sunColor * sunDisc * 12.0f * sunIntensity;
-
-    return max(skyBase + mieColor + horizGlow + disc, 0.0f);
-}
+#include "ProceduralSky/ProceduralSky.hlsli"
 
 // ---------------------------------------------------------------------------
 // SDF cloud density (FBM-based signed-distance field in cloud layer)
@@ -189,21 +112,15 @@ float4 PSMain(PSInput i) : SV_TARGET
     // 1. Atmospheric sky
     float3 sky = ComputeSkyColor(rd, sunDir, sunColor, sunIntensity);
 
-    // 2. Reinhard tone-map sky before cloud compositing
-    sky = sky / (sky + 1.0f);
-
-    // 3. Volumetric cloud ray march
+    // 2. Volumetric cloud ray march
     float4 clouds = float4(0, 0, 0, 0);
     if (rd.y > 0.01f && cloudCover > 0.01f) {
         clouds = MarchClouds(rd, sunDir, sunColor, sunIntensity,
                              time, cloudCover, cloudDensity);
     }
 
-    // 4. Composite clouds over sky
+    // 3. Composite clouds over sky. Tone mapping happens in the post process pass.
     float3 color = lerp(sky, clouds.rgb / max(clouds.a, 1e-4f), saturate(clouds.a));
 
-    // 5. Gamma correction
-    color = pow(max(color, 0.0f), 1.0f / 2.2f);
-
-    return float4(color, 1.0f);
+    return float4(max(color, 0.0f), 1.0f);
 }

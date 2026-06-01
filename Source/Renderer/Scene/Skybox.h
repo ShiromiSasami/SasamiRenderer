@@ -38,7 +38,7 @@ namespace SasamiRenderer
         void EnsureSkyboxTextureUploaded(CommandList* cmdList);
         void EnsureIblTexturesUploaded(CommandList* cmdList);
 
-        void Render(CommandList* cmdList,
+        void Render(IRhiCommandEncoder* enc,
                     RenderPipelineStateCache& pipelineStateCache,
                     DescriptorHeap& srvHeap,
                     const Viewport& viewport,

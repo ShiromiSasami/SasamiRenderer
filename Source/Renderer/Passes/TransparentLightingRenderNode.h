@@ -18,7 +18,7 @@ namespace SasamiRenderer
         void Setup(RenderGraphBuilder& builder) const override;
         bool Execute(const RenderNodeContextView& context) const override;
 
-        void Execute(CommandList* cmdList,
+        void Execute(IRhiCommandEncoder* enc,
                      RenderPipelineStateCache& pipelineStateCache,
                      DescriptorHeap& srvHeap,
                      const Viewport& viewport,
@@ -26,11 +26,15 @@ namespace SasamiRenderer
                      bool useTessellation,
                      GpuDescriptorHandle shadowSrv,
                      GpuDescriptorHandle spotShadowSrv,
+                     GpuDescriptorHandle vsmSrv,
                      GpuDescriptorHandle lightSrvTable,
                      GpuDescriptorHandle iblSrvTable,
                      GpuDescriptorHandle aoSrv,
-                     GpuDescriptorHandle reflectionSrv,
+                     GpuDescriptorHandle transmissionSceneColorSrv,
+                     GpuDescriptorHandle sceneDepthSrv,
+                     GpuDescriptorHandle transparentBackfaceDistanceSrv,
                      D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu,
-                     const std::function<void()>& drawCallback) const;
+                     const std::function<void()>& drawCallback,
+                     const std::function<void()>& drawSkinnedCallback) const;
     };
 }

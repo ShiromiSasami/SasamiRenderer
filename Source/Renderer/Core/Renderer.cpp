@@ -1,4 +1,6 @@
 #include "Renderer/Core/Renderer.h"
+#include "Renderer/Core/SceneSynchronizer.h"
+#include "Renderer/Core/EnvironmentManager.h"
 
 #include <algorithm>
 #include <array>
@@ -12,6 +14,7 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 #include <windows.h>
 #include <windowsx.h>
 
@@ -37,6 +40,259 @@ namespace SasamiRenderer
 
     namespace
     {
+        D3D12_RESOURCE_STATES ToCompatibilityDx12State(RhiResourceState state)
+        {
+            switch (state) {
+            case RhiResourceState::RenderTarget: return D3D12_RESOURCE_STATE_RENDER_TARGET;
+            case RhiResourceState::DepthWrite: return D3D12_RESOURCE_STATE_DEPTH_WRITE;
+            case RhiResourceState::DepthRead: return D3D12_RESOURCE_STATE_DEPTH_READ;
+            case RhiResourceState::ShaderResource: return D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+            case RhiResourceState::UnorderedAccess: return D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            case RhiResourceState::CopySource: return D3D12_RESOURCE_STATE_COPY_SOURCE;
+            case RhiResourceState::CopyDest: return D3D12_RESOURCE_STATE_COPY_DEST;
+            case RhiResourceState::Present: return D3D12_RESOURCE_STATE_PRESENT;
+            case RhiResourceState::Common:
+            default: return D3D12_RESOURCE_STATE_COMMON;
+            }
+        }
+
+        D3D_PRIMITIVE_TOPOLOGY ToCompatibilityDx12Topology(RhiPrimitiveTopology topology)
+        {
+            switch (topology) {
+            case RhiPrimitiveTopology::TriangleStrip: return D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
+            case RhiPrimitiveTopology::LineList: return D3D_PRIMITIVE_TOPOLOGY_LINELIST;
+            case RhiPrimitiveTopology::LineStrip: return D3D_PRIMITIVE_TOPOLOGY_LINESTRIP;
+            case RhiPrimitiveTopology::PointList: return D3D_PRIMITIVE_TOPOLOGY_POINTLIST;
+            case RhiPrimitiveTopology::PatchList: return D3D_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST;
+            case RhiPrimitiveTopology::TriangleList:
+            default: return D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+            }
+        }
+
+        class D3D12CommandListRhiEncoder final : public IRhiCommandEncoder
+        {
+        public:
+            D3D12CommandListRhiEncoder(IRHIDevice& device, CommandList& commandList)
+                : m_device(device)
+                , m_commandList(commandList)
+            {
+            }
+
+            void TransitionResources(const RhiResourceTransitionDesc* transitions, uint32_t count) override
+            {
+                if (!transitions || count == 0) {
+                    return;
+                }
+
+                std::vector<ResourceBarrier> barriers;
+                barriers.reserve(count);
+                for (uint32_t i = 0; i < count; ++i) {
+                    Resource* resource = m_device.GetD3D12CompatibilityResource(transitions[i].resource);
+                    if (!resource || !resource->IsValid()) {
+                        continue;
+                    }
+
+                    barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
+                        resource->Get(),
+                        ToCompatibilityDx12State(transitions[i].before),
+                        ToCompatibilityDx12State(transitions[i].after),
+                        transitions[i].subresource));
+                }
+
+                if (!barriers.empty()) {
+                    m_commandList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+                }
+            }
+
+            void SetViewports(const RhiViewport* viewports, uint32_t count) override
+            {
+                if (!viewports || count == 0) {
+                    return;
+                }
+
+                std::vector<Viewport> dxViewports(count);
+                for (uint32_t i = 0; i < count; ++i) {
+                    dxViewports[i] = {
+                        viewports[i].x,
+                        viewports[i].y,
+                        viewports[i].width,
+                        viewports[i].height,
+                        viewports[i].minDepth,
+                        viewports[i].maxDepth,
+                    };
+                }
+                m_commandList.RSSetViewports(count, dxViewports.data());
+            }
+
+            void SetScissors(const RhiRect* scissors, uint32_t count) override
+            {
+                if (!scissors || count == 0) {
+                    return;
+                }
+
+                std::vector<Rect> dxRects(count);
+                for (uint32_t i = 0; i < count; ++i) {
+                    dxRects[i] = { scissors[i].left, scissors[i].top, scissors[i].right, scissors[i].bottom };
+                }
+                m_commandList.RSSetScissorRects(count, dxRects.data());
+            }
+
+            void SetGraphicsPipeline(RhiPipelineHandle handle) override
+            {
+                if (!handle.IsValid()) return;
+                auto* pso = reinterpret_cast<ID3D12PipelineState*>(static_cast<uintptr_t>(handle.id));
+                m_commandList.Get()->SetPipelineState(pso);
+            }
+
+            void SetComputePipeline(RhiPipelineHandle handle) override
+            {
+                SetGraphicsPipeline(handle);
+            }
+
+            void SetPrimitiveTopology(RhiPrimitiveTopology topology) override
+            {
+                m_commandList.IASetPrimitiveTopology(ToCompatibilityDx12Topology(topology));
+            }
+
+            void Draw(const RhiDrawDesc& desc) override
+            {
+                m_commandList.DrawInstanced(desc.vertexCount,
+                                            desc.instanceCount,
+                                            desc.startVertex,
+                                            desc.startInstance);
+            }
+
+            void DrawIndexed(const RhiDrawIndexedDesc& desc) override
+            {
+                m_commandList.DrawIndexedInstanced(desc.indexCount,
+                                                   desc.instanceCount,
+                                                   desc.startIndex,
+                                                   desc.baseVertex,
+                                                   desc.startInstance);
+            }
+
+            void Dispatch(const RhiDispatchDesc& desc) override
+            {
+                m_commandList.Dispatch(desc.groupCountX, desc.groupCountY, desc.groupCountZ);
+            }
+
+            void SetGraphicsPipelineLayout(RhiPipelineLayoutHandle handle) override
+            {
+                if (!handle.IsValid()) return;
+                auto* sig = reinterpret_cast<ID3D12RootSignature*>(static_cast<uintptr_t>(handle.id));
+                m_commandList.Get()->SetGraphicsRootSignature(sig);
+            }
+
+            void SetComputePipelineLayout(RhiPipelineLayoutHandle handle) override
+            {
+                if (!handle.IsValid()) return;
+                auto* sig = reinterpret_cast<ID3D12RootSignature*>(static_cast<uintptr_t>(handle.id));
+                m_commandList.Get()->SetComputeRootSignature(sig);
+            }
+
+            void SetDescriptorHeap(RhiDescriptorHeapHandle handle) override
+            {
+                if (!handle.IsValid()) return;
+                auto* heap = reinterpret_cast<ID3D12DescriptorHeap*>(static_cast<uintptr_t>(handle.id));
+                m_commandList.SetDescriptorHeaps(1, &heap);
+            }
+
+            void SetGraphicsDescriptorTable(uint32_t slot, RhiGpuDescriptorHandle table) override
+            {
+                m_commandList.SetGraphicsRootDescriptorTable(slot, { table.ptr });
+            }
+
+            void SetComputeDescriptorTable(uint32_t slot, RhiGpuDescriptorHandle table) override
+            {
+                m_commandList.SetComputeRootDescriptorTable(slot, { table.ptr });
+            }
+
+            void SetGraphicsConstantBufferView(uint32_t slot, RhiGpuAddress address) override
+            {
+                m_commandList.SetGraphicsRootConstantBufferView(slot, address);
+            }
+
+            void SetComputeConstantBufferView(uint32_t slot, RhiGpuAddress address) override
+            {
+                m_commandList.SetComputeRootConstantBufferView(slot, address);
+            }
+
+            void SetGraphicsShaderResourceView(uint32_t slot, RhiGpuAddress address) override
+            {
+                m_commandList.SetGraphicsRootShaderResourceView(slot, address);
+            }
+
+            void SetComputeShaderResourceView(uint32_t slot, RhiGpuAddress address) override
+            {
+                m_commandList.SetComputeRootShaderResourceView(slot, address);
+            }
+
+            void SetRenderTargets(uint32_t numRtvs,
+                                  const RhiCpuDescriptorHandle* rtvs,
+                                  const RhiCpuDescriptorHandle* dsv = nullptr) override
+            {
+                std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> dxRtvs(numRtvs);
+                for (uint32_t i = 0; i < numRtvs; ++i)
+                    dxRtvs[i] = { static_cast<SIZE_T>(rtvs[i].ptr) };
+                const D3D12_CPU_DESCRIPTOR_HANDLE* dsvPtr = nullptr;
+                D3D12_CPU_DESCRIPTOR_HANDLE dxDsv{};
+                if (dsv && dsv->IsValid()) {
+                    dxDsv = { static_cast<SIZE_T>(dsv->ptr) };
+                    dsvPtr = &dxDsv;
+                }
+                m_commandList.OMSetRenderTargets(numRtvs,
+                                                  numRtvs > 0 ? dxRtvs.data() : nullptr,
+                                                  FALSE,
+                                                  dsvPtr);
+            }
+
+            void ClearRenderTarget(RhiCpuDescriptorHandle rtv, const RhiClearColor& color) override
+            {
+                const float rgba[4] = { color.r, color.g, color.b, color.a };
+                m_commandList.ClearRenderTargetView({ static_cast<SIZE_T>(rtv.ptr) }, rgba, 0, nullptr);
+            }
+
+            void ClearDepthStencil(RhiCpuDescriptorHandle dsv, float depth, uint8_t stencil) override
+            {
+                m_commandList.ClearDepthStencilView({ static_cast<SIZE_T>(dsv.ptr) },
+                                                    D3D12_CLEAR_FLAG_DEPTH,
+                                                    depth,
+                                                    stencil,
+                                                    0, nullptr);
+            }
+
+            void SetVertexBuffers(uint32_t startSlot, uint32_t count,
+                                  const RhiVertexBufferView* views) override
+            {
+                std::vector<D3D12_VERTEX_BUFFER_VIEW> dxViews(count);
+                for (uint32_t i = 0; i < count; ++i) {
+                    dxViews[i].BufferLocation = views[i].gpuAddress;
+                    dxViews[i].StrideInBytes  = views[i].strideInBytes;
+                    dxViews[i].SizeInBytes    = views[i].sizeInBytes;
+                }
+                m_commandList.IASetVertexBuffers(startSlot, count, dxViews.data());
+            }
+
+            void SetIndexBuffer(const RhiIndexBufferView& view) override
+            {
+                D3D12_INDEX_BUFFER_VIEW ibv{};
+                ibv.BufferLocation = view.gpuAddress;
+                ibv.SizeInBytes    = view.sizeInBytes;
+                ibv.Format         = view.is32Bit ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT;
+                m_commandList.IASetIndexBuffer(&ibv);
+            }
+
+        private:
+            IRHIDevice& m_device;
+            CommandList& m_commandList;
+        };
+
+        bool UsesNativeBackendFrame(const IRHIDevice& device)
+        {
+            return !device.GetCapabilities().supportsFeatureRenderPasses &&
+                   device.GetCapabilities().supportsNativeFrame;
+        }
+
         uint32_t ComputeScaledDimension(uint32_t dimension, float scale)
         {
             return std::max(1u, static_cast<uint32_t>(std::round(static_cast<float>(dimension) * scale)));
@@ -66,392 +322,12 @@ namespace SasamiRenderer
 
         bool UsesReflectionDebugView(RendererEnums::GBufferDebugView view)
         {
-            return view == RendererEnums::GBufferDebugView::FinalLit ||
-                   view == RendererEnums::GBufferDebugView::ReflectionRadiance ||
+            return view == RendererEnums::GBufferDebugView::ReflectionRadiance ||
                    view == RendererEnums::GBufferDebugView::ReflectionAlpha ||
                    view == RendererEnums::GBufferDebugView::SwrtReflectionHitDistance ||
                    view == RendererEnums::GBufferDebugView::SwrtReflectionComposite;
         }
     }
-
-    Renderer::Renderer()
-    {
-        ScopedPerfTimer perfTimer("Renderer::Renderer");
-
-        m_shadowRenderNode = std::make_shared<ShadowRenderNode>();
-        m_opaqueRenderNode = std::make_shared<OpaqueRenderNode>();
-        m_lightingRenderNode = std::make_shared<LightingRenderNode>();
-        m_transparentRenderNode = std::make_shared<TransparentRenderNode>();
-        m_transparentLightingRenderNode = std::make_shared<TransparentLightingRenderNode>();
-        m_skyboxRenderNode = std::make_shared<SkyboxRenderNode>();
-        m_postProcessRenderNode = std::make_shared<PostProcessRenderNode>();
-        m_rayTracingRenderNode = std::make_shared<RayTracingRenderNode>();
-        m_ssaoRenderNode = std::make_shared<SSAORenderNode>();
-        m_proceduralSkyRenderNode = std::make_shared<ProceduralSkyRenderNode>();
-        m_sdfFluidRenderNode = std::make_shared<SdfFluidRenderNode>();
-        m_volumetricCloudRenderNode = std::make_shared<VolumetricCloudRenderNode>();
-        m_debugProbeGridRenderNode = std::make_shared<DebugProbeGridRenderNode>();
-
-        m_passRegistry.SetBuiltinNodes({
-            m_shadowRenderNode, m_opaqueRenderNode, m_lightingRenderNode,
-            m_transparentRenderNode, m_transparentLightingRenderNode,
-            m_skyboxRenderNode, m_postProcessRenderNode, m_ssaoRenderNode,
-            m_proceduralSkyRenderNode, m_sdfFluidRenderNode
-        });
-
-        // Rebuild default order through AddPass so runtime order uses one path configuration flow.
-        SetRenderNodeSequence(std::vector<RenderNodeType>(RenderNodeConstants::kDefaultRenderPathSequence.begin(),
-                                                          RenderNodeConstants::kDefaultRenderPathSequence.end()));
-    }
-
-    Renderer::~Renderer()
-    {
-        if (m_device) {
-            m_device->WaitForGPU();
-        }
-
-        m_frameCoordinator.Shutdown(m_lightSystem);
-
-        m_skybox.Shutdown();
-
-        if (m_comInitialized) {
-            CoUninitialize();
-            m_comInitialized = false;
-        }
-    }
-
-    bool Renderer::Initialize(HWND hWnd, UINT width, UINT height)
-    {
-        ScopedPerfTimer perfTimer("Renderer::Initialize");
-        auto failInit = [](const char* message) -> bool {
-            DebugLogDialog(message, L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
-            return false;
-        };
-
-        HRESULT coHr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        if (SUCCEEDED(coHr)) {
-            m_comInitialized = true;
-        } else if (coHr != RPC_E_CHANGED_MODE) {
-            return failInit("Renderer::Initialize: CoInitializeEx failed.\n");
-        }
-
-        RECT rc{};
-        GetClientRect(hWnd, &rc);
-        UINT clientW = static_cast<UINT>(rc.right - rc.left);
-        UINT clientH = static_cast<UINT>(rc.bottom - rc.top);
-        if (clientW == 0 || clientH == 0) {
-            clientW = width;
-            clientH = height;
-        }
-
-        if (!IsGraphicsRuntimeEnabled(m_graphicsRuntime)) {
-            std::string msg = "Selected graphics runtime is disabled by build symbol: ";
-            msg += GraphicsRuntimeToString(m_graphicsRuntime);
-            msg += "\n";
-            return failInit(msg.c_str());
-        }
-
-        {
-            ScopedPerfTimer stepTimer("Renderer::Initialize.GraphicsDevice");
-            m_device = CreateRHIDevice(m_graphicsRuntime);
-            if (!m_device) {
-                std::string msg = "Failed to create graphics runtime: ";
-                msg += GraphicsRuntimeToString(m_graphicsRuntime);
-                msg += "\n";
-                return failInit(msg.c_str());
-            }
-            if (!m_device->Initialize(hWnd, clientW, clientH)) {
-                return failInit("Renderer::Initialize: IRHIDevice::Initialize failed.\n");
-            }
-        }
-
-        {
-            ScopedPerfTimer stepTimer("Renderer::Initialize.BackBufferTargets");
-            if (!m_renderTargetPool.InitializeBackBuffers(*m_device, m_device->GetSwapChain(), GetBackBufferCount())) {
-                return failInit("Renderer::Initialize: back buffer target initialization failed.\n");
-            }
-        }
-
-        {
-            ScopedPerfTimer stepTimer("Renderer::Initialize.RenderPipelineStateCache");
-            if (!m_pipelineStateCache.Initialize(*m_device)) {
-                return failInit("Renderer::Initialize: RenderPipelineStateCache::Initialize failed.\n");
-            }
-        }
-
-        {
-            ScopedPerfTimer stepTimer("Renderer::Initialize.SrvHeap");
-            if (!m_srvAllocator.Initialize(*m_device, 512)) {
-                return failInit("Renderer::Initialize: SRV descriptor heap creation failed.\n");
-            }
-        }
-
-        m_viewport = { 0.0f, 0.0f, static_cast<float>(clientW), static_cast<float>(clientH), 0.0f, 1.0f };
-        m_scissorRect = { 0, 0, static_cast<LONG>(clientW), static_cast<LONG>(clientH) };
-
-        {
-            ScopedPerfTimer stepTimer("Renderer::Initialize.NullTexture");
-            CpuDescriptorHandle nullTexCpu{};
-            GpuDescriptorHandle nullTexGpu{};
-            if (!m_srvAllocator.Allocate(1, nullTexCpu, nullTexGpu)) {
-                return failInit("Renderer::Initialize: SRV allocation failed for null texture.\n");
-            }
-            m_nullTextureSrv = nullTexGpu;
-
-            Resource nullResource;
-            D3D12_SHADER_RESOURCE_VIEW_DESC nullSrvDesc = {};
-            nullSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-            nullSrvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-            nullSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-            nullSrvDesc.Texture2D.MipLevels = 1;
-            m_device->CreateShaderResourceView(nullResource, &nullSrvDesc, nullTexCpu);
-        }
-
-        // (SWRT/ReSTIR SRV slots and descriptor heaps are now initialized by RenderTargetPool)
-
-        {
-            ScopedPerfTimer stepTimer("Renderer::Initialize.RayTracingDescriptors");
-            CpuDescriptorHandle rtCpu{};
-            GpuDescriptorHandle rtGpu{};
-            if (!m_srvAllocator.Allocate(6, rtCpu, rtGpu)) {
-                return failInit("Renderer::Initialize: ray tracing descriptor reservation failed.\n");
-            }
-
-            const UINT descriptorSize =
-                m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-            const UINT baseIndex = m_srvAllocator.GetIndex(rtGpu);
-
-            m_rayTracingDescriptors.outputUavCpu = rtCpu;
-            m_rayTracingDescriptors.outputDescriptorIndex = baseIndex;
-
-            m_rayTracingDescriptors.tlasSrvCpu = { rtCpu.ptr + descriptorSize * 1u };
-            m_rayTracingDescriptors.tlasDescriptorIndex = baseIndex + 1u;
-
-            m_rayTracingDescriptors.vertexSrvCpu = { rtCpu.ptr + descriptorSize * 2u };
-            m_rayTracingDescriptors.vertexDescriptorIndex = baseIndex + 2u;
-
-            m_rayTracingDescriptors.indexSrvCpu = { rtCpu.ptr + descriptorSize * 3u };
-            m_rayTracingDescriptors.indexDescriptorIndex = baseIndex + 3u;
-
-            m_rayTracingDescriptors.materialSrvCpu = { rtCpu.ptr + descriptorSize * 4u };
-            m_rayTracingDescriptors.materialDescriptorIndex = baseIndex + 4u;
-
-            m_rayTracingDescriptors.instanceSrvCpu = { rtCpu.ptr + descriptorSize * 5u };
-            m_rayTracingDescriptors.instanceDescriptorIndex = baseIndex + 5u;
-        }
-
-        auto allocateSrv = [this](UINT count, CpuDescriptorHandle& outCpu, GpuDescriptorHandle& outGpu) -> bool {
-            return m_srvAllocator.Allocate(count, outCpu, outGpu);
-        };
-
-        {
-            ScopedPerfTimer stepTimer("Renderer::Initialize.LightSystem");
-            if (!m_lightSystem.Initialize(*m_device, allocateSrv)) {
-                return failInit("Renderer::Initialize: LightSystem initialization failed.\n");
-            }
-        }
-
-        {
-            ScopedPerfTimer stepTimer("Renderer::Initialize.Skybox");
-            if (!m_skybox.Initialize(*m_device, allocateSrv)) {
-                return failInit("Renderer::Initialize: Skybox initialization failed.\n");
-            }
-        }
-
-        {
-            ScopedPerfTimer stepTimer("Renderer::Initialize.FrameCoordinator");
-            if (!m_frameCoordinator.Initialize(*m_device,
-                                               m_pipelineStateCache,
-                                               m_lightSystem,
-                                               GetBackBufferCount(),
-                                               allocateSrv)) {
-                return failInit("Renderer::Initialize: Frame context initialization failed.\n");
-            }
-        }
-
-        {
-            ScopedPerfTimer stepTimer("Renderer::Initialize.RenderTargetPool");
-            if (!m_renderTargetPool.Initialize(*m_device, clientW, clientH, GetBackBufferCount(), allocateSrv)) {
-                return failInit("Renderer::Initialize: RenderTargetPool initialization failed.\n");
-            }
-            if (!m_renderTargetPool.EnsureSSAO(*m_device, clientW, clientH)) {
-                return failInit("Renderer::Initialize: SSAO resource creation failed.\n");
-            }
-            if (!m_renderTargetPool.EnsureGBuffer(*m_device, clientW, clientH)) {
-                return failInit("Renderer::Initialize: GBuffer resource creation failed.\n");
-            }
-        }
-
-        {
-            ScopedPerfTimer stepTimer("Renderer::Initialize.DefaultMaterialTextures");
-            DeferredUploadBatch batch;
-            HRESULT uploadHr = m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, batch.allocator);
-            if (SUCCEEDED(uploadHr)) {
-                uploadHr = m_device->CreateCommandList(0,
-                                                       D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                                       batch.allocator,
-                                                       nullptr,
-                                                       batch.commandList);
-            }
-            if (FAILED(uploadHr)) {
-                return failInit("Renderer::Initialize: default material texture upload command list creation failed.\n");
-            }
-
-            CpuTextureRgba8 albedoFallback;
-            albedoFallback.pixels = { 255u, 255u, 255u, 255u };
-            albedoFallback.width = 1;
-            albedoFallback.height = 1;
-            m_defaultAlbedoTexture = CreateTextureFromRgba8Data(albedoFallback, &batch.commandList, batch.uploadResources);
-            if (!m_defaultAlbedoTexture) {
-                return failInit("Renderer::Initialize: albedo fallback texture creation failed.\n");
-            }
-
-            CpuTextureRgba8 aoFallback;
-            aoFallback.pixels = { 255u, 255u, 255u, 255u };
-            aoFallback.width = 1;
-            aoFallback.height = 1;
-
-            m_defaultOcclusionTexture = CreateTextureFromRgba8Data(aoFallback, &batch.commandList, batch.uploadResources);
-            if (!m_defaultOcclusionTexture) {
-                return failInit("Renderer::Initialize: AO fallback texture creation failed.\n");
-            }
-
-            batch.commandList.Close();
-            ID3D12CommandList* uploadLists[] = { batch.commandList.Get() };
-            m_device->GetCommandQueue()->ExecuteCommandLists(1, uploadLists);
-
-            batch.retireFenceValue = m_frameCoordinator.SignalQueueFence();
-            if (batch.retireFenceValue == 0) {
-                m_device->WaitForGPU();
-                return failInit("Renderer::Initialize: AO fallback fence signal failed.\n");
-            }
-
-            m_deferredUploadBatches.push_back(std::move(batch));
-        }
-
-        {
-            ScopedPerfTimer stepTimer("Renderer::Initialize.RayTracing");
-            if (!m_renderTargetPool.EnsureRayTracingOutput(*m_device, clientW, clientH)) {
-                return failInit("Renderer::Initialize: ray tracing resources initialization failed.\n");
-            }
-            m_rayTracingStats.hardwareSupported = IsHardwareRayTracingSupported();
-            if (!m_gpuSoftwareRayTracer.Initialize(*m_device)) {
-                DebugLog("Renderer::Initialize: GpuSoftwareRayTracer initialization failed.\n");
-            }
-            if (!m_probeGrid.Initialize(*m_device)) {
-                DebugLog("Renderer::Initialize: IrradianceProbeGrid initialization failed.\n");
-            }
-            if (m_debugProbeGridRenderNode) {
-                if (!m_debugProbeGridRenderNode->Initialize(*m_device)) {
-                    DebugLog("Renderer::Initialize: DebugProbeGridRenderNode initialization failed (non-fatal).\n");
-                } else {
-                    m_debugProbeGridRenderNode->SetProbeGrid(&m_probeGrid);
-                }
-            }
-            if (m_rayTracingStats.hardwareSupported) {
-                if (!m_dxrRayTracer.Initialize(*m_device, m_rayTracingDescriptors)) {
-                    DebugLog("Renderer::Initialize: DXR initialization failed. Hardware RT is unavailable.\n");
-                }
-            }
-        }
-
-        {
-            SWRTExecutor::InitParams swrtParams{};
-            swrtParams.device               = m_device.get();
-            swrtParams.renderTargetPool     = &m_renderTargetPool;
-            swrtParams.gpuSoftwareRayTracer = &m_gpuSoftwareRayTracer;
-            swrtParams.dxrRayTracer         = &m_dxrRayTracer;
-            swrtParams.rayTracingScene      = &m_rayTracingScene;
-            swrtParams.lightSystem          = &m_lightSystem;
-            swrtParams.skybox               = &m_skybox;
-            swrtParams.probeGrid            = &m_probeGrid;
-            swrtParams.srvHeap              = m_srvAllocator.GetHeap();
-            m_swrtExecutor.Initialize(swrtParams);
-        }
-
-        {
-            SceneSubmitter::InitParams submitterParams{};
-            submitterParams.device          = m_device.get();
-            submitterParams.meshBuffer      = &m_meshBuffer;
-            submitterParams.rayTracingScene = &m_rayTracingScene;
-            submitterParams.dxrRayTracer    = &m_dxrRayTracer;
-            submitterParams.srvAllocFn      = [this](UINT count, CpuDescriptorHandle& cpu, GpuDescriptorHandle& gpu) {
-                return m_srvAllocator.Allocate(count, cpu, gpu);
-            };
-            submitterParams.srvIndexFn      = [this](GpuDescriptorHandle handle) {
-                return m_srvAllocator.GetIndex(handle);
-            };
-            m_sceneSubmitter.Initialize(submitterParams);
-        }
-
-        // ---- Async compute resources ----
-        // Non-fatal: if compute queue is unavailable, SWRT falls back to graphics queue.
-        if (m_device->GetComputeQueue().IsValid()) {
-            const UINT frameCount = GetBackBufferCount();
-            m_computeAllocators.resize(frameCount);
-            bool computeOk = true;
-            for (UINT i = 0; i < frameCount && computeOk; ++i) {
-                if (FAILED(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE,
-                                                            m_computeAllocators[i]))) {
-                    DebugLog("Renderer::Initialize: compute command allocator creation failed.\n");
-                    computeOk = false;
-                }
-            }
-            if (computeOk) {
-                if (FAILED(m_device->CreateCommandList(0,
-                                                       D3D12_COMMAND_LIST_TYPE_COMPUTE,
-                                                       m_computeAllocators[0],
-                                                       nullptr,
-                                                       m_computeCmdList))) {
-                    DebugLog("Renderer::Initialize: compute command list creation failed.\n");
-                    computeOk = false;
-                }
-            }
-            if (computeOk) {
-                m_computeCmdList.Close();
-                m_computeCmdListReady = true;
-                if (FAILED(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE,
-                                                 m_crossQueueFence.GetAddressOf()))) {
-                    DebugLog("Renderer::Initialize: cross-queue fence creation failed.\n");
-                    m_computeCmdListReady = false;
-                } else {
-                    DebugLog("Renderer::Initialize: async compute queue initialized.\n");
-                }
-            }
-            if (!computeOk) {
-                m_computeAllocators.clear();
-            }
-        }
-
-        m_passRegistry.SetBuiltinNodes({
-            m_shadowRenderNode, m_opaqueRenderNode, m_lightingRenderNode,
-            m_transparentRenderNode, m_transparentLightingRenderNode,
-            m_skyboxRenderNode, m_postProcessRenderNode, m_ssaoRenderNode,
-            m_proceduralSkyRenderNode, m_sdfFluidRenderNode
-        });
-
-        // Propagate cloud settings to SdfFluidRenderNode (RayMarch sky/cloud uses these too).
-        if (m_sdfFluidRenderNode) {
-            m_sdfFluidRenderNode->SetCloudCover(m_settings.cloudCover);
-            m_sdfFluidRenderNode->SetCloudDensity(m_settings.cloudDensity);
-        }
-
-        EnsureVolumetricCloudPassInserted();
-
-        // Insert the debug probe grid after sky composition so deferred lighting has already
-        // produced SceneColor. Transparent passes still come later and can draw over it.
-        if (m_debugProbeGridRenderNode && m_debugProbeGridRenderNode->IsInitialized()) {
-            if (!AddPassAfter("Skybox", m_debugProbeGridRenderNode).IsValid()) {
-                if (!AddPassAfter("Lighting", m_debugProbeGridRenderNode).IsValid()) {
-                    AddPass(m_debugProbeGridRenderNode);
-                }
-            }
-        }
-
-        return true;
-    }
-
-    // Back buffer management is now delegated to RenderTargetPool.
 
     void Renderer::RetireDeferredUploadBatches()
     {
@@ -467,27 +343,8 @@ namespace SasamiRenderer
         m_deferredUploadBatches.erase(newEnd, m_deferredUploadBatches.end());
     }
 
-    void Renderer::EnsureEnvironmentTexturesUploaded(CommandList* cmdList)
-    {
-        if (!m_skybox.IsSkyboxTextureUploaded() && !m_skybox.HasSkyboxUploadAttempted()) {
-            m_skybox.EnsureSkyboxTextureUploaded(cmdList);
-            return;
-        }
-        if (!m_skybox.IsIblUploaded() && !m_skybox.HasIblUploadAttempted()) {
-            m_skybox.EnsureIblTexturesUploaded(cmdList);
-        }
-    }
-
-    SWRTExecutor::FrameContext Renderer::BuildSwrtFrameContext() const
-    {
-        SWRTExecutor::FrameContext ctx{};
-        std::memcpy(ctx.cameraPos,   m_cameraState.GetPos(),   sizeof(ctx.cameraPos));
-        std::memcpy(ctx.cameraInvPV, m_cameraState.GetInvPV(), sizeof(ctx.cameraInvPV));
-        ctx.viewportWidth  = m_viewport.Width;
-        ctx.viewportHeight = m_viewport.Height;
-        ctx.deltaTime      = m_deltaTime;
-        return ctx;
-    }
+    // EnsureEnvironmentTexturesUploaded and BuildSwrtFrameContext
+    // are now implemented in EnvironmentManager and SceneSynchronizer respectively.
 
     RenderNodeExecutionPolicy Renderer::BuildRenderNodeExecutionPolicy(bool executeOpaqueFamilyPasses,
                                                                        bool executeLightingFamilyPasses,
@@ -529,47 +386,51 @@ namespace SasamiRenderer
         policy.iblIntensity = m_settings.iblIntensity;
         policy.gBufferDebugView = m_settings.gBufferDebugView;
         policy.renderPathMode = m_settings.renderPathMode;
+        policy.vsmBlurEnabled = m_settings.vsmBlurEnabled;
         m_lightSystem.SetAoMinOcclusion(m_settings.aoMinOcclusion);
         return policy;
     }
 
     RenderNodeFrameInputs Renderer::BuildRenderNodeFrameInputs(CommandList* cmdList,
+                                                               IRhiCommandEncoder* commandEncoder,
                                                                RendererFrameCoordinator::FrameContext* frame,
                                                                D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu,
                                                                GpuDescriptorHandle defaultAoSrv)
     {
         RenderNodeFrameInputs inputs{};
-        inputs.cmdList = cmdList;
-        inputs.pipelineStateCache = &m_pipelineStateCache;
-        inputs.srvHeap = m_srvAllocator.GetHeap();
-        inputs.viewport = &m_viewport;
-        inputs.scissorRect = &m_scissorRect;
-        inputs.frameCoordinator = &m_frameCoordinator;
-        inputs.frame = frame;
+        inputs.execution.cmdList = cmdList;
+        inputs.execution.commandEncoder = commandEncoder;
+        inputs.execution.pipelineStateCache = &m_pipelineStateCache;
+        inputs.execution.srvHeap = m_srvAllocator.GetHeap();
+        inputs.execution.viewport = &m_viewport;
+        inputs.execution.scissorRect = &m_scissorRect;
+        inputs.execution.frameCoordinator = &m_frameCoordinator;
+        inputs.execution.frame = frame;
 
-        inputs.lightSystem = &m_lightSystem;
-        inputs.frameLight = frame ? &frame->light : nullptr;
+        inputs.lighting.lightSystem = &m_lightSystem;
+        inputs.lighting.frameLight = frame ? &frame->light : nullptr;
         inputs.skybox = &m_skybox;
-        inputs.cameraPV = m_cameraState.GetPV();
-        inputs.cameraInvPV = m_cameraState.GetInvPV();
-        inputs.cameraPos = m_cameraState.GetPos();
-        inputs.cameraRight = m_cameraState.GetRight();
-        inputs.cameraUp = m_cameraState.GetUp();
-        inputs.cameraForward = m_cameraState.GetForward();
-        inputs.cameraTanHalfFovY = m_cameraState.GetTanHalfFovY();
-        inputs.cameraAspectRatio = m_cameraState.GetAspectRatio();
-        inputs.cameraMode = m_cameraState.GetCameraMode();
-        inputs.shadowSrv =
+        inputs.camera.pv = m_cameraState.GetPV();
+        inputs.camera.invPv = m_cameraState.GetInvPV();
+        inputs.camera.pos = m_cameraState.GetPos();
+        inputs.camera.right = m_cameraState.GetRight();
+        inputs.camera.up = m_cameraState.GetUp();
+        inputs.camera.forward = m_cameraState.GetForward();
+        inputs.camera.tanHalfFovY = m_cameraState.GetTanHalfFovY();
+        inputs.camera.aspectRatio = m_cameraState.GetAspectRatio();
+        inputs.camera.mode = m_cameraState.GetCameraMode();
+        inputs.shadow.shadowSrv =
             ((m_settings.renderPathMode == RenderPathMode::Raster) &&
              m_settings.rasterSoftwareRayTracedDirectionalShadowEnabled &&
              m_renderTargetPool.GetSWRTShadowTexture().IsValid() &&
              m_swrtExecutor.IsShadowCacheValid())
                 ? m_renderTargetPool.GetSWRTShadowSrv()
                 : m_lightSystem.GetShadowSrv();
-        inputs.spotShadowSrv = m_lightSystem.GetSpotShadowSrv();
-        inputs.lightSrvTable = frame ? frame->light.lightSrvTable : GpuDescriptorHandle{};
-        inputs.iblSrvTable = m_skybox.GetIblSrvTable();
-        inputs.aoSrv = defaultAoSrv;
+        inputs.shadow.spotShadowSrv = m_lightSystem.GetSpotShadowSrv();
+        inputs.shadow.vsmSrv = m_lightSystem.GetVsmSrv();
+        inputs.lighting.lightSrvTable = frame ? frame->light.lightSrvTable : GpuDescriptorHandle{};
+        inputs.lighting.iblSrvTable = m_skybox.GetIblSrvTable();
+        inputs.ao.aoSrv = defaultAoSrv;
         const bool useSwrtReflection =
             (m_settings.renderPathMode == RenderPathMode::Raster) &&
             m_settings.rasterSoftwareRayTracedReflectionEnabled &&
@@ -583,53 +444,70 @@ namespace SasamiRenderer
         inputs.reflectionSrv = useSwrtReflection
             ? m_renderTargetPool.GetSWRTReflectionSrv()
             : (useScreenSpaceReflection ? m_renderTargetPool.GetTransparentSceneColorCopySrv() : m_nullTextureSrv);
-        inputs.lightCbGpu = lightCbGpu;
+        inputs.transmissionSceneColorSrv = m_renderTargetPool.GetTransmissionSceneColorCopyTexture().IsValid()
+            ? m_renderTargetPool.GetTransmissionSceneColorCopySrv()
+            : m_nullTextureSrv;
+        inputs.transparentBackfaceDistanceSrv = m_renderTargetPool.GetTransparentBackfaceDistanceTexture().IsValid()
+            ? m_renderTargetPool.GetTransparentBackfaceDistanceSrv()
+            : m_nullTextureSrv;
+        inputs.transparentOitAccumSrv = m_renderTargetPool.GetTransparentOitAccumTexture().IsValid()
+            ? m_renderTargetPool.GetTransparentOitAccumSrv()
+            : m_nullTextureSrv;
+        inputs.transparentOitRevealageSrv = m_renderTargetPool.GetTransparentOitRevealageTexture().IsValid()
+            ? m_renderTargetPool.GetTransparentOitRevealageSrv()
+            : m_nullTextureSrv;
+        inputs.lighting.lightCbGpu = lightCbGpu;
         inputs.sceneTimeSec = m_sceneTime;
 
+        // GBuffer SRV inputs for deferred/composition passes.
+        inputs.gbuffer.albedoSrv   = m_renderTargetPool.GetGBufferAlbedoSrv();
+        inputs.gbuffer.materialSrv = m_renderTargetPool.GetGBufferMaterialSrv();
+        inputs.gbuffer.emissiveSrv = m_renderTargetPool.GetGBufferEmissiveSrv();
+
         // Runtime AO resources. SSAO and RTAO share the same AO consumption slot in lighting.
-        inputs.depthSrv = m_renderTargetPool.GetDepthSrv();
-        inputs.gbufferNormalSrv = m_renderTargetPool.GetGBufferNormal().IsValid()
+        inputs.gbuffer.depthSrv = m_renderTargetPool.GetDepthSrv();
+        inputs.gbuffer.normalSrv = m_renderTargetPool.GetGBufferNormal().IsValid()
             ? m_renderTargetPool.GetGBufferNormalSrv()
             : m_nullTextureSrv;
-        inputs.depthResource = m_renderTargetPool.GetDepth().IsValid() ? m_renderTargetPool.GetDepth().Get() : nullptr;
+        inputs.gbuffer.depthResource = m_renderTargetPool.GetDepth().IsValid() ? m_renderTargetPool.GetDepth().Get() : nullptr;
         const bool usesSsaoAo = m_settings.runtimeAoEnabled &&
             UsesSsaoRuntimeAmbientOcclusion(m_settings.ambientOcclusionMode, m_settings.runtimeAoMethod);
         const bool usesRayTracedAo = m_settings.runtimeAoEnabled &&
             UsesRayTracedRuntimeAmbientOcclusion(m_settings.ambientOcclusionMode, m_settings.runtimeAoMethod);
-        inputs.ssaoRtv = m_renderTargetPool.GetSSAORtv();
-        inputs.ssaoResource =
+        inputs.ao.ssaoRtv = m_renderTargetPool.GetSSAORtv();
+        inputs.ao.ssaoResource =
             (usesSsaoAo && m_renderTargetPool.GetSSAOTexture().IsValid()) ? m_renderTargetPool.GetSSAOTexture().Get() : nullptr;
-        inputs.ssaoRawSrv =
+        inputs.ao.ssaoRawSrv =
             (usesSsaoAo && m_renderTargetPool.GetSSAOTexture().IsValid()) ? m_renderTargetPool.GetSSAOSrv() : m_nullTextureSrv;
-        inputs.ssaoBlurRtv = m_renderTargetPool.GetSSAOBlurRtv();
-        inputs.ssaoBlurResource =
+        inputs.ao.ssaoBlurRtv = m_renderTargetPool.GetSSAOBlurRtv();
+        inputs.ao.ssaoBlurResource =
             (usesSsaoAo && m_renderTargetPool.GetSSAOBlurTexture().IsValid()) ? m_renderTargetPool.GetSSAOBlurTexture().Get() : nullptr;
         switch (m_settings.ambientOcclusionMode) {
         case RendererEnums::AmbientOcclusionMode::MaterialOnly:
-            inputs.screenSpaceAoSrv = defaultAoSrv;
+            inputs.ao.screenSpaceAoSrv = defaultAoSrv;
             break;
         case RendererEnums::AmbientOcclusionMode::RuntimeAOOnly:
         case RendererEnums::AmbientOcclusionMode::Hybrid:
             if (usesRayTracedAo) {
-                inputs.screenSpaceAoSrv =
+                inputs.ao.screenSpaceAoSrv =
                     m_renderTargetPool.GetSWRTAmbientOcclusionTexture().IsValid()
                         ? m_renderTargetPool.GetSWRTAmbientOcclusionSrv()
                         : defaultAoSrv;
             } else {
-                inputs.screenSpaceAoSrv =
+                inputs.ao.screenSpaceAoSrv =
                     m_renderTargetPool.GetSSAOBlurTexture().IsValid() ? m_renderTargetPool.GetSSAOBlurSrv()
                     : m_renderTargetPool.GetSSAOTexture().IsValid() ? m_renderTargetPool.GetSSAOSrv()
                     : defaultAoSrv;
             }
             break;
         case RendererEnums::AmbientOcclusionMode::RayTracedAOOnly:
-            inputs.screenSpaceAoSrv =
+            inputs.ao.screenSpaceAoSrv =
                 m_renderTargetPool.GetSWRTAmbientOcclusionTexture().IsValid()
                     ? m_renderTargetPool.GetSWRTAmbientOcclusionSrv()
                     : defaultAoSrv;
             break;
         default:
-            inputs.screenSpaceAoSrv = defaultAoSrv;
+            inputs.ao.screenSpaceAoSrv = defaultAoSrv;
             break;
         }
 
@@ -653,7 +531,7 @@ namespace SasamiRenderer
                 m_cameraState.GetPos()[2],
                 static_cast<float>(m_settings.runtimeAoQuality)
             };
-            inputs.ssaoCbGpu = m_frameCoordinator.PushCameraCB(
+            inputs.ao.ssaoCbGpu = m_frameCoordinator.PushCameraCB(
                 *frame, m_cameraState.GetPV(), m_cameraState.GetInvPV(), ssaoExtra0, ssaoExtra1, ssaoExtra2);
         }
 
@@ -668,470 +546,100 @@ namespace SasamiRenderer
         services.drawOpaqueItems = [drawItems]() { drawItems(false); };
         services.drawTransparentItems = [drawItems]() { drawItems(true); };
         services.drawShadowItems = drawShadowItems;
+        services.copySceneColorForTransmission = []() { return true; };
         return services;
     }
 
-    void Renderer::Render(const OverlayRenderCallback& overlay)
+
+    Renderer::Renderer()
+        : m_sceneSynchronizer(m_sceneSubmitter,
+                              m_cameraState,
+                              m_rayTracingScene,
+                              m_swrtExecutor,
+                              m_drawCommandBuilder,
+                              m_deltaTime,
+                              m_viewport)
+        , m_environmentManager(m_skybox, m_swrtExecutor)
     {
-        if (!m_device) {
-            return;
-        }
+        ScopedPerfTimer perfTimer("Renderer::Renderer");
 
-        RetireDeferredUploadBatches();
+        m_renderNodeBuilderCatalog = RenderNodeBuilderCatalog::CreateDefault();
 
-        if (m_deltaTime > 0.0f) {
-            m_sceneTime += m_deltaTime;
-        }
+        RenderNodeBuildContext buildContext{};
+        buildContext.capabilities.supportsFeatureRenderPasses = true;
+        buildContext.capabilities.supportsD3D12CompatibilitySurface = true;
+        buildContext.capabilities.supportsHardwareRayTracing = true;
+        buildContext.capabilities.supportsComputeQueue = true;
+        buildContext.capabilities.supportsSwapChain = true;
 
-        const UINT backIndex = m_device->GetSwapChain()->GetCurrentBackBufferIndex();
-        auto* frame = m_frameCoordinator.GetFrameContext(backIndex);
-        if (!frame) {
-            return;
-        }
+        auto builtins = m_renderNodeBuilderCatalog.BuildBuiltinSequenceNodes(buildContext);
+        m_shadowRenderNode = std::dynamic_pointer_cast<ShadowRenderNode>(
+            builtins[static_cast<size_t>(RenderNodeType::Shadow)]);
+        m_opaqueRenderNode = std::dynamic_pointer_cast<OpaqueRenderNode>(
+            builtins[static_cast<size_t>(RenderNodeType::Opaque)]);
+        m_lightingRenderNode = std::dynamic_pointer_cast<LightingRenderNode>(
+            builtins[static_cast<size_t>(RenderNodeType::Lighting)]);
+        m_transparentRenderNode = std::dynamic_pointer_cast<TransparentRenderNode>(
+            builtins[static_cast<size_t>(RenderNodeType::Transparent)]);
+        m_transparentLightingRenderNode = std::dynamic_pointer_cast<TransparentLightingRenderNode>(
+            builtins[static_cast<size_t>(RenderNodeType::TransparentLighting)]);
+        m_transparentBackfaceDistanceRenderNode = std::dynamic_pointer_cast<TransparentBackfaceDistanceRenderNode>(
+            builtins[static_cast<size_t>(RenderNodeType::TransparentBackfaceDistance)]);
+        m_transparentCompositeRenderNode = std::dynamic_pointer_cast<TransparentCompositeRenderNode>(
+            builtins[static_cast<size_t>(RenderNodeType::TransparentComposite)]);
+        m_skyboxRenderNode = std::dynamic_pointer_cast<SkyboxRenderNode>(
+            builtins[static_cast<size_t>(RenderNodeType::Skybox)]);
+        m_postProcessRenderNode = std::dynamic_pointer_cast<PostProcessRenderNode>(
+            builtins[static_cast<size_t>(RenderNodeType::PostProcess)]);
+        m_ssaoRenderNode = std::dynamic_pointer_cast<SSAORenderNode>(
+            builtins[static_cast<size_t>(RenderNodeType::RuntimeAO)]);
+        m_proceduralSkyRenderNode = std::dynamic_pointer_cast<ProceduralSkyRenderNode>(
+            builtins[static_cast<size_t>(RenderNodeType::ProceduralSky)]);
+        m_sdfFluidRenderNode = std::dynamic_pointer_cast<SdfFluidRenderNode>(
+            builtins[static_cast<size_t>(RenderNodeType::SdfFluid)]);
+        m_rayTracingRenderNode = std::dynamic_pointer_cast<RayTracingRenderNode>(
+            m_renderNodeBuilderCatalog.Build(RenderNodeBuilderId::RayTracing, buildContext));
+        m_volumetricCloudRenderNode = std::dynamic_pointer_cast<VolumetricCloudRenderNode>(
+            m_renderNodeBuilderCatalog.Build(RenderNodeBuilderId::VolumetricCloud, buildContext));
+        m_debugProbeGridRenderNode = std::dynamic_pointer_cast<DebugProbeGridRenderNode>(
+            m_renderNodeBuilderCatalog.Build(RenderNodeBuilderId::DebugProbeGrid, buildContext));
 
-        CommandList* cmdList = nullptr;
-        if (!m_frameCoordinator.BeginFrame(backIndex, cmdList)) {
-            return;
-        }
-        const size_t drawItemCount = m_sceneSubmitter.GetDrawItems().size();
-        // Raster shadow rendering records one draw per directional cascade, then the
-        // main scene pass records another draw per item. Reserve the spot-shadow pass
-        // as well so CSM4 cannot overwrite later per-draw camera constants.
-        const size_t cameraCbDrawSlots =
-            drawItemCount * (static_cast<size_t>(LightSystem::kDirectionalCascadeCount) + 2u);
-        const size_t cameraCbExtraSlots = 8u; // SSAO, sky/fullscreen passes, and small pass variations.
-        const size_t cameraCbRequired = cameraCbDrawSlots + cameraCbExtraSlots;
-        const UINT cameraCbRequiredClamped = static_cast<UINT>(
-            (std::min)(cameraCbRequired, static_cast<size_t>((std::numeric_limits<UINT>::max)())));
-        m_frameCoordinator.EnsureCameraBuffers(*frame, cameraCbRequiredClamped);
+        m_passRegistry.SetBuiltinNodes(builtins);
 
-        EnsureEnvironmentTexturesUploaded(cmdList);
-
-        m_renderGraph.Clear();
-        const auto* backBuffer = m_renderTargetPool.GetBackBufferResource(backIndex);
-        if (!backBuffer || !m_renderTargetPool.GetDepth().IsValid() || !m_renderTargetPool.GetDepthDsv().ptr) {
-            return;
-        }
-
-        ExternalRenderGraphResourceDesc sceneColorDesc{};
-        sceneColorDesc.resource = backBuffer->Get();
-        sceneColorDesc.initialState = D3D12_RESOURCE_STATE_PRESENT;
-        sceneColorDesc.finalState = D3D12_RESOURCE_STATE_PRESENT;
-        sceneColorDesc.transitionToFinalState = true;
-        sceneColorDesc.rtv = m_renderTargetPool.GetBackBufferRtv(backIndex);
-        sceneColorDesc.hasRtv = true;
-        sceneColorDesc.clearColorOnFirstUse = true;
-        sceneColorDesc.clearColor[0] = 0.2f;
-        sceneColorDesc.clearColor[1] = 0.2f;
-        sceneColorDesc.clearColor[2] = 0.2f;
-        sceneColorDesc.clearColor[3] = 1.0f;
-        m_renderGraph.ImportExternalResource("SceneColor", sceneColorDesc);
-
-        ExternalRenderGraphResourceDesc sceneDepthDesc{};
-        sceneDepthDesc.resource = m_renderTargetPool.GetDepth().Get();
-        sceneDepthDesc.initialState = D3D12_RESOURCE_STATE_DEPTH_WRITE;
-        sceneDepthDesc.finalState = D3D12_RESOURCE_STATE_DEPTH_WRITE;
-        sceneDepthDesc.transitionToFinalState = true;
-        sceneDepthDesc.dsv = m_renderTargetPool.GetDepthDsv();
-        sceneDepthDesc.hasDsv = true;
-        sceneDepthDesc.clearDepthOnFirstUse = true;
-        sceneDepthDesc.clearDepth = 1.0f;
-        sceneDepthDesc.clearStencil = 0;
-        m_renderGraph.ImportExternalResource("SceneDepth", sceneDepthDesc);
-
-        // Import GBuffer resources so LightingRenderNode can bind them as MRTs.
-        const UINT gbufferW = static_cast<UINT>(m_viewport.Width);
-        const UINT gbufferH = static_cast<UINT>(m_viewport.Height);
-        m_renderTargetPool.EnsureGBuffer(*m_device, gbufferW, gbufferH);
-        if (m_renderTargetPool.GetGBufferAlbedo().IsValid()) {
-            const auto importGBuffer = [&](const char* name, Resource& res, CpuDescriptorHandle rtv) {
-                ExternalRenderGraphResourceDesc d{};
-                d.resource = res.Get();
-                d.initialState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-                d.finalState   = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-                d.transitionToFinalState = true;
-                d.rtv = rtv;
-                d.hasRtv = true;
-                d.clearColorOnFirstUse = true;
-                // clearColor defaults to 0,0,0,0
-                m_renderGraph.ImportExternalResource(name, d);
-            };
-            importGBuffer("GBufferAlbedo",   m_renderTargetPool.GetGBufferAlbedo(),   m_renderTargetPool.GetGBufferAlbedoRtv());
-            importGBuffer("GBufferNormal",   m_renderTargetPool.GetGBufferNormal(),   m_renderTargetPool.GetGBufferNormalRtv());
-            importGBuffer("GBufferMaterial", m_renderTargetPool.GetGBufferMaterial(), m_renderTargetPool.GetGBufferMaterialRtv());
-            importGBuffer("GBufferEmissive", m_renderTargetPool.GetGBufferEmissive(), m_renderTargetPool.GetGBufferEmissiveRtv());
-        }
-
-        auto drawItems = [this, cmdList, frame](bool drawTransparent) {
-            // Bind runtime-generated AO texture at slot 8 (t9 in shader) once per batch.
-            GpuDescriptorHandle runtimeAoSrv = m_nullTextureSrv;
-            const bool usesRayTracedAo = m_settings.runtimeAoEnabled &&
-                UsesRayTracedRuntimeAmbientOcclusion(m_settings.ambientOcclusionMode, m_settings.runtimeAoMethod);
-            switch (m_settings.ambientOcclusionMode) {
-            case RendererEnums::AmbientOcclusionMode::MaterialOnly:
-                runtimeAoSrv = m_nullTextureSrv;
-                break;
-            case RendererEnums::AmbientOcclusionMode::RuntimeAOOnly:
-            case RendererEnums::AmbientOcclusionMode::Hybrid:
-            {
-                // Fallback to white (AO=1) rather than null (AO=0) when runtime AO is not ready.
-                const GpuDescriptorHandle runtimeAoFallback = m_defaultOcclusionTexture
-                    ? m_defaultOcclusionTexture->srv : m_nullTextureSrv;
-                if (usesRayTracedAo) {
-                    runtimeAoSrv =
-                        m_renderTargetPool.GetSWRTAmbientOcclusionTexture().IsValid()
-                            ? m_renderTargetPool.GetSWRTAmbientOcclusionSrv()
-                            : runtimeAoFallback;
-                } else if (m_settings.gBufferDebugView == RendererEnums::GBufferDebugView::RuntimeAmbientOcclusionRaw) {
-                    runtimeAoSrv = m_renderTargetPool.GetSSAOTexture().IsValid()
-                        ? m_renderTargetPool.GetSSAOSrv()
-                        : runtimeAoFallback;
-                } else {
-                    runtimeAoSrv =
-                        m_renderTargetPool.GetSSAOBlurTexture().IsValid() ? m_renderTargetPool.GetSSAOBlurSrv()
-                        : m_renderTargetPool.GetSSAOTexture().IsValid() ? m_renderTargetPool.GetSSAOSrv()
-                        : runtimeAoFallback;
-                }
-                break;
-            }
-            case RendererEnums::AmbientOcclusionMode::RayTracedAOOnly:
-                runtimeAoSrv =
-                    m_renderTargetPool.GetSWRTAmbientOcclusionTexture().IsValid()
-                        ? m_renderTargetPool.GetSWRTAmbientOcclusionSrv()
-                        : m_nullTextureSrv;
-                break;
-            default:
-                break;
-            }
-            cmdList->SetGraphicsRootDescriptorTable(8, runtimeAoSrv);
-
-            // Bind GI probe grid CB (b2) and probe SH data (t10) as inline root descriptors.
-            // These are always bound so PBR_PS can read g_giEnabled to decide whether to use probes.
-            if (m_probeGrid.IsInitialized()) {
-                const D3D12_GPU_VIRTUAL_ADDRESS probeCbGpu = m_probeGrid.GetProbeGridCbGpuAddress();
-                const D3D12_GPU_VIRTUAL_ADDRESS probeVA    = m_probeGrid.GetProbeDataGpuVA();
-                if (probeCbGpu != 0) cmdList->SetGraphicsRootConstantBufferView(9, probeCbGpu);
-                if (probeVA    != 0) cmdList->SetGraphicsRootShaderResourceView(10, probeVA);
-            }
-
-            for (const auto& item : m_sceneSubmitter.GetDrawItems()) {
-                if (item.transparent != drawTransparent) {
-                    continue;
-                }
-
-                const float extra0[4] = {
-                    item.material.baseColor[0],
-                    item.material.baseColor[1],
-                    item.material.baseColor[2],
-                    item.material.baseColor[3],
-                };
-                const float extra1[4] = {
-                    item.material.emissive[0],
-                    item.material.emissive[1],
-                    item.material.emissive[2],
-                    item.material.roughness,
-                };
-                const RendererEnums::AmbientOcclusionMode effectiveAoMode =
-                    m_settings.runtimeAoEnabled
-                        ? m_settings.ambientOcclusionMode
-                        : RendererEnums::AmbientOcclusionMode::MaterialOnly;
-                const float extra2[4] = {
-                    item.material.metallic,
-                    item.material.occlusionStrength,
-                    static_cast<float>(effectiveAoMode),
-                    item.usesMetallicRoughnessTexture ? 1.0f : 0.0f,
-                };
-                const float extra3[4] = {
-                    item.material.specularColor[0],
-                    item.material.specularColor[1],
-                    item.material.specularColor[2],
-                    static_cast<float>(static_cast<uint32_t>(item.material.workflow)),
-                };
-                float objMVP[16];
-                Mul4x4(item.model, m_cameraState.GetPV(), objMVP);
-                const D3D12_GPU_VIRTUAL_ADDRESS cameraCbGpu =
-                    m_frameCoordinator.PushCameraCB(*frame, objMVP, item.model, extra0, extra1, extra2, extra3);
-                if (cameraCbGpu != 0) {
-                    cmdList->SetGraphicsRootConstantBufferView(2, cameraCbGpu);
-                }
-
-                if (item.texture) {
-                    cmdList->SetGraphicsRootDescriptorTable(0, item.texture->srv);
-                } else if (m_defaultAlbedoTexture) {
-                    cmdList->SetGraphicsRootDescriptorTable(0, m_defaultAlbedoTexture->srv);
-                } else {
-                    cmdList->SetGraphicsRootDescriptorTable(0, m_nullTextureSrv);
-                }
-
-                if (item.occlusionTexture) {
-                    cmdList->SetGraphicsRootDescriptorTable(6, item.occlusionTexture->srv);
-                } else if (m_defaultOcclusionTexture) {
-                    cmdList->SetGraphicsRootDescriptorTable(6, m_defaultOcclusionTexture->srv);
-                } else {
-                    cmdList->SetGraphicsRootDescriptorTable(6, m_nullTextureSrv);
-                }
-
-                m_meshBuffer.Bind(cmdList, item.meshIndex);
-                const auto& items = m_meshBuffer.Items();
-                if (item.meshIndex < items.size()) {
-                    const auto& it = items[item.meshIndex];
-                    if (it.indexCount > 0) {
-                        cmdList->DrawIndexedInstanced(it.indexCount, 1, 0, 0, 0);
-                    } else if (it.vertexCount > 0) {
-                        cmdList->DrawInstanced(it.vertexCount, 1, 0, 0);
-                    }
-                }
-            }
-        };
-
-        const D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu = frame->light.lightCB.IsValid()
-            ? frame->light.lightCB->GetGPUVirtualAddress()
-            : 0;
-        const GpuDescriptorHandle defaultAoSrv =
-            (m_defaultOcclusionTexture != nullptr) ? m_defaultOcclusionTexture->srv : m_nullTextureSrv;
-        const SWRTExecutor::PartialBehavior partialBehavior =
-            m_swrtExecutor.ResolveBehavior(m_settings.rayTracingPerformancePreset);
-        const bool useSoftwareRayTracedDirectionalShadow =
-            (m_settings.renderPathMode == RenderPathMode::Raster) &&
-            m_settings.rasterSoftwareRayTracedDirectionalShadowEnabled;
-        const bool useSoftwareRayTracedReflections =
-            (m_settings.renderPathMode == RenderPathMode::Raster) &&
-            m_settings.rasterSoftwareRayTracedReflectionEnabled;
-        const bool useSoftwareRayTracedAmbientOcclusion =
-            (m_settings.renderPathMode == RenderPathMode::Raster) &&
-            m_settings.runtimeAoEnabled &&
-            UsesRayTracedRuntimeAmbientOcclusion(m_settings.ambientOcclusionMode,
-                                                 m_settings.runtimeAoMethod);
-        if (useSoftwareRayTracedDirectionalShadow) {
-            bool cacheInvalidated = false;
-            if (!m_renderTargetPool.EnsureSWRTShadow(*m_device, partialBehavior.shadowMapSize, cacheInvalidated)) {
-                DebugLog("Renderer::Render: failed to prepare software directional shadow resources. Falling back to raster shadow map.\n");
-            }
-            if (cacheInvalidated) {
-                m_swrtExecutor.OnShadowResourcesReallocated();
-            }
-        }
-        if (useSoftwareRayTracedReflections) {
-            const float reflectionScale = UsesReflectionDebugView(m_settings.gBufferDebugView)
-                ? 1.0f
-                : partialBehavior.reflectionResolutionScale;
-            const uint32_t reflectionWidth  = ComputeScaledDimension(
-                static_cast<uint32_t>(m_viewport.Width),  reflectionScale);
-            const uint32_t reflectionHeight = ComputeScaledDimension(
-                static_cast<uint32_t>(m_viewport.Height), reflectionScale);
-            bool reflCacheInvalidated = false;
-            if (!m_renderTargetPool.EnsureSWRTReflection(*m_device, reflectionWidth, reflectionHeight, reflCacheInvalidated)) {
-                DebugLog("Renderer::Render: failed to prepare software reflection resources. Disabling SWRT reflections for this frame.\n");
-            }
-            if (reflCacheInvalidated) {
-                m_swrtExecutor.OnReflectionResourcesReallocated();
-            }
-        }
-        if (useSoftwareRayTracedAmbientOcclusion) {
-            bool aoCacheInvalidated = false;
-            if (!m_renderTargetPool.EnsureSWRTAmbientOcclusion(*m_device,
-                                                               static_cast<uint32_t>(m_viewport.Width),
-                                                               static_cast<uint32_t>(m_viewport.Height),
-                                                               aoCacheInvalidated)) {
-                DebugLog("Renderer::Render: failed to prepare ray-traced runtime AO resources. Falling back to default AO.\n");
-            }
-        }
-        if (useSoftwareRayTracedDirectionalShadow || useSoftwareRayTracedReflections || useSoftwareRayTracedAmbientOcclusion) {
-            m_rayTracingStats = {};
-            m_rayTracingStats.hardwareSupported     = IsHardwareRayTracingSupported();
-            m_rayTracingStats.instanceCount         = static_cast<uint32_t>(m_rayTracingScene.instances.size());
-            m_rayTracingStats.triangleCount         = m_rayTracingScene.TriangleCount();
-            m_rayTracingStats.shadowMapSize         = partialBehavior.shadowMapSize;
-            m_rayTracingStats.reflectionWidth       = m_renderTargetPool.GetSWRTReflectionWidth();
-            m_rayTracingStats.reflectionHeight      = m_renderTargetPool.GetSWRTReflectionHeight();
-            m_rayTracingStats.shadowUpdateInterval  = partialBehavior.shadowUpdateInterval;
-            m_rayTracingStats.reflectionUpdateInterval = partialBehavior.reflectionUpdateInterval;
-            m_rayTracingStats.reflectionPhaseCount  = partialBehavior.reflectionPhaseCount;
-            m_rayTracingStats.reflectionPhaseIndex  = m_swrtExecutor.GetReflectionPhaseIndex();
-            m_rayTracingStats.reflectionResolutionScale = partialBehavior.reflectionResolutionScale;
-            m_rayTracingStats.reflectionMaxRoughness = partialBehavior.reflectionMaxRoughness;
-            m_rayTracingStats.reflectionMinEnergy   = partialBehavior.reflectionMinEnergy;
-            m_rayTracingStats.reflectionMaxDistance = partialBehavior.reflectionMaxTraceDistance;
-        }
-
-        // SdfFluid mode bypasses all rasterized scene passes
-        const bool isSdfFluidMode = (m_settings.renderPathMode == RenderPathMode::SdfFluid);
-        const bool executeOpaqueFamilyPasses = !isSdfFluidMode && (m_settings.rasterShaderMode == RasterShaderMode::Opaque);
-        const bool executeLightingFamilyPasses = !isSdfFluidMode && !executeOpaqueFamilyPasses;
-        const bool hasLightingPass =
-            executeLightingFamilyPasses &&
-            std::any_of(m_passRegistry.GetPasses().begin(),
-                        m_passRegistry.GetPasses().end(),
-                        [](const std::shared_ptr<IRenderNode>& runtimeNode) {
-                            if (!runtimeNode) {
-                                return false;
-                            }
-                            const std::string_view tag = runtimeNode->Tag();
-                            return tag == "Lighting" || tag == "TransparentLighting";
-                        });
-        const bool useShadowTessPath = hasLightingPass && m_settings.useTessellation;
-
-        auto drawShadowItems = [this, cmdList, frame](const LightSystem::ShadowPassContext& context) {
-            for (const auto& item : m_sceneSubmitter.GetDrawItems()) {
-                float objLightMVP[16];
-                Mul4x4(item.model, context.lightViewProjection, objLightMVP);
-                const D3D12_GPU_VIRTUAL_ADDRESS cameraCbGpu =
-                    m_frameCoordinator.PushCameraCB(*frame, objLightMVP, item.model);
-                if (cameraCbGpu != 0) {
-                    cmdList->SetGraphicsRootConstantBufferView(2, cameraCbGpu);
-                }
-
-                m_meshBuffer.Bind(cmdList, item.meshIndex);
-                const auto& items = m_meshBuffer.Items();
-                if (item.meshIndex < items.size()) {
-                    const auto& it = items[item.meshIndex];
-                    if (it.indexCount > 0) {
-                        cmdList->DrawIndexedInstanced(it.indexCount, 1, 0, 0, 0);
-                    } else if (it.vertexCount > 0) {
-                        cmdList->DrawInstanced(it.vertexCount, 1, 0, 0);
-                    }
-                }
-            }
-        };
-
-        const RenderNodeExecutionPolicy executionPolicy = BuildRenderNodeExecutionPolicy(
-            executeOpaqueFamilyPasses,
-            executeLightingFamilyPasses,
-            useShadowTessPath);
-        // --- Build frame inputs for graphics and (optionally) compute queues ---
-        RenderNodeFrameInputs frameInputs = BuildRenderNodeFrameInputs(
-            cmdList,
-            frame,
-            lightCbGpu,
-            defaultAoSrv);
-
-        // Prepare compute command list if async compute is available.
-        CommandList* computeCmdList = nullptr;
-        RenderNodeFrameInputs computeFrameInputs{};
-        if (m_computeCmdListReady && !m_computeAllocators.empty()) {
-            CommandAllocator& computeAlloc = m_computeAllocators[backIndex % m_computeAllocators.size()];
-            computeAlloc.Reset();
-            if (SUCCEEDED(m_computeCmdList.Reset(computeAlloc, nullptr))) {
-                computeCmdList = &m_computeCmdList;
-                computeFrameInputs = frameInputs;
-                computeFrameInputs.cmdList = computeCmdList;
-                frameInputs.computeCmdList = computeCmdList;
-            }
-        }
-
-        RenderNodeExecutionServices executionServices = BuildRenderNodeExecutionServices(
-            drawItems,
-            drawShadowItems);
-        executionServices.executeSoftwareDirectionalShadow = [this, cmdList, partialBehavior](const LightSystem::ShadowPassContext& shadowContext) {
-            const auto ctx = BuildSwrtFrameContext();
-            return m_swrtExecutor.ExecuteDirectionalShadow(cmdList, shadowContext, ctx, partialBehavior, m_settings, m_rayTracingStats);
-        };
-        executionServices.executeSoftwareReflections = [this, cmdList, partialBehavior]() {
-            const auto ctx = BuildSwrtFrameContext();
-            return m_swrtExecutor.ExecuteReflections(cmdList, ctx, partialBehavior, m_settings, m_rayTracingStats);
-        };
-        executionServices.executeRayTracing = [this, cmdList, backIndex]() {
-            const auto ctx = BuildSwrtFrameContext();
-            return m_swrtExecutor.ExecuteHardware(cmdList, backIndex, ctx, m_settings, m_rayTracingStats);
-        };
-
-        m_passRegistry.ClearPhaseCompletionNodes();
-        if (useSoftwareRayTracedAmbientOcclusion) {
-            m_passRegistry.AddPhaseCompletionNode(
-                "Scene",
-                "SwrtAmbientOcclusion",
-                [this, cmdList](const RenderNodeContextView&) -> bool {
-                    const auto ctx = BuildSwrtFrameContext();
-                    return m_swrtExecutor.ExecuteAmbientOcclusion(cmdList, ctx, m_settings, m_rayTracingStats);
-                },
-                PhaseCompletionMode::Deterministic,
-                {});
-        }
-        if (useSoftwareRayTracedReflections) {
-            m_passRegistry.AddPhaseCompletionNode(
-                "Scene",
-                "SwrtReflections",
-                [this, cmdList, partialBehavior](const RenderNodeContextView&) -> bool {
-                    const auto ctx = BuildSwrtFrameContext();
-                    return m_swrtExecutor.ExecuteReflections(cmdList, ctx, partialBehavior, m_settings, m_rayTracingStats);
-                },
-                PhaseCompletionMode::Deterministic,
-                {});
-            executionServices.compositeSoftwareReflections =
-                [this, cmdList, backIndex, lightCbGpu]() -> bool {
-                    return CompositeSoftwareReflections(cmdList, backIndex, lightCbGpu);
-                };
-        }
-
-        RenderGraphExecuteContext executeContext{};
-        executeContext.executionPolicy    = &executionPolicy;
-        executeContext.frameInputs        = &frameInputs;
-        executeContext.computeFrameInputs = computeCmdList ? &computeFrameInputs : nullptr;
-        executeContext.executionServices  = &executionServices;
-        executeContext.resources          = &m_renderGraph.GetResourceRegistry();
-        if (computeCmdList && m_crossQueueFence) {
-            executeContext.graphicsQueueRaw   = m_device->GetCommandQueue().Get();
-            executeContext.computeQueueRaw    = m_device->GetComputeQueue().Get();
-            executeContext.crossQueueFence    = m_crossQueueFence.Get();
-            executeContext.crossQueueFenceVal = &m_crossQueueFenceVal;
-        }
-
-        if (!m_passRegistry.RegisterPassesToRenderGraph(m_renderGraph, executeContext, m_settings.renderPathMode, m_rayTracingRenderNode)) {
-            m_renderGraph.Clear();
-            if (overlay) {
-                TransitionBackBufferToRenderTarget(cmdList, backIndex);
-                ClearAndBindMainTargets(cmdList, backIndex);
-                overlay(*cmdList, m_renderTargetPool.GetBackBufferRtv(backIndex));
-                TransitionBackBufferToPresent(cmdList, backIndex);
-            }
-            SubmitAndPresent(cmdList, backIndex);
-            return;
-        }
-
-        m_passRegistry.RegisterPhaseCompletionNodesToRenderGraph(m_renderGraph, executeContext);
-
-        const bool graphExecuted = m_renderGraph.Execute();
-        m_renderGraph.Clear();
-
-        // Submit compute CL (SWRT work) on the compute queue.
-        // The cross-queue fence sync is set up by RenderGraph::Execute() — this submission
-        // happens after the Signal/Wait calls that ensure GPU ordering.
-        if (computeCmdList) {
-            if (SUCCEEDED(computeCmdList->Close())) {
-                ID3D12CommandList* cLists[] = { computeCmdList->Get() };
-                m_device->GetComputeQueue().ExecuteCommandLists(1, cLists);
-            }
-        }
-
-        if (!graphExecuted) {
-            if (overlay) {
-                TransitionBackBufferToRenderTarget(cmdList, backIndex);
-                BindMainTargets(cmdList, backIndex);
-                overlay(*cmdList, m_renderTargetPool.GetBackBufferRtv(backIndex));
-                TransitionBackBufferToPresent(cmdList, backIndex);
-            }
-            SubmitAndPresent(cmdList, backIndex);
-            return;
-        }
-
-        CaptureSceneColorHistory(cmdList, backIndex);
-
-        if (overlay) {
-            TransitionBackBufferToRenderTarget(cmdList, backIndex);
-            BindMainTargets(cmdList, backIndex);
-            overlay(*cmdList, m_renderTargetPool.GetBackBufferRtv(backIndex));
-            TransitionBackBufferToPresent(cmdList, backIndex);
-        }
-        SubmitAndPresent(cmdList, backIndex);
+        // Rebuild default order through AddPass so runtime order uses one path configuration flow.
+        SetRenderNodeSequence(std::vector<RenderNodeType>(RenderNodeConstants::kDefaultRenderPathSequence.begin(),
+                                                          RenderNodeConstants::kDefaultRenderPathSequence.end()));
     }
-    Renderer::DirectionalLightSettings Renderer::GetDirectionalLightSettings() const
+
+    Renderer::~Renderer()
     {
-        return m_lightSystem.GetDirectionalLightSettings();
+        if (m_device) {
+            m_device->WaitForGPU();
+        }
+
+        m_frameCoordinator.Shutdown(m_lightSystem);
+
+        m_skybox.Shutdown();
+
+        if (m_comInitialized) {
+            CoUninitialize();
+            m_comInitialized = false;
+        }
     }
+
+    // Renderer::Initialize → RendererInitialization.cpp
+
+    // Back buffer management is now delegated to RenderTargetPool.
 
     bool Renderer::IsHardwareRayTracingSupported() const
     {
-        return m_device ? m_device->SupportsHardwareRayTracing() : false;
+        return m_device ? m_device->GetCapabilities().supportsHardwareRayTracing : false;
+    }
+
+    const RhiBackendCapabilities& Renderer::GetBackendCapabilities() const
+    {
+        static const RhiBackendCapabilities kNoCapabilities{};
+        return m_device ? m_device->GetCapabilities() : kNoCapabilities;
     }
 
     void Renderer::SetRenderPathMode(RenderPathMode mode)
@@ -1202,6 +710,14 @@ namespace SasamiRenderer
             return;
         }
 
+        if (UsesNativeBackendFrame(*m_device)) {
+            m_device->WaitForGPU();
+            m_viewport = { 0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f };
+            m_scissorRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
+            DebugLog("Renderer::ResizeViewport: native backend swapchain resize is not migrated yet; viewport state was updated only.\n");
+            return;
+        }
+
         m_device->WaitForGPU();
         m_frameCoordinator.ResetFrameFenceValues();
 
@@ -1244,32 +760,27 @@ namespace SasamiRenderer
         if (m_device) {
             m_device->WaitForGPU();
         }
-        m_skybox.RefreshEnvironmentAssets();
-        m_swrtExecutor.InvalidateCache();
+        m_environmentManager.RefreshEnvironmentAssets();
     }
 
     void Renderer::SetSkyboxHdrEquirectData(std::vector<float> pixels, UINT width, UINT height)
     {
-        m_skybox.SetHdrEquirectData(std::move(pixels), width, height);
-        m_swrtExecutor.OnReflectionResourcesReallocated();
+        m_environmentManager.SetSkyboxHdrEquirectData(std::move(pixels), width, height);
     }
 
     void Renderer::SetSkyboxLdrEquirectData(std::vector<uint8_t> pixels, UINT width, UINT height)
     {
-        m_skybox.SetLdrEquirectData(std::move(pixels), width, height);
-        m_swrtExecutor.OnReflectionResourcesReallocated();
+        m_environmentManager.SetSkyboxLdrEquirectData(std::move(pixels), width, height);
     }
 
     void Renderer::SetSkyboxLdrCubemapFacesData(std::vector<std::vector<uint8_t>> facePixels, UINT width, UINT height)
     {
-        m_skybox.SetLdrCubemapFaceData(std::move(facePixels), width, height);
-        m_swrtExecutor.OnReflectionResourcesReallocated();
+        m_environmentManager.SetSkyboxLdrCubemapFacesData(std::move(facePixels), width, height);
     }
 
     void Renderer::SetSkyboxLoadFormat(SkyboxLoadFormat format)
     {
-        m_skybox.SetLoadFormat(format);
-        m_swrtExecutor.OnReflectionResourcesReallocated();
+        m_environmentManager.SetSkyboxLoadFormat(format);
     }
 
     Renderer::PassHandle Renderer::AddPass(const std::shared_ptr<IRenderNode>& renderPass)
@@ -1371,236 +882,39 @@ namespace SasamiRenderer
         AddPass(m_debugProbeGridRenderNode);
     }
 
-    void Renderer::TransitionBackBufferToRenderTarget(CommandList* cmdList, UINT backIndex)
-    {
-        D3D12_RESOURCE_BARRIER barrier = {};
-        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-        const auto* backBuffer = m_renderTargetPool.GetBackBufferResource(backIndex);
-        barrier.Transition.pResource = backBuffer ? backBuffer->Get() : nullptr;
-        barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-        barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        cmdList->ResourceBarrier(1, &barrier);
-    }
-
-    void Renderer::BindMainTargets(CommandList* cmdList, UINT backIndex)
-    {
-        auto rtvHandle = m_renderTargetPool.GetBackBufferRtv(backIndex);
-        auto dsvMain = m_renderTargetPool.GetDepthDsv();
-        cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvMain);
-    }
-
-    void Renderer::ClearAndBindMainTargets(CommandList* cmdList, UINT backIndex)
-    {
-        BindMainTargets(cmdList, backIndex);
-        auto rtvHandle = m_renderTargetPool.GetBackBufferRtv(backIndex);
-        auto dsvMain = m_renderTargetPool.GetDepthDsv();
-        const FLOAT clearColor[] = { 0.2f, 0.2f, 0.2f, 1.0f };
-        cmdList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-        cmdList->ClearDepthStencilView(dsvMain, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-    }
-
-    // SWRT execution methods moved to SWRTExecutor.cpp
-
-    Texture* Renderer::CreateTextureFromRgba8Data(const CpuTextureRgba8& src,
-                                                  CommandList* cmdList,
-                                                  std::vector<Resource>& uploads)
-    {
-        if (src.pixels.empty() || src.width == 0 || src.height == 0 || !cmdList) {
-            return nullptr;
-        }
-
-        Resource texture;
-        Resource upload;
-        if (!ResourceUploadUtility::CreateTexture2DFromRgba8(*m_device,
-                                                             cmdList,
-                                                             src.pixels.data(),
-                                                             src.width,
-                                                             src.height,
-                                                             texture,
-                                                             upload)) {
-            return nullptr;
-        }
-
-        CpuDescriptorHandle cpu{};
-        GpuDescriptorHandle gpu{};
-        if (!m_srvAllocator.Allocate(1, cpu, gpu)) {
-            return nullptr;
-        }
-
-        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-        srvDesc.Texture2D.MipLevels = 1;
-        m_device->CreateShaderResourceView(texture, &srvDesc, cpu);
-
-        auto texObj = std::make_unique<Texture>();
-        texObj->resource = texture;
-        texObj->srv = gpu;
-        texObj->desc.width = src.width;
-        texObj->desc.height = src.height;
-        texObj->desc.mips = 1;
-        texObj->desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-
-        uploads.push_back(upload);
-        m_defaultTextures.push_back(std::move(texObj));
-        return m_defaultTextures.back().get();
-    }
-
-    void Renderer::TransitionBackBufferToPresent(CommandList* cmdList, UINT backIndex)
-    {
-        D3D12_RESOURCE_BARRIER barrier = {};
-        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-        const auto* backBuffer = m_renderTargetPool.GetBackBufferResource(backIndex);
-        barrier.Transition.pResource = backBuffer ? backBuffer->Get() : nullptr;
-        barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-        barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        cmdList->ResourceBarrier(1, &barrier);
-    }
-
-    bool Renderer::CompositeSoftwareReflections(CommandList* cmdList,
-                                                UINT backIndex,
-                                                D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu)
-    {
-        if (!cmdList || lightCbGpu == 0) {
-            return true;
-        }
-        if (!m_renderTargetPool.GetSWRTReflectionTexture().IsValid() ||
-            !m_renderTargetPool.GetGBufferAlbedo().IsValid() ||
-            !m_renderTargetPool.GetGBufferNormal().IsValid() ||
-            !m_renderTargetPool.GetGBufferMaterial().IsValid()) {
-            return true;
-        }
-
-        D3D12_RESOURCE_BARRIER toSrv[] = {
-            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool.GetGBufferAlbedo().Get(),
-                D3D12_RESOURCE_STATE_RENDER_TARGET,
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
-            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool.GetGBufferNormal().Get(),
-                D3D12_RESOURCE_STATE_RENDER_TARGET,
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
-            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool.GetGBufferMaterial().Get(),
-                D3D12_RESOURCE_STATE_RENDER_TARGET,
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
-        };
-        cmdList->ResourceBarrier(_countof(toSrv), toSrv);
-
-        cmdList->SetGraphicsRootSignature(m_pipelineStateCache.GetRootSignature());
-        cmdList->SetPipelineState(m_pipelineStateCache.GetSwrtReflectionCompositePipelineState());
-        cmdList->RSSetViewports(1, &m_viewport);
-        cmdList->RSSetScissorRects(1, &m_scissorRect);
-
-        auto rtv = m_renderTargetPool.GetBackBufferRtv(backIndex);
-        cmdList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
-
-        DescriptorHeap* heaps[] = { m_srvAllocator.GetHeap() };
-        cmdList->SetDescriptorHeaps(1, heaps);
-        cmdList->SetGraphicsRootDescriptorTable(0, m_renderTargetPool.GetGBufferAlbedoSrv());
-        cmdList->SetGraphicsRootConstantBufferView(3, lightCbGpu);
-        cmdList->SetGraphicsRootDescriptorTable(6, m_renderTargetPool.GetGBufferMaterialSrv());
-        cmdList->SetGraphicsRootDescriptorTable(7, m_renderTargetPool.GetSWRTReflectionSrv());
-        cmdList->SetGraphicsRootDescriptorTable(8, m_renderTargetPool.GetGBufferNormalSrv());
-        cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        cmdList->DrawInstanced(3u, 1u, 0u, 0u);
-
-        D3D12_RESOURCE_BARRIER toRenderTarget[] = {
-            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool.GetGBufferAlbedo().Get(),
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                D3D12_RESOURCE_STATE_RENDER_TARGET),
-            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool.GetGBufferNormal().Get(),
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                D3D12_RESOURCE_STATE_RENDER_TARGET),
-            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool.GetGBufferMaterial().Get(),
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                D3D12_RESOURCE_STATE_RENDER_TARGET),
-        };
-        cmdList->ResourceBarrier(_countof(toRenderTarget), toRenderTarget);
-        return true;
-    }
-
-    void Renderer::CaptureSceneColorHistory(CommandList* cmdList, UINT backIndex)
-    {
-        if (!cmdList || !m_device ||
-            m_settings.renderPathMode != RenderPathMode::Raster ||
-            !m_settings.rasterScreenSpaceReflectionEnabled ||
-            m_viewport.Width <= 0.0f || m_viewport.Height <= 0.0f) {
-            return;
-        }
-
-        const auto* backBuffer = m_renderTargetPool.GetBackBufferResource(backIndex);
-        const uint32_t width = static_cast<uint32_t>(m_viewport.Width);
-        const uint32_t height = static_cast<uint32_t>(m_viewport.Height);
-        if (!backBuffer || !backBuffer->IsValid() ||
-            !m_renderTargetPool.EnsureTransparentSceneColorCopy(*m_device, width, height)) {
-            m_sceneColorHistoryValid = false;
-            return;
-        }
-
-        Resource& history = m_renderTargetPool.GetTransparentSceneColorCopyTexture();
-        if (!history.IsValid()) {
-            m_sceneColorHistoryValid = false;
-            return;
-        }
-
-        D3D12_RESOURCE_BARRIER preCopy[] = {
-            CD3DX12_RESOURCE_BARRIER::Transition(backBuffer->Get(),
-                                                 D3D12_RESOURCE_STATE_PRESENT,
-                                                 D3D12_RESOURCE_STATE_COPY_SOURCE),
-            CD3DX12_RESOURCE_BARRIER::Transition(history.Get(),
-                                                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                 D3D12_RESOURCE_STATE_COPY_DEST)
-        };
-        cmdList->ResourceBarrier(_countof(preCopy), preCopy);
-        cmdList->Get()->CopyResource(history.Get(), backBuffer->Get());
-
-        D3D12_RESOURCE_BARRIER postCopy[] = {
-            CD3DX12_RESOURCE_BARRIER::Transition(backBuffer->Get(),
-                                                 D3D12_RESOURCE_STATE_COPY_SOURCE,
-                                                 D3D12_RESOURCE_STATE_PRESENT),
-            CD3DX12_RESOURCE_BARRIER::Transition(history.Get(),
-                                                 D3D12_RESOURCE_STATE_COPY_DEST,
-                                                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
-        };
-        cmdList->ResourceBarrier(_countof(postCopy), postCopy);
-        m_sceneColorHistoryValid = true;
-    }
-
-    void Renderer::SubmitAndPresent(CommandList* cmdList, UINT frameIndex)
-    {
-        if (FAILED(cmdList->Close())) {
-            DebugLog("Failed to close command list\n");
-            return;
-        }
-
-        ID3D12CommandList* lists[] = { cmdList->Get() };
-        m_device->GetCommandQueue()->ExecuteCommandLists(1, lists);
-        (void)m_device->GetSwapChain()->Present(1, 0);
-        m_frameCoordinator.SignalFrame(frameIndex);
-        RetireDeferredUploadBatches();
-    }
-
     void Renderer::UpdateCameraCB(const RenderCameraProxy* camera)
     {
-        m_cameraState.Update(camera);
+        m_sceneSynchronizer.UpdateCameraCB(camera);
     }
 
     void Renderer::SubmitRenderProxies(std::vector<RenderProxy>&& proxies)
     {
-        m_sceneSubmitter.SubmitRenderProxies(std::move(proxies));
+        m_sceneSynchronizer.SubmitRenderProxies(std::move(proxies));
+    }
+
+    void Renderer::SubmitSkinnedRenderProxies(std::vector<SkinnedRenderProxy>&& proxies)
+    {
+        const UINT backIndex = m_device ? m_device->GetSwapChain()->GetCurrentBackBufferIndex() : 0;
+        auto* frame = m_frameCoordinator.GetFrameContext(backIndex);
+        if (!frame) return;
+        m_sceneSubmitter.SubmitSkinnedRenderProxies(std::move(proxies), m_frameCoordinator, *frame);
     }
 
     void Renderer::ClearSubmittedRenderProxies()
     {
-        m_sceneSubmitter.ClearSubmittedRenderProxies();
-        m_swrtExecutor.InvalidateCache();
+        if (m_device) {
+            m_device->WaitForGPU();
+        }
+        m_sceneSynchronizer.ClearSubmittedRenderProxies();
+        m_sceneSubmitter.ClearSkinnedRenderProxies();
     }
 
     void Renderer::ClearRenderObjects()
     {
-        ClearSubmittedRenderProxies();
+        if (m_device) {
+            m_device->WaitForGPU();
+        }
+        m_sceneSynchronizer.ClearRenderObjects();
+        m_sceneSubmitter.ClearSkinnedRenderProxies();
     }
 }

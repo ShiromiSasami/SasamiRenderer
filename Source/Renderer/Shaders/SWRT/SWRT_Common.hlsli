@@ -112,6 +112,34 @@ float3 SWRT_MaterialDiffuseReflectance(GpuMaterial mat)
     return mat.baseColor.rgb * (1.0f - saturate(mat.metallic)) * transmissionScale;
 }
 
+float SWRT_MaterialAlpha(GpuMaterial mat)
+{
+    return saturate(mat.baseColor.a);
+}
+
+float SWRT_MaterialEffectiveTransmission(GpuMaterial mat)
+{
+    return saturate(mat.transmission) * (1.0f - saturate(mat.metallic));
+}
+
+bool SWRT_IsTransparentMaterial(GpuMaterial mat)
+{
+    return SWRT_MaterialAlpha(mat) < 0.999f || SWRT_MaterialEffectiveTransmission(mat) > 0.001f;
+}
+
+float SWRT_MaterialSurfaceOpacity(GpuMaterial mat)
+{
+    const float alphaOpacity = SWRT_MaterialAlpha(mat);
+    const float transmissionOpacity = 1.0f - SWRT_MaterialEffectiveTransmission(mat);
+    return saturate(min(alphaOpacity, transmissionOpacity));
+}
+
+float3 SWRT_MaterialTransmittanceTint(GpuMaterial mat)
+{
+    const float transmission = SWRT_MaterialEffectiveTransmission(mat);
+    return lerp(float3(1.0f, 1.0f, 1.0f), saturate(mat.baseColor.rgb), transmission * 0.35f);
+}
+
 // --------------------------------------------------------------------------
 // Bindings (shared by all SWRT compute shaders)
 // --------------------------------------------------------------------------

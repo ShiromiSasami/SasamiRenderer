@@ -36,18 +36,32 @@
     <None Include="Source\Renderer\Shaders\MeshShader\MeshShader_MS.hlsl" />
     <None Include="Source\Renderer\Shaders\Debug\DebugProbeGrid_VS.hlsl" />
     <None Include="Source\Renderer\Shaders\Debug\DebugProbeGrid_PS.hlsl" />
+    <None Include="Source\Renderer\Shaders\Shadow\ShadowVSM_PS.hlsl" />
+    <None Include="Source\Renderer\Shaders\Shadow\ShadowVSM_GaussBlur_CS.hlsl" />
+    <None Include="Source\Renderer\Shaders\SkinnedMesh_VS.hlsl" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Foundation\Math\MathUtil.h" />
+    <ClInclude Include="Source\Renderer\Core\Dx11GraphicsDevice.h" />
     <ClInclude Include="Source\Renderer\Core\Dx12GraphicsDevice.h" />
     <ClInclude Include="Source\Renderer\Core\GraphicsDevice.h" />
+    <ClInclude Include="Source\Renderer\Core\OpenGLGraphicsDevice.h" />
+    <ClInclude Include="Source\Renderer\Core\RhiDevice.h" />
+    <ClInclude Include="Source\Renderer\Core\RhiTypes.h" />
+    <ClInclude Include="Source\Renderer\Core\RenderFeatureSettings.h" />
+    <ClInclude Include="Source\Renderer\Core\RenderFrameOrchestrator.h" />
     <ClInclude Include="Source\Renderer\Core\RenderGraph.h" />
+    <ClInclude Include="Source\Renderer\Core\RenderNodeBuilder.h" />
     <ClInclude Include="Source\Renderer\Core\RenderPipelineStateCache.h" />
+    <ClInclude Include="Source\Renderer\Core\ShaderCompilationService.h" />
     <ClInclude Include="Source\Renderer\Core\RenderSettings.h" />
     <ClInclude Include="Source\Renderer\Core\RenderTargetPool.h" />
     <ClInclude Include="Source\Renderer\Core\RendererFrameCoordinator.h" />
     <ClInclude Include="Source\Renderer\Core\Renderer.h" />
+    <ClInclude Include="Source\Renderer\Core\SceneSynchronizer.h" />
+    <ClInclude Include="Source\Renderer\Core\EnvironmentManager.h" />
     <ClInclude Include="Source\Renderer\Core\SrvDescriptorAllocator.h" />
+    <ClInclude Include="Source\Renderer\Core\VulkanGraphicsDevice.h" />
     <ClInclude Include="Source\Renderer\Core\CameraState.h" />
     <ClInclude Include="Source\Renderer\Core\RenderPassRegistry.h" />
     <ClInclude Include="Source\Renderer\Scene\DrawCommandBuilder.h" />
@@ -63,6 +77,8 @@
     <ClInclude Include="Source\Renderer\Passes\LightingRenderNode.h" />
     <ClInclude Include="Source\Renderer\Passes\TransparentRenderNode.h" />
     <ClInclude Include="Source\Renderer\Passes\TransparentLightingRenderNode.h" />
+    <ClInclude Include="Source\Renderer\Passes\TransparentBackfaceDistanceRenderNode.h" />
+    <ClInclude Include="Source\Renderer\Passes\TransparentCompositeRenderNode.h" />
     <ClInclude Include="Source\Renderer\Passes\IRenderNode.h" />
     <ClInclude Include="Source\Renderer\Passes\RenderNodeSetupContext.h" />
     <ClInclude Include="Source\Renderer\Passes\PostProcessRenderNode.h" />
@@ -79,7 +95,10 @@
     <ClInclude Include="Source\Renderer\Passes\VolumetricCloudRenderNode.h" />
     <ClInclude Include="Source\Renderer\Scene\Material.h" />
     <ClInclude Include="Source\Renderer\Scene\LightSystem.h" />
+    <ClInclude Include="Source\Renderer\Scene\ShadowMapManager.h" />
+    <ClInclude Include="Source\Renderer\Scene\AnimationController.h" />
     <ClInclude Include="Source\Renderer\Scene\MeshBuffer.h" />
+    <ClInclude Include="Source\Renderer\Scene\SkinnedMeshBuffer.h" />
     <ClInclude Include="Source\Renderer\Scene\RenderCameraProxy.h" />
     <ClInclude Include="Source\Renderer\Scene\RenderLightProxy.h" />
     <ClInclude Include="Source\Renderer\Scene\RenderProxy.h" />
@@ -88,20 +107,32 @@
     <ClInclude Include="Source\Renderer\Structures\Mesh.h" />
     <ClInclude Include="Source\Renderer\Structures\Texture.h" />
     <ClInclude Include="Source\Renderer\Structures\Vertex.h" />
+    <ClInclude Include="Source\Renderer\Structures\SkinnedVertex.h" />
+    <ClInclude Include="Source\Renderer\Structures\Skeleton.h" />
+    <ClInclude Include="Source\Renderer\Structures\SkeletonAnimation.h" />
     <ClInclude Include="Source\Renderer\Utilities\ResourceUploadUtility.h" />
     <ClInclude Include="Source\Renderer\Utilities\RendererMathUtility.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Renderer\Scene\MeshBuffer.cpp" />
+    <ClCompile Include="Source\Renderer\Scene\SkinnedMeshBuffer.cpp" />
+    <ClCompile Include="Source\Renderer\Scene\AnimationController.cpp" />
     <ClCompile Include="Source\Renderer\Scene\DrawCommandBuilder.cpp" />
     <ClCompile Include="Source\Renderer\RayTracing\DxrRayTracer.cpp" />
+    <ClCompile Include="Source\Renderer\RayTracing\DxrRayTracer_Setup.cpp" />
     <ClCompile Include="Source\Renderer\RayTracing\SWRTExecutor.cpp" />
     <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwareRayTracer.cpp" />
+    <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwareBvhBuilder.cpp" />
+    <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwarePipelineCache.cpp" />
+    <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwareRayTracer_Legacy.cpp" />
+    <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwareRayTracer_ReSTIR.cpp" />
     <ClCompile Include="Source\Renderer\Scene\SceneSubmitter.cpp" />
     <ClCompile Include="Source\Renderer\Passes\OpaqueRenderNode.cpp" />
     <ClCompile Include="Source\Renderer\Passes\LightingRenderNode.cpp" />
     <ClCompile Include="Source\Renderer\Passes\TransparentRenderNode.cpp" />
     <ClCompile Include="Source\Renderer\Passes\TransparentLightingRenderNode.cpp" />
+    <ClCompile Include="Source\Renderer\Passes\TransparentBackfaceDistanceRenderNode.cpp" />
+    <ClCompile Include="Source\Renderer\Passes\TransparentCompositeRenderNode.cpp" />
     <ClCompile Include="Source\Renderer\Passes\PostProcessRenderNode.cpp" />
     <ClCompile Include="Source\Renderer\Passes\RayTracingRenderNode.cpp" />
     <ClCompile Include="Source\Renderer\Passes\ShadowRenderNode.cpp" />
@@ -116,17 +147,42 @@
     <ClCompile Include="Source\Renderer\Passes\RayMarchRenderNode.cpp" />
     <ClCompile Include="Source\Renderer\Passes\VolumetricCloudRenderNode.cpp" />
     <ClCompile Include="Source\Renderer\Scene\LightSystem.cpp" />
+    <ClCompile Include="Source\Renderer\Scene\ShadowMapManager.cpp" />
     <ClCompile Include="Source\Renderer\Scene\Skybox.cpp" />
+    <ClCompile Include="Source\Renderer\Scene\LightSystem_Shadow.cpp" />
+    <ClCompile Include="Source\Renderer\Scene\Skybox_IBL.cpp" />
     <ClCompile Include="Source\Renderer\Utilities\ResourceUploadUtility.cpp" />
     <ClCompile Include="Source\Renderer\Utilities\RendererMathUtility.cpp" />
     <ClCompile Include="Source\Renderer\Core\RenderGraph.cpp" />
+    <ClCompile Include="Source\Renderer\Core\RenderGraph_Registry.cpp" />
+    <ClCompile Include="Source\Renderer\Core\RenderNodeBuilder.cpp" />
+    <ClCompile Include="Source\Renderer\Core\RenderFrameOrchestrator.cpp" />
     <ClCompile Include="Source\Renderer\Core\RenderTargetPool.cpp" />
+    <ClCompile Include="Source\Renderer\Core\Dx12GraphicsDevice_Init.cpp" />
+    <ClCompile Include="Source\Renderer\Core\Dx12GraphicsDevice_Resource.cpp" />
+    <ClCompile Include="Source\Renderer\Core\RenderTargetPool_Swrt.cpp" />
     <ClCompile Include="Source\Renderer\Core\Renderer.cpp" />
+    <ClCompile Include="Source\Renderer\Core\Renderer_Render.cpp" />
+    <ClCompile Include="Source\Renderer\Core\RendererInitialization.cpp" />
+    <ClCompile Include="Source\Renderer\Core\RendererGraphicsCommands.cpp" />
+    <ClCompile Include="Source\Renderer\Core\SceneSynchronizer.cpp" />
+    <ClCompile Include="Source\Renderer\Core\EnvironmentManager.cpp" />
     <ClCompile Include="Source\Renderer\Core\SrvDescriptorAllocator.cpp" />
     <ClCompile Include="Source\Renderer\Core\RenderPassRegistry.cpp" />
     <ClCompile Include="Source\Renderer\Core\RendererFrameCoordinator.cpp" />
     <ClCompile Include="Source\Renderer\Core\RenderPipelineStateCache.cpp" />
+    <ClCompile Include="Source\Renderer\Core\RenderPipelineStateCache_Effects.cpp" />
+    <ClCompile Include="Source\Renderer\Core\RenderPipelineStateCache_Ssao.cpp" />
+    <ClCompile Include="Source\Renderer\Core\RenderPipelineStateCache_MeshShader.cpp" />
+    <ClCompile Include="Source\Renderer\Core\ShaderCompilationService.cpp" />
+    <ClCompile Include="Source\Renderer\Core\Dx11GraphicsDevice.cpp" />
     <ClCompile Include="Source\Renderer\Core\Dx12GraphicsDevice.cpp" />
+    <ClCompile Include="Source\Renderer\Core\OpenGLGraphicsDevice.cpp" />
+    <ClCompile Include="Source\Renderer\Core\OpenGLGraphicsDevice_Resource.cpp" />
+    <ClCompile Include="Source\Renderer\Core\Dx11GraphicsDevice_Resource.cpp" />
+    <ClCompile Include="Source\Renderer\Core\VulkanGraphicsDevice.cpp" />
+    <ClCompile Include="Source\Renderer\Core\VulkanGraphicsDevice_Backend.cpp" />
+    <ClCompile Include="Source\Renderer\Core\VulkanGraphicsDevice_Pipeline.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>15.0</VCProjectVersion>
@@ -166,6 +222,7 @@
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <Import Project="RhiBuild.props" />
   <ImportGroup Label="ExtensionSettings">
   </ImportGroup>
   <ImportGroup Label="Shared">
@@ -184,8 +241,8 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
-    <OutDir>$(MSBuildThisFileDirectory)Build\bin\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>$(MSBuildThisFileDirectory)Build\obj\$(MSBuildProjectName)\$(Platform)\$(Configuration)\</IntDir>
+    <OutDir>$(MSBuildThisFileDirectory)Build\bin\$(Platform)\$(Configuration)\$(RhiOutputSubdir)</OutDir>
+    <IntDir>$(MSBuildThisFileDirectory)Build\obj\$(MSBuildProjectName)\$(Platform)\$(Configuration)\$(RhiOutputSubdir)</IntDir>
   </PropertyGroup>
   <PropertyGroup>
     <BundledDxcRoot>$(ProjectDir)Tools\DXC\bin\x64</BundledDxcRoot>
@@ -216,6 +273,30 @@
 "$(DxcExecutable)" -E PSMain -T ps_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\CookTorranceGGX_PS.PSMain.ps_$(RendererShaderModel).cso" "%(FullPath)"</Command>
       <Outputs>$(OutDir)Shaders\CookTorranceGGX_PS.PSMain.ps_$(RendererShaderModel).cso</Outputs>
       <AdditionalInputs>%(FullPath);$(ProjectDir)Source\Renderer\Shaders\Common\LightCB.hlsli</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Transparent\TransparentBackfaceDistance_PS.hlsl">
+      <FileType>Document</FileType>
+      <Message>DXC %(Filename)%(Extension)</Message>
+      <Command>if not exist "$(OutDir)Shaders" mkdir "$(OutDir)Shaders"
+"$(DxcExecutable)" -E PSMain -T ps_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\TransparentBackfaceDistance_PS.PSMain.ps_$(RendererShaderModel).cso" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Shaders\TransparentBackfaceDistance_PS.PSMain.ps_$(RendererShaderModel).cso</Outputs>
+      <AdditionalInputs>%(FullPath);$(ProjectDir)Source\Renderer\Shaders\Common\LightCB.hlsli</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Transparent\TransparentOIT_PS.hlsl">
+      <FileType>Document</FileType>
+      <Message>DXC %(Filename)%(Extension)</Message>
+      <Command>if not exist "$(OutDir)Shaders" mkdir "$(OutDir)Shaders"
+"$(DxcExecutable)" -E PSMain -T ps_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\TransparentOIT_PS.PSMain.ps_$(RendererShaderModel).cso" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Shaders\TransparentOIT_PS.PSMain.ps_$(RendererShaderModel).cso</Outputs>
+      <AdditionalInputs>%(FullPath);$(ProjectDir)Source\Renderer\Shaders\CookTorranceGGX_PS.hlsl;$(ProjectDir)Source\Renderer\Shaders\Common\LightCB.hlsli;$(ProjectDir)Source\Renderer\Shaders\GI\GI_Common.hlsli</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Transparent\TransparentOITComposite_PS.hlsl">
+      <FileType>Document</FileType>
+      <Message>DXC %(Filename)%(Extension)</Message>
+      <Command>if not exist "$(OutDir)Shaders" mkdir "$(OutDir)Shaders"
+"$(DxcExecutable)" -E PSMain -T ps_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\TransparentOITComposite_PS.PSMain.ps_$(RendererShaderModel).cso" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Shaders\TransparentOITComposite_PS.PSMain.ps_$(RendererShaderModel).cso</Outputs>
+      <AdditionalInputs>%(FullPath)</AdditionalInputs>
     </CustomBuild>
     <CustomBuild Include="Source\Renderer\Shaders\Opaque_VS.hlsl">
       <FileType>Document</FileType>
@@ -321,6 +402,14 @@
       <Outputs>$(OutDir)Shaders\SWRT\SWRT_ReflectionComposite_PS.PSMain.ps_$(RendererShaderModel).cso</Outputs>
       <AdditionalInputs>%(FullPath);$(ProjectDir)Source\Renderer\Shaders\Common\LightCB.hlsli</AdditionalInputs>
     </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\PostProcess\ToneMap_PS.hlsl">
+      <FileType>Document</FileType>
+      <Message>DXC %(Filename)%(Extension)</Message>
+      <Command>if not exist "$(OutDir)Shaders\PostProcess" mkdir "$(OutDir)Shaders\PostProcess"
+"$(DxcExecutable)" -E PSMain -T ps_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\PostProcess\ToneMap_PS.PSMain.ps_$(RendererShaderModel).cso" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Shaders\PostProcess\ToneMap_PS.PSMain.ps_$(RendererShaderModel).cso</Outputs>
+      <AdditionalInputs>%(FullPath)</AdditionalInputs>
+    </CustomBuild>
     <CustomBuild Include="Source\Renderer\Shaders\RayMarch\RayMarch_VS.hlsl">
       <FileType>Document</FileType>
       <Message>DXC %(Filename)%(Extension)</Message>
@@ -380,12 +469,12 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;PLATFORM_WINDOWS=1;PLATFORM_LINUX=0;PLATFORM_MACOS=0;PLATFORM_ANDROID=0;RHI_DIRECTX12=1;RHI_DIRECTX11=0;RHI_VULKAN=0;RHI_OPENGL=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;PLATFORM_WINDOWS=1;PLATFORM_LINUX=0;PLATFORM_MACOS=0;PLATFORM_ANDROID=0;$(RhiPreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Renderer;$(ProjectDir)Tools\DXC\inc;$(ProjectDir)Libraries;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;$(BOOST_ROOT);$(BOOST_INCLUDEDIR);$(ProjectDir)Libraries\NRD\_NRD_SDK\Include;$(ProjectDir)Libraries\NRD\_NRD_SDK\Integration;$(ProjectDir)Libraries\NRD\_Build\_deps\nri-src\Include;$(ProjectDir)Libraries\NRD\_Build\_deps\nri-src\Include\Extensions</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Renderer;$(ProjectDir)Tools\DXC\inc;$(ProjectDir)Libraries;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;$(BOOST_ROOT);$(BOOST_INCLUDEDIR);$(RhiVulkanIncludeDirectories);$(ProjectDir)Libraries\NRD\_NRD_SDK\Include;$(ProjectDir)Libraries\NRD\_NRD_SDK\Integration;$(ProjectDir)Libraries\NRD\_Build\_deps\nri-src\Include;$(ProjectDir)Libraries\NRD\_Build\_deps\nri-src\Include\Extensions</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -398,12 +487,12 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;PLATFORM_WINDOWS=1;PLATFORM_LINUX=0;PLATFORM_MACOS=0;PLATFORM_ANDROID=0;RHI_DIRECTX12=1;RHI_DIRECTX11=0;RHI_VULKAN=0;RHI_OPENGL=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;PLATFORM_WINDOWS=1;PLATFORM_LINUX=0;PLATFORM_MACOS=0;PLATFORM_ANDROID=0;$(RhiPreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Renderer;$(ProjectDir)Tools\DXC\inc;$(ProjectDir)Libraries;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;C:\local\boost_1_89_0;$(ProjectDir)Libraries\NRD\_NRD_SDK\Include;$(ProjectDir)Libraries\NRD\_NRD_SDK\Integration;$(ProjectDir)Libraries\NRD\_Build\_deps\nri-src\Include;$(ProjectDir)Libraries\NRD\_Build\_deps\nri-src\Include\Extensions</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Renderer;$(ProjectDir)Tools\DXC\inc;$(ProjectDir)Libraries;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;C:\local\boost_1_89_0;$(RhiVulkanIncludeDirectories);$(ProjectDir)Libraries\NRD\_NRD_SDK\Include;$(ProjectDir)Libraries\NRD\_NRD_SDK\Integration;$(ProjectDir)Libraries\NRD\_Build\_deps\nri-src\Include;$(ProjectDir)Libraries\NRD\_Build\_deps\nri-src\Include\Extensions</AdditionalIncludeDirectories>
       <AdditionalOptions>/FS /utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
@@ -421,12 +510,12 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;PLATFORM_WINDOWS=1;PLATFORM_LINUX=0;PLATFORM_MACOS=0;PLATFORM_ANDROID=0;RHI_DIRECTX12=1;RHI_DIRECTX11=0;RHI_VULKAN=0;RHI_OPENGL=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;PLATFORM_WINDOWS=1;PLATFORM_LINUX=0;PLATFORM_MACOS=0;PLATFORM_ANDROID=0;$(RhiPreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Renderer;$(ProjectDir)Tools\DXC\inc;$(ProjectDir)Libraries;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;$(BOOST_ROOT);$(BOOST_INCLUDEDIR);$(ProjectDir)Libraries\NRD\_NRD_SDK\Include;$(ProjectDir)Libraries\NRD\_NRD_SDK\Integration;$(ProjectDir)Libraries\NRD\_Build\_deps\nri-src\Include;$(ProjectDir)Libraries\NRD\_Build\_deps\nri-src\Include\Extensions</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Renderer;$(ProjectDir)Tools\DXC\inc;$(ProjectDir)Libraries;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;$(BOOST_ROOT);$(BOOST_INCLUDEDIR);$(RhiVulkanIncludeDirectories);$(ProjectDir)Libraries\NRD\_NRD_SDK\Include;$(ProjectDir)Libraries\NRD\_NRD_SDK\Integration;$(ProjectDir)Libraries\NRD\_Build\_deps\nri-src\Include;$(ProjectDir)Libraries\NRD\_Build\_deps\nri-src\Include\Extensions</AdditionalIncludeDirectories>
       <AdditionalOptions>/FS /utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
@@ -444,12 +533,12 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;PLATFORM_WINDOWS=1;PLATFORM_LINUX=0;PLATFORM_MACOS=0;PLATFORM_ANDROID=0;RHI_DIRECTX12=1;RHI_DIRECTX11=0;RHI_VULKAN=0;RHI_OPENGL=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;PLATFORM_WINDOWS=1;PLATFORM_LINUX=0;PLATFORM_MACOS=0;PLATFORM_ANDROID=0;$(RhiPreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Renderer;$(ProjectDir)Tools\DXC\inc;$(ProjectDir)Libraries;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;C:\local\boost_1_89_0;$(ProjectDir)Libraries\NRD\_NRD_SDK\Include;$(ProjectDir)Libraries\NRD\_NRD_SDK\Integration;$(ProjectDir)Libraries\NRD\_Build\_deps\nri-src\Include;$(ProjectDir)Libraries\NRD\_Build\_deps\nri-src\Include\Extensions</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Renderer;$(ProjectDir)Tools\DXC\inc;$(ProjectDir)Libraries;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;C:\local\boost_1_89_0;$(RhiVulkanIncludeDirectories);$(ProjectDir)Libraries\NRD\_NRD_SDK\Include;$(ProjectDir)Libraries\NRD\_NRD_SDK\Integration;$(ProjectDir)Libraries\NRD\_Build\_deps\nri-src\Include;$(ProjectDir)Libraries\NRD\_Build\_deps\nri-src\Include\Extensions</AdditionalIncludeDirectories>
       <AdditionalOptions>/FS /utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
@@ -478,7 +567,7 @@
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
-      <ErrorText>このプロジェクトは、このコンピューター上にない NuGet パッケージを参照しています。それらのパッケージをダウンロードするには、[NuGet パッケージの復元] を使用します。詳細については、http://go.microsoft.com/fwlink/?LinkID=322105 を参照してください。見つからないファイルは {0} です。</ErrorText>
+      <ErrorText>This project references NuGet package files that are missing on this computer. Restore NuGet packages before building. Missing file: {0}</ErrorText>
     </PropertyGroup>
     <Error Condition="!Exists('Libraries\packages\Microsoft.Direct3D.D3D12.1.616.1\build\native\Microsoft.Direct3D.D3D12.props')" Text="$([System.String]::Format('$(ErrorText)', 'Libraries\packages\Microsoft.Direct3D.D3D12.1.616.1\build\native\Microsoft.Direct3D.D3D12.props'))" />
     <Error Condition="!Exists('Libraries\packages\Microsoft.Direct3D.D3D12.1.616.1\build\native\Microsoft.Direct3D.D3D12.targets')" Text="$([System.String]::Format('$(ErrorText)', 'Libraries\packages\Microsoft.Direct3D.D3D12.1.616.1\build\native\Microsoft.Direct3D.D3D12.targets'))" />

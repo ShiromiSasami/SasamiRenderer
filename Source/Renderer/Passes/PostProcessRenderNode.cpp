@@ -9,8 +9,10 @@ namespace SasamiRenderer
 
     void PostProcessRenderNode::Setup(RenderGraphBuilder& builder) const
     {
-        builder.Read("SceneColor");
         builder.Write("SceneColor");
+        builder.UseColorTarget("SceneColor");
+        builder.Write("BackBuffer");
+        builder.UseColorTarget("BackBuffer");
         builder.DependsOnPrevious();
     }
 
@@ -20,8 +22,8 @@ namespace SasamiRenderer
             return false;
         }
         const RenderNodeExecutionServices& services = context.Services();
-        if (services.compositeSoftwareReflections &&
-            !services.compositeSoftwareReflections()) {
+        if (services.toneMapSceneColor &&
+            !services.toneMapSceneColor()) {
             return false;
         }
         Execute({});

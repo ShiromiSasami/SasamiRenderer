@@ -4,9 +4,49 @@
 
 namespace SasamiRenderer
 {
+    namespace
+    {
+        void ExecuteSkinnedOpaquePass(IRhiCommandEncoder* enc,
+                                      RenderPipelineStateCache& pipelineStateCache,
+                                      DescriptorHeap& srvHeap,
+                                      GpuDescriptorHandle shadowSrv,
+                                      GpuDescriptorHandle spotShadowSrv,
+                                      GpuDescriptorHandle vsmSrv,
+                                      GpuDescriptorHandle lightSrvTable,
+                                      GpuDescriptorHandle iblSrvTable,
+                                      GpuDescriptorHandle aoSrv,
+                                      GpuDescriptorHandle reflectionSrv,
+                                      GpuDescriptorHandle transparentBackfaceDistanceSrv,
+                                      D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu,
+                                      const std::function<void()>& drawSkinnedCallback)
+        {
+            if (!enc || !drawSkinnedCallback) return;
+
+            enc->SetGraphicsPipelineLayout(RenderPipelineStateCache::MakeLayoutHandle(pipelineStateCache.GetSkinnedRootSignature()));
+            enc->SetGraphicsPipeline(RenderPipelineStateCache::MakePipelineHandle(pipelineStateCache.GetSkinnedPipelineState()));
+
+            enc->SetDescriptorHeap(RenderPipelineStateCache::MakeDescriptorHeapHandle(srvHeap));
+            enc->SetGraphicsDescriptorTable(1,  { shadowSrv.ptr });
+            enc->SetGraphicsDescriptorTable(4,  { lightSrvTable.ptr });
+            enc->SetGraphicsDescriptorTable(5,  { iblSrvTable.ptr });
+            enc->SetGraphicsDescriptorTable(6,  { aoSrv.ptr });
+            enc->SetGraphicsDescriptorTable(7,  { reflectionSrv.ptr });
+            enc->SetGraphicsDescriptorTable(12, { spotShadowSrv.ptr });
+            enc->SetGraphicsDescriptorTable(13, { vsmSrv.ptr });
+            enc->SetGraphicsDescriptorTable(14, { transparentBackfaceDistanceSrv.ptr });
+            if (lightCbGpu != 0) {
+                enc->SetGraphicsConstantBufferView(3, lightCbGpu);
+            }
+            enc->SetPrimitiveTopology(RhiPrimitiveTopology::TriangleList);
+
+            drawSkinnedCallback();
+        }
+    }
+
     void OpaqueRenderNode::BuildRequirements(RenderNodeRequirementBuilder& builder) const
     {
-        builder.RequireGraphicsBase();
+        builder.RequireRhiGraphicsBase();
+        builder.RequireSrvHeap();
     }
 
     void OpaqueRenderNode::Setup(RenderGraphBuilder& builder) const
@@ -32,25 +72,41 @@ namespace SasamiRenderer
         const RenderNodeFrameInputs& inputs = context.Inputs();
         const RenderNodeExecutionServices& services = context.Services();
 
-        Execute(inputs.cmdList,
-                *inputs.pipelineStateCache,
-                *inputs.srvHeap,
-                *inputs.viewport,
-                *inputs.scissorRect,
-                inputs.shadowSrv,
-                inputs.spotShadowSrv,
-                inputs.lightSrvTable,
-                inputs.iblSrvTable,
-                inputs.aoSrv,
+        Execute(inputs.execution.commandEncoder,
+                *inputs.execution.pipelineStateCache,
+                *inputs.execution.srvHeap,
+                *inputs.execution.viewport,
+                *inputs.execution.scissorRect,
+                inputs.shadow.shadowSrv,
+                inputs.shadow.spotShadowSrv,
+                inputs.lighting.lightSrvTable,
+                inputs.lighting.iblSrvTable,
+                inputs.ao.aoSrv,
                 inputs.reflectionSrv,
-                inputs.lightCbGpu,
+                inputs.lighting.lightCbGpu,
                 policy.useTessellation,
                 policy.useTessellationDebugColors,
                 services.drawOpaqueItems);
+
+        if (services.drawSkinnedOpaqueItems) {
+            ExecuteSkinnedOpaquePass(inputs.execution.commandEncoder,
+                                     *inputs.execution.pipelineStateCache,
+                                     *inputs.execution.srvHeap,
+                                     inputs.shadow.shadowSrv,
+                                     inputs.shadow.spotShadowSrv,
+                                     inputs.shadow.vsmSrv,
+                                     inputs.lighting.lightSrvTable,
+                                     inputs.lighting.iblSrvTable,
+                                     inputs.ao.aoSrv,
+                                     inputs.reflectionSrv,
+                                     inputs.transparentBackfaceDistanceSrv,
+                                     inputs.lighting.lightCbGpu,
+                                     services.drawSkinnedOpaqueItems);
+        }
         return true;
     }
 
-    void OpaqueRenderNode::Execute(CommandList* cmdList,
+    void OpaqueRenderNode::Execute(IRhiCommandEncoder* enc,
                                    RenderPipelineStateCache& pipelineStateCache,
                                    DescriptorHeap& srvHeap,
                                    const Viewport& viewport,
@@ -66,40 +122,40 @@ namespace SasamiRenderer
                                    bool tessDebugColors,
                                    const std::function<void()>& drawCallback) const
     {
-        if (!cmdList) {
+        if (!enc) {
             return;
         }
 
-        cmdList->SetGraphicsRootSignature(pipelineStateCache.GetRootSignature());
-        cmdList->RSSetViewports(1, &viewport);
-        cmdList->RSSetScissorRects(1, &scissorRect);
+        enc->SetGraphicsPipelineLayout(RenderPipelineStateCache::MakeLayoutHandle(pipelineStateCache.GetRootSignature()));
+        enc->SetViewports(reinterpret_cast<const RhiViewport*>(&viewport), 1);
+        enc->SetScissors(reinterpret_cast<const RhiRect*>(&scissorRect), 1);
         if (useTessellation) {
             if (tessDebugColors && pipelineStateCache.GetTessellationDebugPipelineState().Get()) {
-                cmdList->SetPipelineState(pipelineStateCache.GetTessellationDebugPipelineState());
+                enc->SetGraphicsPipeline(RenderPipelineStateCache::MakePipelineHandle(pipelineStateCache.GetTessellationDebugPipelineState()));
             } else {
-                cmdList->SetPipelineState(pipelineStateCache.GetTessellationPipelineState());
+                enc->SetGraphicsPipeline(RenderPipelineStateCache::MakePipelineHandle(pipelineStateCache.GetTessellationPipelineState()));
             }
-            cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST);
+            enc->SetPrimitiveTopology(RhiPrimitiveTopology::PatchList);
         } else {
-            cmdList->SetPipelineState(pipelineStateCache.GetBasicPipelineState());
-            cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            enc->SetGraphicsPipeline(RenderPipelineStateCache::MakePipelineHandle(pipelineStateCache.GetBasicPipelineState()));
+            enc->SetPrimitiveTopology(RhiPrimitiveTopology::TriangleList);
         }
 
-        DescriptorHeap* heaps[] = { &srvHeap };
-        cmdList->SetDescriptorHeaps(1, heaps);
-        cmdList->SetGraphicsRootDescriptorTable(1, shadowSrv);
-        cmdList->SetGraphicsRootDescriptorTable(4, lightSrvTable);
-        cmdList->SetGraphicsRootDescriptorTable(5, iblSrvTable);
-        cmdList->SetGraphicsRootDescriptorTable(6, aoSrv);
-        cmdList->SetGraphicsRootDescriptorTable(7, reflectionSrv);
-        cmdList->SetGraphicsRootDescriptorTable(12, spotShadowSrv);
+        enc->SetDescriptorHeap(RenderPipelineStateCache::MakeDescriptorHeapHandle(srvHeap));
+        enc->SetGraphicsDescriptorTable(1,  { shadowSrv.ptr });
+        enc->SetGraphicsDescriptorTable(4,  { lightSrvTable.ptr });
+        enc->SetGraphicsDescriptorTable(5,  { iblSrvTable.ptr });
+        enc->SetGraphicsDescriptorTable(6,  { aoSrv.ptr });
+        enc->SetGraphicsDescriptorTable(7,  { reflectionSrv.ptr });
+        enc->SetGraphicsDescriptorTable(12, { spotShadowSrv.ptr });
 
         if (lightCbGpu != 0) {
-            cmdList->SetGraphicsRootConstantBufferView(3, lightCbGpu);
+            enc->SetGraphicsConstantBufferView(3, lightCbGpu);
         }
 
         if (drawCallback) {
             drawCallback();
         }
     }
+
 }

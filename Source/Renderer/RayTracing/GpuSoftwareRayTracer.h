@@ -58,6 +58,7 @@ namespace SasamiRenderer
             uint32_t samplingMode             = 2;  // 0=IS Only, 1=NEE Only, 2=MIS (IS+NEE)
             bool     preserveExistingPixels   = false;
             bool     iblEnabled               = false;
+            bool     proceduralSkyEnabled     = false;
             float    iblIntensity             = 1.0f;
             float    iblPrefilterMaxMip       = 0.0f;
             RayTracingFrameDesc frameDesc{};
@@ -329,7 +330,7 @@ namespace SasamiRenderer
             float    iblEnabled;
             float    iblIntensity;
             float    iblPrefilterMaxMip;
-            float    pad0;
+            float    proceduralSkyEnabled;
             uint32_t pointLightCount;
             uint32_t spotLightCount;
             uint32_t samplesPerPixel;
@@ -454,7 +455,7 @@ namespace SasamiRenderer
         // [6]      = shadow output UAV (legacy)
         // [7]      = reflection output UAV (legacy)
         // [8..11]  = ReSTIR scratch SRVs (t6-t9, set per-pass)
-        // [12..13] = ReSTIR scratch UAVs (u0-u1, set per-pass)
+        // [12..14] = ReSTIR scratch UAVs (u0-u2, set per-pass)
         DescriptorHeap m_descHeap;
         UINT           m_descIncrementSize = 0;
 
@@ -467,11 +468,11 @@ namespace SasamiRenderer
         static constexpr UINT kScratchUavCount    = 3u;   // u0-u2 (NRD Pack needs 3)
         static constexpr UINT kGBufferSrvBase     = 8u;   // t6-t9: Normal, Material, Albedo, IBL Prefilter
         static constexpr UINT kGBufferSrvCount    = 4u;
-        static constexpr UINT kReSTIRPassDescBase   = 14u;  // first per-pass descriptor slot
+        static constexpr UINT kReSTIRPassDescBase   = 23u;  // after legacy temporal slots 14-22
         static constexpr UINT kReSTIRPassDescStride = 7u;   // 4 SRV + 3 UAV per pass
         static constexpr UINT kReSTIRPassCount      = 8u;   // Pass0-Pass5(NRD Pack) + Pass6/7(A-Trous ping/pong)
         static constexpr UINT kReSTIRFrameSlots     = 2u;   // double-buffer to avoid WaitForGPU
-        static constexpr UINT kTotalDescriptors     = kReSTIRPassDescBase + kReSTIRFrameSlots * kReSTIRPassCount * kReSTIRPassDescStride; // 14+112=126
+        static constexpr UINT kTotalDescriptors     = kReSTIRPassDescBase + kReSTIRFrameSlots * kReSTIRPassCount * kReSTIRPassDescStride; // 23+112=135
 
         // ---- Legacy Compute PSOs ----
         ComPtr<ID3D12RootSignature> m_rootSignature;
@@ -523,6 +524,8 @@ namespace SasamiRenderer
         Resource m_reservoirBuffer[3];     // RWStructuredBuffer<Reservoir> W×H  [0]=initial/spatial, [1]/[2]=temporal ping-pong
         Resource m_prevColorTexture;       // R16G16B16A16_FLOAT  W×H
         Resource m_shadedColorTexture;     // R16G16B16A16_FLOAT  W×H  (Pass4 output)
+        Resource m_hitPositionTexture;     // R16G16B16A16_FLOAT: secondary hit world position.xyz + valid
+        Resource m_hitMaterialTexture;     // R16G16B16A16_FLOAT: secondary hit baseColor.rgb + roughness
         // ---- NRD textures ----
         Resource m_nrdDiffIn;             // RGBA16F – IN_DIFF_RADIANCE_HITDIST
         Resource m_nrdViewZ;              // R16F    – IN_VIEWZ

@@ -18,6 +18,7 @@
 
 #include "SWRT/SWRT_Common.hlsli"
 #include "SWRT/SWRT_Reservoir.hlsli"
+#include "ProceduralSky/ProceduralSky.hlsli"
 
 cbuffer ReSTIRFrameConstants : register(b0)
 {
@@ -49,9 +50,9 @@ cbuffer ReSTIRFrameConstants : register(b0)
     uint   g_cbPad1;
 };
 
-Texture2D<float4> g_gbuffer         : register(t6);  // scratch SRV[0]: ReSTIR GBuffer (normal + linearDepth)
-Texture2D<float4> g_rasterMaterial  : register(t7);  // scratch SRV[1]: rasterized GBufferMaterial (r=roughness, g=metallic)
-Texture2D<float4> g_rasterAlbedo    : register(t8);  // scratch SRV[2]: rasterized GBufferAlbedo (rgb=baseColor)
+Texture2D<float4> g_gbuffer         : register(t6);  // secondary normal.xyz + hit distance
+Texture2D<float4> g_hitMaterial     : register(t7);  // secondary baseColor.rgb + roughness
+Texture2D<float4> g_hitPosition     : register(t9);  // secondary world position.xyz + (1 + metallic), 0 = invalid
 
 struct GpuPointLightRT { float3 pos; float range; float3 colorIntensity; float pad; };
 struct GpuSpotLightRT  { float3 pos; float range; float3 dir; float cosInner;
@@ -101,15 +102,6 @@ float3 EvalPBR(float3 N, float3 L, float3 V, float3 albedo, float roughness, flo
     return (kd * albedo / 3.14159265f + spec) * NdotL * lightRadiance;
 }
 
-float3 ReconstructWorldPos(uint2 pixel, float linearDepth)
-{
-    float ndcX =  ((float(pixel.x) + 0.5f) / float(g_renderWidth))  * 2.0f - 1.0f;
-    float ndcY = -((float(pixel.y) + 0.5f) / float(g_renderHeight)) * 2.0f + 1.0f;
-    float4 viewRayH = mul(float4(ndcX, ndcY, 1.0f, 1.0f), g_invVP);
-    float3 viewRay  = normalize(viewRayH.xyz / viewRayH.w - g_cameraPos);
-    return g_cameraPos + viewRay * linearDepth;
-}
-
 [numthreads(16, 16, 1)]
 void CS_ReSTIR_Shade(uint3 id : SV_DispatchThreadID)
 {
@@ -117,27 +109,39 @@ void CS_ReSTIR_Shade(uint3 id : SV_DispatchThreadID)
 
     float4 gbuf  = g_gbuffer[id.xy];
     float  depth = gbuf.w;
+    float4 hitPosSample = g_hitPosition[id.xy];
 
-    if (depth < 0.0f)
+    if (depth < 0.0f || hitPosSample.w <= 0.0f)
     {
-        // Sky: use ambient gradient
-        g_shadedOut[id.xy] = float4(g_ambientColor * g_ambientIntensity, 0.0f);
+        // depth == -2.0f: ray miss — gbuf.xyz holds the reflection direction.
+        // depth == -1.0f: fully invalid pixel (no primary geometry / TLAS / low energy).
+        if (depth < -1.5f)
+        {
+            float3 reflDir = normalize(gbuf.xyz);
+            float3 skyColor = ComputeSkyColor(reflDir,
+                                  normalize(g_dirLightDir),
+                                  g_dirLightColor,
+                                  g_dirLightIntensity);
+            g_shadedOut[id.xy] = float4(skyColor, 1.0f);
+        }
+        else
+        {
+            g_shadedOut[id.xy] = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        }
         return;
     }
 
     float3 N       = normalize(gbuf.xyz);
-    float3 worldPos = ReconstructWorldPos(id.xy, depth);
+    float3 worldPos = hitPosSample.xyz;
     float3 V       = normalize(g_cameraPos - worldPos);
 
     uint pixIdx = id.y * g_reservoirWidth + id.x;
     Reservoir r  = g_reservoir[pixIdx];
 
-    // Read actual material from rasterized G-Buffer
-    float4 matSample    = g_rasterMaterial.Load(int3(id.xy, 0));
-    float4 albedoSample = g_rasterAlbedo.Load(int3(id.xy, 0));
-    float3 albedo    = albedoSample.rgb;
-    float  roughness = matSample.r;
-    float  metallic  = matSample.g;
+    float4 hitMat = g_hitMaterial.Load(int3(id.xy, 0));
+    float3 albedo    = saturate(hitMat.rgb);
+    float  roughness = saturate(hitMat.a);
+    float  metallic  = saturate(hitPosSample.w - 1.0f);
 
     float3 color = float3(0, 0, 0);
 
@@ -213,9 +217,5 @@ void CS_ReSTIR_Shade(uint3 id : SV_DispatchThreadID)
 
     // Roughness attenuation only — Fresnel is applied per-channel in PBR_PS.hlsl.
     // (Same convention as SWRT_Reflection_CS.hlsl: alpha = roughnessAtten, not fresnelWeight.)
-    float  roughnessFade = 1.0f - smoothstep(g_maxSurfaceRoughness * 0.7f,
-                                              g_maxSurfaceRoughness, roughness);
-    float  roughnessAtten = roughnessFade * roughnessFade;
-
-    g_shadedOut[id.xy] = float4(color, roughnessAtten);
+    g_shadedOut[id.xy] = float4(color, 1.0f);
 }

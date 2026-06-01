@@ -21,5 +21,6 @@ float4 PSMain(PSInput i) : SV_TARGET
 {
     float4 texColor = AlbedoTex.Sample(LinearWrap, i.uv);
     float3 baseColor = texColor.rgb * i.color.rgb * u_materialBaseColor.rgb;
-    return float4(baseColor + u_materialEmissiveRoughness.rgb, 1.0f);
+    float alpha = saturate(texColor.a * i.color.a * u_materialBaseColor.a);
+    return float4(baseColor + u_materialEmissiveRoughness.rgb, alpha);
 }

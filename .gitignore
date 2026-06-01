@@ -37,6 +37,7 @@ bld/
 [Ll]ogs/
 Build/bin/
 Build/obj/
+Build/shadercheck/
 
 # Visual Studio 2015/2017 cache/options directory
 .vs/
@@ -289,6 +290,8 @@ FakesAssemblies/
 # Node.js Tools for Visual Studio
 .ntvs_analysis.dat
 node_modules/
+package.json
+package-lock.json
 
 # Visual Studio 6 build log
 *.plg

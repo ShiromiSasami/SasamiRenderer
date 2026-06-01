@@ -1,11 +1,15 @@
 #pragma once
+#include "Renderer/Core/SceneSynchronizer.h"
+#include "Renderer/Core/EnvironmentManager.h"
 #include "Renderer/Core/GraphicsDevice.h"
 #include "Renderer/Core/RayTracingStats.h"
-#include "Renderer/Core/RenderSettings.h"
+#include "Renderer/Core/RenderFeatureSettings.h"
 #include "Renderer/Core/RenderTargetPool.h"
 #include "Renderer/RayTracing/SWRTExecutor.h"
 #include "Renderer/Scene/SceneSubmitter.h"
 #include "Renderer/Core/RenderGraph.h"
+#include "Renderer/Core/RenderFrameOrchestrator.h"
+#include "Renderer/Core/RenderNodeBuilder.h"
 #include "Renderer/Core/RendererFrameCoordinator.h"
 #include "Renderer/Core/RenderPipelineStateCache.h"
 #include "Renderer/Core/RenderNodeConstants.h"
@@ -15,12 +19,15 @@
 #include "Renderer/Core/RenderPassRegistry.h"
 #include "Renderer/Scene/RenderProxy.h"
 #include "Renderer/Scene/MeshBuffer.h"
+#include "Renderer/Scene/SkinnedMeshBuffer.h"
 #include "Renderer/Scene/DrawCommandBuilder.h"
 #include "Renderer/Passes/ShadowRenderNode.h"
 #include "Renderer/Passes/OpaqueRenderNode.h"
 #include "Renderer/Passes/LightingRenderNode.h"
 #include "Renderer/Passes/TransparentRenderNode.h"
 #include "Renderer/Passes/TransparentLightingRenderNode.h"
+#include "Renderer/Passes/TransparentBackfaceDistanceRenderNode.h"
+#include "Renderer/Passes/TransparentCompositeRenderNode.h"
 #include "Renderer/Passes/SkyboxRenderNode.h"
 #include "Renderer/Passes/PostProcessRenderNode.h"
 #include "Renderer/Passes/RayTracingRenderNode.h"
@@ -66,7 +73,8 @@ namespace SasamiRenderer
         using PointLight = LightSystem::PointLight;
         using SpotLight = LightSystem::SpotLight;
 
-        using RenderProxy = SasamiRenderer::RenderProxy;
+        using RenderProxy        = SasamiRenderer::RenderProxy;
+        using SkinnedRenderProxy = SasamiRenderer::SkinnedRenderProxy;
 
         using OverlayRenderCallback = std::function<void(CommandList&, CpuDescriptorHandle)>;
         using PhaseCompletionMode = RenderGraph::PhaseCompletionMode;
@@ -85,6 +93,7 @@ namespace SasamiRenderer
         void Render(const OverlayRenderCallback& overlay = {});
         void UpdateCameraCB(const RenderCameraProxy* camera);
         void SubmitRenderProxies(std::vector<RenderProxy>&& proxies);
+        void SubmitSkinnedRenderProxies(std::vector<SkinnedRenderProxy>&& proxies);
         void ClearSubmittedRenderProxies();
         void ClearRenderObjects();
         void SetDeltaTime(float dt) { m_deltaTime = dt; }
@@ -118,7 +127,7 @@ namespace SasamiRenderer
         GraphicsBackend GetGraphicsBackend() const { return GetRHIBackend(); }
 
         float GetIblIntensity() const { return m_settings.iblIntensity; }
-        void SetIblIntensity(float intensity) { m_settings.iblIntensity = (intensity < 0.0f) ? 0.0f : intensity; }
+        void SetIblIntensity(float intensity) { m_settings.SetIblIntensity(intensity); }
         void ResizeViewport(UINT width, UINT height);
         bool GetUseTessellation() const { return m_settings.useTessellation; }
         void SetUseTessellation(bool enable) { m_settings.useTessellation = enable; }
@@ -139,26 +148,18 @@ namespace SasamiRenderer
         bool GetRayTracingDynamicResolutionEnabled() const { return m_settings.rayTracingDynamicResolutionEnabled; }
         void SetRayTracingDynamicResolutionEnabled(bool enabled) { m_settings.rayTracingDynamicResolutionEnabled = enabled; }
         uint32_t GetRayTracingMaxBounceCount() const { return m_settings.rayTracingMaxBounceCount; }
-        void SetRayTracingMaxBounceCount(uint32_t count)
-        {
-            if (count < kMinRayTracingBounceCount) {
-                count = kMinRayTracingBounceCount;
-            }
-            if (count > kMaxRayTracingBounceCount) {
-                count = kMaxRayTracingBounceCount;
-            }
-            m_settings.rayTracingMaxBounceCount = count;
-        }
+        void SetRayTracingMaxBounceCount(uint32_t count) { m_settings.SetRayTracingMaxBounceCount(count); }
         bool GetRasterSoftwareRayTracedDirectionalShadowEnabled() const
         {
             return m_settings.rasterSoftwareRayTracedDirectionalShadowEnabled;
         }
         void SetRasterSoftwareRayTracedDirectionalShadowEnabled(bool enabled)
         {
-            if (m_settings.rasterSoftwareRayTracedDirectionalShadowEnabled != enabled) {
+            const RenderFeatureSettingChanges changes =
+                m_settings.SetRasterSoftwareRayTracedDirectionalShadowEnabled(enabled);
+            if (changes.invalidateShadowCache) {
                 m_swrtExecutor.InvalidateShadowCache();
             }
-            m_settings.rasterSoftwareRayTracedDirectionalShadowEnabled = enabled;
         }
         bool GetRasterSoftwareRayTracedReflectionEnabled() const
         {
@@ -166,10 +167,14 @@ namespace SasamiRenderer
         }
         void SetRasterSoftwareRayTracedReflectionEnabled(bool enabled)
         {
-            if (m_settings.rasterSoftwareRayTracedReflectionEnabled != enabled) {
+            const RenderFeatureSettingChanges changes =
+                m_settings.SetRasterSoftwareRayTracedReflectionEnabled(enabled);
+            if (changes.invalidateSceneColorHistory) {
+                m_sceneColorHistoryValid = false;
+            }
+            if (changes.reallocateReflectionResources) {
                 m_swrtExecutor.OnReflectionResourcesReallocated();
             }
-            m_settings.rasterSoftwareRayTracedReflectionEnabled = enabled;
         }
         bool GetRasterScreenSpaceReflectionEnabled() const
         {
@@ -177,27 +182,22 @@ namespace SasamiRenderer
         }
         void SetRasterScreenSpaceReflectionEnabled(bool enabled)
         {
-            if (m_settings.rasterScreenSpaceReflectionEnabled != enabled) {
+            const RenderFeatureSettingChanges changes =
+                m_settings.SetRasterScreenSpaceReflectionEnabled(enabled);
+            if (changes.reallocateReflectionResources) {
+                m_swrtExecutor.OnReflectionResourcesReallocated();
+            }
+            if (changes.invalidateSceneColorHistory) {
                 m_sceneColorHistoryValid = false;
             }
-            m_settings.rasterScreenSpaceReflectionEnabled = enabled;
         }
         bool GetRasterSoftwareRayTracedAmbientOcclusionEnabled() const
         {
-            return m_settings.ambientOcclusionMode != RendererEnums::AmbientOcclusionMode::MaterialOnly &&
-                   (m_settings.runtimeAoMethod == RuntimeAmbientOcclusionMethod::RayTraced ||
-                    m_settings.ambientOcclusionMode == RendererEnums::AmbientOcclusionMode::RayTracedAOOnly);
+            return m_settings.IsRasterSoftwareRayTracedAmbientOcclusionEnabled();
         }
         void SetRasterSoftwareRayTracedAmbientOcclusionEnabled(bool enabled)
         {
-            m_settings.rasterSoftwareRayTracedAmbientOcclusionEnabled = enabled;
-            if (enabled) {
-                m_settings.ambientOcclusionMode = RendererEnums::AmbientOcclusionMode::RuntimeAOOnly;
-                m_settings.runtimeAoMethod = RuntimeAmbientOcclusionMethod::RayTraced;
-            } else {
-                m_settings.ambientOcclusionMode = RendererEnums::AmbientOcclusionMode::Hybrid;
-                m_settings.runtimeAoMethod = RuntimeAmbientOcclusionMethod::SSAO;
-            }
+            m_settings.SetRasterSoftwareRayTracedAmbientOcclusionEnabled(enabled);
         }
         RendererEnums::AmbientOcclusionMode GetAmbientOcclusionMode() const
         {
@@ -205,36 +205,29 @@ namespace SasamiRenderer
         }
         void SetAmbientOcclusionMode(RendererEnums::AmbientOcclusionMode mode)
         {
-            m_settings.ambientOcclusionMode = mode;
-            if (mode == RendererEnums::AmbientOcclusionMode::RayTracedAOOnly) {
-                m_settings.runtimeAoMethod = RuntimeAmbientOcclusionMethod::RayTraced;
-            }
-            m_settings.rasterSoftwareRayTracedAmbientOcclusionEnabled = GetRasterSoftwareRayTracedAmbientOcclusionEnabled();
+            m_settings.SetAmbientOcclusionMode(mode);
         }
         RuntimeAmbientOcclusionMethod GetRuntimeAmbientOcclusionMethod() const { return m_settings.runtimeAoMethod; }
         void SetRuntimeAmbientOcclusionMethod(RuntimeAmbientOcclusionMethod method)
         {
-            m_settings.runtimeAoMethod = method;
-            m_settings.rasterSoftwareRayTracedAmbientOcclusionEnabled =
-                (method == RuntimeAmbientOcclusionMethod::RayTraced);
+            m_settings.SetRuntimeAmbientOcclusionMethod(method);
         }
         bool GetSwrtUseReSTIR() const { return m_settings.swrtUseReSTIR; }
         void SetSwrtUseReSTIR(bool useReSTIR)
         {
             m_settings.swrtUseReSTIR = useReSTIR;
-            using SwrtMode = GpuSoftwareRayTracer::SwrtMode;
-            m_gpuSoftwareRayTracer.SetMode(useReSTIR ? SwrtMode::ReSTIR : SwrtMode::Legacy);
+            ApplySwrtModeSetting();
         }
         uint32_t GetSwrtSamplingMode() const { return m_settings.swrtSamplingMode; }
-        void SetSwrtSamplingMode(uint32_t mode) { m_settings.swrtSamplingMode = (mode < 2u ? mode : 2u); }
+        void SetSwrtSamplingMode(uint32_t mode) { m_settings.SetSwrtSamplingMode(mode); }
         uint32_t GetSwrtSamplesPerPixel() const { return m_settings.swrtSamplesPerPixel; }
         void SetSwrtSamplesPerPixel(uint32_t n) { m_settings.swrtSamplesPerPixel = n; }
         uint32_t GetSwrtMaxBounces() const { return m_settings.swrtMaxBounces; }
-        void SetSwrtMaxBounces(uint32_t n) { m_settings.swrtMaxBounces = (n < 1u ? 1u : (n > 8u ? 8u : n)); }
+        void SetSwrtMaxBounces(uint32_t n) { m_settings.SetSwrtMaxBounces(n); }
         bool GetSwrtDenoiserEnabled() const { return m_settings.swrtDenoiserEnabled; }
         void SetSwrtDenoiserEnabled(bool enabled) { m_settings.swrtDenoiserEnabled = enabled; }
         uint32_t GetSwrtReflectionAtrousIterations() const { return m_settings.swrtReflectionAtrousIterations; }
-        void SetSwrtReflectionAtrousIterations(uint32_t n) { m_settings.swrtReflectionAtrousIterations = (n > 5u ? 5u : n); }
+        void SetSwrtReflectionAtrousIterations(uint32_t n) { m_settings.SetSwrtReflectionAtrousIterations(n); }
         bool GetGIEnabled()     const { return m_probeGrid.GetEnabled(); }
         void SetGIEnabled(bool e)     { m_probeGrid.SetEnabled(e); }
         float GetGIIntensity()  const { return m_probeGrid.GetGiIntensity(); }
@@ -271,52 +264,25 @@ namespace SasamiRenderer
         GBufferDebugView GetGBufferDebugView() const { return m_settings.gBufferDebugView; }
         void SetGBufferDebugView(GBufferDebugView view)
         {
-            if (m_settings.renderPathMode != RenderPathMode::Raster) {
-                m_settings.gBufferDebugView = GBufferDebugView::FinalLit;
-                return;
-            }
-
-            const int index = static_cast<int>(view);
-            const int count = static_cast<int>(GBufferDebugView::Count);
-            if (index >= 0 && index < count) {
-                m_settings.gBufferDebugView = view;
-            } else {
-                m_settings.gBufferDebugView = GBufferDebugView::FinalLit;
-            }
+            m_settings.SetGBufferDebugView(view);
         }
         void CycleGBufferDebugView(int delta = 1)
         {
-            if (m_settings.renderPathMode != RenderPathMode::Raster) {
-                m_settings.gBufferDebugView = GBufferDebugView::FinalLit;
-                return;
-            }
-
-            const int count = static_cast<int>(GBufferDebugView::Count);
-            if (count <= 0) {
-                m_settings.gBufferDebugView = GBufferDebugView::FinalLit;
-                return;
-            }
-
-            int index = static_cast<int>(m_settings.gBufferDebugView);
-            index = (index + delta) % count;
-            if (index < 0) {
-                index += count;
-            }
-            m_settings.gBufferDebugView = static_cast<GBufferDebugView>(index);
+            m_settings.CycleGBufferDebugView(delta);
         }
         float GetDeltaTime() const { return m_deltaTime; }
         bool GetRuntimeAOEnabled() const { return m_settings.runtimeAoEnabled; }
         void SetRuntimeAOEnabled(bool enabled) { m_settings.runtimeAoEnabled = enabled; }
         float GetRuntimeAORadius() const { return m_settings.runtimeAoRadius; }
-        void SetRuntimeAORadius(float r) { m_settings.runtimeAoRadius = (r > 0.0f) ? r : 0.01f; }
+        void SetRuntimeAORadius(float r) { m_settings.SetRuntimeAORadius(r); }
         float GetRuntimeAOBias() const { return m_settings.runtimeAoBias; }
         void SetRuntimeAOBias(float b) { m_settings.runtimeAoBias = b; }
         float GetRuntimeAOIntensity() const { return m_settings.runtimeAoIntensity; }
-        void SetRuntimeAOIntensity(float i) { m_settings.runtimeAoIntensity = (i >= 0.0f) ? i : 0.0f; }
+        void SetRuntimeAOIntensity(float i) { m_settings.SetRuntimeAOIntensity(i); }
         float GetRuntimeAOThickness() const { return m_settings.runtimeAoThickness; }
-        void SetRuntimeAOThickness(float t) { m_settings.runtimeAoThickness = (t >= 0.0f) ? t : 0.0f; }
+        void SetRuntimeAOThickness(float t) { m_settings.SetRuntimeAOThickness(t); }
         uint32_t GetRuntimeAOQuality() const { return m_settings.runtimeAoQuality; }
-        void SetRuntimeAOQuality(uint32_t q) { m_settings.runtimeAoQuality = (q > 2u) ? 2u : q; }
+        void SetRuntimeAOQuality(uint32_t q) { m_settings.SetRuntimeAOQuality(q); }
         bool GetSSAOEnabled() const { return GetRuntimeAOEnabled(); }
         void SetSSAOEnabled(bool enabled) { SetRuntimeAOEnabled(enabled); }
         float GetSSAORadius() const { return GetRuntimeAORadius(); }
@@ -332,22 +298,14 @@ namespace SasamiRenderer
         uint32_t GetSwrtAoSampleCount() const { return m_settings.swrtAoSampleCount; }
         void SetSwrtAoSampleCount(uint32_t count)
         {
-            if (count < 4u) {
-                count = 4u;
-            } else if (count > 32u) {
-                count = 32u;
-            }
-            m_settings.swrtAoSampleCount = count;
+            m_settings.SetSwrtAoSampleCount(count);
         }
+        bool GetVsmBlurEnabled() const { return m_settings.vsmBlurEnabled; }
+        void SetVsmBlurEnabled(bool enabled) { m_settings.vsmBlurEnabled = enabled; }
         float GetAoMinOcclusion() const { return m_settings.aoMinOcclusion; }
         void  SetAoMinOcclusion(float v)
         {
-            if (v < 0.0f) {
-                v = 0.0f;
-            } else if (v > 1.0f) {
-                v = 1.0f;
-            }
-            m_settings.aoMinOcclusion = v;
+            m_settings.SetAoMinOcclusion(v);
         }
         DirectionalLightSettings GetDirectionalLightSettings() const;
         void SetDirectionalLightSettings(const DirectionalLightSettings& settings);
@@ -357,6 +315,9 @@ namespace SasamiRenderer
         const std::vector<SpotLight>& GetSpotLights() const { return m_lightSystem.GetSpotLights(); }
         void* GetNativeDeviceHandle() const { return m_device ? m_device->GetNativeDeviceHandle() : nullptr; }
         void* GetNativeGraphicsQueueHandle() const { return m_device ? m_device->GetNativeGraphicsQueueHandle() : nullptr; }
+        const RhiBackendCapabilities& GetBackendCapabilities() const;
+        bool SupportsFeatureRenderPasses() const { return GetBackendCapabilities().supportsFeatureRenderPasses; }
+        bool SupportsD3D12OverlayRendering() const { return GetBackendCapabilities().supportsD3D12CompatibilitySurface; }
         ID3D12Device* GetNativeDevice() const { return m_device ? m_device->GetDevice() : nullptr; }
         ID3D12CommandQueue* GetNativeCommandQueue() const { return m_device ? m_device->GetCommandQueue().Get() : nullptr; }
         bool IsHardwareRayTracingSupported() const;
@@ -378,12 +339,16 @@ namespace SasamiRenderer
         };
 
         void RetireDeferredUploadBatches();
-        void EnsureEnvironmentTexturesUploaded(CommandList* cmdList);
-        SWRTExecutor::FrameContext BuildSwrtFrameContext() const;
+        void ApplySwrtModeSetting()
+        {
+            using SwrtMode = GpuSoftwareRayTracer::SwrtMode;
+            m_gpuSoftwareRayTracer.SetMode(m_settings.swrtUseReSTIR ? SwrtMode::ReSTIR : SwrtMode::Legacy);
+        }
         RenderNodeExecutionPolicy BuildRenderNodeExecutionPolicy(bool executeOpaqueFamilyPasses,
                                                                  bool executeLightingFamilyPasses,
                                                                  bool useShadowTessPath);
         RenderNodeFrameInputs BuildRenderNodeFrameInputs(CommandList* cmdList,
+                                                         IRhiCommandEncoder* commandEncoder,
                                                          RendererFrameCoordinator::FrameContext* frame,
                                                          D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu,
                                                          GpuDescriptorHandle defaultAoSrv);
@@ -399,6 +364,8 @@ namespace SasamiRenderer
         bool CompositeSoftwareReflections(CommandList* cmdList,
                                           UINT backIndex,
                                           D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu);
+        bool CopySceneColorForTransmission(CommandList* cmdList);
+        bool ToneMapSceneColor(CommandList* cmdList, UINT backIndex);
         void CaptureSceneColorHistory(CommandList* cmdList, UINT backIndex);
         void SubmitAndPresent(CommandList* cmdList, UINT frameIndex);
         Texture* CreateTextureFromRgba8Data(const CpuTextureRgba8& src, CommandList* cmdList,
@@ -407,15 +374,19 @@ namespace SasamiRenderer
         RenderPipelineStateCache m_pipelineStateCache;
         RendererFrameCoordinator m_frameCoordinator;
         MeshBuffer m_meshBuffer;
+        SkinnedMeshBuffer m_skinnedMeshBuffer;
         DrawCommandBuilder m_drawCommandBuilder;
         Skybox m_skybox;
         LightSystem m_lightSystem;
         RenderGraph m_renderGraph;
+        RenderNodeBuilderCatalog m_renderNodeBuilderCatalog;
         std::shared_ptr<ShadowRenderNode> m_shadowRenderNode;
         std::shared_ptr<OpaqueRenderNode> m_opaqueRenderNode;
         std::shared_ptr<LightingRenderNode> m_lightingRenderNode;
         std::shared_ptr<TransparentRenderNode> m_transparentRenderNode;
         std::shared_ptr<TransparentLightingRenderNode> m_transparentLightingRenderNode;
+        std::shared_ptr<TransparentBackfaceDistanceRenderNode> m_transparentBackfaceDistanceRenderNode;
+        std::shared_ptr<TransparentCompositeRenderNode> m_transparentCompositeRenderNode;
         std::shared_ptr<SkyboxRenderNode> m_skyboxRenderNode;
         std::shared_ptr<PostProcessRenderNode> m_postProcessRenderNode;
         std::shared_ptr<RayTracingRenderNode> m_rayTracingRenderNode;
@@ -448,7 +419,7 @@ namespace SasamiRenderer
         SWRTExecutor  m_swrtExecutor;
         SceneSubmitter m_sceneSubmitter;
 
-        RenderSettings m_settings;
+        RenderFeatureSettings m_settings;
         RayTracingStats m_rayTracingStats{};
         std::vector<RenderNodeType> m_preSdfRenderNodeSequence;
         bool m_sceneColorHistoryValid = false;
@@ -463,5 +434,9 @@ namespace SasamiRenderer
         bool                          m_computeCmdListReady = false;
         ComPtr<ID3D12Fence>           m_crossQueueFence;
         UINT64                        m_crossQueueFenceVal  = 0;
+
+        // Composed subsystems — must be declared after all members they reference.
+        SceneSynchronizer  m_sceneSynchronizer;
+        EnvironmentManager m_environmentManager;
     };
 }

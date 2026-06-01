@@ -28,6 +28,7 @@ namespace SasamiRenderer
         bool useShadowTessellationPath = false;
         bool useSoftwareRayTracedDirectionalShadow = false;
         bool useSoftwareRayTracedReflections = false;
+        bool vsmBlurEnabled = true;
         float reflectionMode = 0.0f; // 0=disabled, 1=SWRT, 2=screen-space
         uint32_t softwareRayTracedShadowMapSize = 4096u;
         uint32_t renderWidth = 0u;
@@ -37,50 +38,81 @@ namespace SasamiRenderer
         RendererEnums::RenderPathMode renderPathMode = RendererEnums::RenderPathMode::Raster;
     };
 
-    struct RenderNodeFrameInputs
-    {
-        CommandList* cmdList        = nullptr;
+    struct RenderNodeExecutionContext {
+        CommandList* cmdList = nullptr;
         CommandList* computeCmdList = nullptr; // async compute CL; null = no compute queue available
+        IRhiCommandEncoder* commandEncoder = nullptr;
+        IRhiCommandEncoder* computeCommandEncoder = nullptr; // async compute encoder; null = no compute queue available
         RenderPipelineStateCache* pipelineStateCache = nullptr;
         DescriptorHeap* srvHeap = nullptr;
         const Viewport* viewport = nullptr;
         const Rect* scissorRect = nullptr;
         RendererFrameCoordinator* frameCoordinator = nullptr;
         RendererFrameCoordinator::FrameContext* frame = nullptr;
+    };
 
-        LightSystem* lightSystem = nullptr;
-        LightSystem::FrameResources* frameLight = nullptr;
-        Skybox* skybox = nullptr;
-        const float* cameraPV = nullptr;
-        const float* cameraInvPV = nullptr;
-        const float* cameraPos = nullptr;
-        const float* cameraRight = nullptr;
-        const float* cameraUp = nullptr;
-        const float* cameraForward = nullptr;
-        float cameraTanHalfFovY = 0.577350269f;
-        float cameraAspectRatio = 1.0f;
-        RenderCameraMode cameraMode = RenderCameraMode::Pbr;
+    struct RenderNodeCameraData {
+        const float* pv = nullptr;
+        const float* invPv = nullptr;
+        const float* pos = nullptr;
+        const float* right = nullptr;
+        const float* up = nullptr;
+        const float* forward = nullptr;
+        float tanHalfFovY = 0.577350269f;
+        float aspectRatio = 1.0f;
+        RenderCameraMode mode = RenderCameraMode::Pbr;
+    };
+
+    struct RenderNodeShadowData {
         GpuDescriptorHandle shadowSrv{};
         GpuDescriptorHandle spotShadowSrv{};
+        GpuDescriptorHandle vsmSrv{};
+    };
+
+    struct RenderNodeLightingData {
+        LightSystem* lightSystem = nullptr;
+        LightSystem::FrameResources* frameLight = nullptr;
         GpuDescriptorHandle lightSrvTable{};
         GpuDescriptorHandle iblSrvTable{};
+        RhiGpuAddress lightCbGpu = 0;
+    };
+
+    struct RenderNodeGBufferData {
+        GpuDescriptorHandle albedoSrv{};
+        GpuDescriptorHandle materialSrv{};
+        GpuDescriptorHandle emissiveSrv{};
+        GpuDescriptorHandle normalSrv{};
+        GpuDescriptorHandle depthSrv{};
+        ID3D12Resource* depthResource = nullptr;
+    };
+
+    struct RenderNodeAoData {
         GpuDescriptorHandle aoSrv{};
-        GpuDescriptorHandle reflectionSrv{};
         GpuDescriptorHandle screenSpaceAoSrv{};
-        D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu = 0;
+        CpuDescriptorHandle ssaoRtv{};
+        ID3D12Resource* ssaoResource = nullptr;
+        GpuDescriptorHandle ssaoRawSrv{};
+        CpuDescriptorHandle ssaoBlurRtv{};
+        ID3D12Resource* ssaoBlurResource = nullptr;
+        RhiGpuAddress ssaoCbGpu = 0;
+    };
 
+    struct RenderNodeFrameInputs {
+        RenderNodeExecutionContext execution;
+        RenderNodeCameraData       camera;
+        RenderNodeShadowData       shadow;
+        RenderNodeLightingData     lighting;
+        RenderNodeGBufferData      gbuffer;
+        RenderNodeAoData           ao;
+
+        // Flat fields with no natural group
+        Skybox* skybox = nullptr;
+        GpuDescriptorHandle reflectionSrv{};
+        GpuDescriptorHandle transmissionSceneColorSrv{};
+        GpuDescriptorHandle transparentBackfaceDistanceSrv{};
+        GpuDescriptorHandle transparentOitAccumSrv{};
+        GpuDescriptorHandle transparentOitRevealageSrv{};
         float sceneTimeSec = 0.0f;
-
-        // SSAO pass resources
-        GpuDescriptorHandle       depthSrv{};
-        GpuDescriptorHandle       gbufferNormalSrv{};
-        ID3D12Resource*           depthResource = nullptr;
-        CpuDescriptorHandle       ssaoRtv{};
-        ID3D12Resource*           ssaoResource = nullptr;
-        GpuDescriptorHandle       ssaoRawSrv{};       // GPU SRV for raw (pre-blur) SSAO output
-        CpuDescriptorHandle       ssaoBlurRtv{};      // RTV for blurred SSAO output
-        ID3D12Resource*           ssaoBlurResource = nullptr; // resource for blurred SSAO texture
-        D3D12_GPU_VIRTUAL_ADDRESS ssaoCbGpu = 0;
     };
 
     struct RenderNodeExecutionServices
@@ -92,12 +124,20 @@ namespace SasamiRenderer
         std::function<bool(const LightSystem::ShadowPassContext&)> executeSoftwareDirectionalShadow;
         std::function<bool()> executeSoftwareReflections;
         std::function<bool()> compositeSoftwareReflections;
+        std::function<bool()> copySceneColorForTransmission;
+        std::function<bool()> toneMapSceneColor;
         std::function<bool()> executeRayTracing;
+
+        // Skinned mesh draw callbacks (may be null when no skinned objects are present)
+        std::function<void()> drawSkinnedOpaqueItems;
+        std::function<void()> drawSkinnedTransparentItems;
+        std::function<void(const LightSystem::ShadowPassContext&)> drawSkinnedShadowItems;
     };
 
     struct RenderNodeRequirements
     {
         bool cmdList = false;
+        bool commandEncoder = false;
         bool pipelineStateCache = false;
         bool srvHeap = false;
         bool viewport = false;
@@ -120,6 +160,7 @@ namespace SasamiRenderer
     {
     public:
         void RequireCmdList() { m_requirements.cmdList = true; }
+        void RequireCommandEncoder() { m_requirements.commandEncoder = true; }
         void RequirePipelineStateCache() { m_requirements.pipelineStateCache = true; }
         void RequireSrvHeap() { m_requirements.srvHeap = true; }
         void RequireViewport() { m_requirements.viewport = true; }
@@ -143,6 +184,14 @@ namespace SasamiRenderer
             RequireCmdList();
             RequirePipelineStateCache();
             RequireSrvHeap();
+            RequireViewport();
+            RequireScissorRect();
+        }
+
+        void RequireRhiGraphicsBase()
+        {
+            RequireCommandEncoder();
+            RequirePipelineStateCache();
             RequireViewport();
             RequireScissorRect();
         }
@@ -172,40 +221,43 @@ namespace SasamiRenderer
             if (m_policy == nullptr || m_inputs == nullptr || m_services == nullptr) {
                 return false;
             }
-            if (m_requirements.cmdList && m_inputs->cmdList == nullptr) {
+            if (m_requirements.cmdList && m_inputs->execution.cmdList == nullptr) {
                 return false;
             }
-            if (m_requirements.pipelineStateCache && m_inputs->pipelineStateCache == nullptr) {
+            if (m_requirements.commandEncoder && m_inputs->execution.commandEncoder == nullptr) {
                 return false;
             }
-            if (m_requirements.srvHeap && m_inputs->srvHeap == nullptr) {
+            if (m_requirements.pipelineStateCache && m_inputs->execution.pipelineStateCache == nullptr) {
                 return false;
             }
-            if (m_requirements.viewport && m_inputs->viewport == nullptr) {
+            if (m_requirements.srvHeap && m_inputs->execution.srvHeap == nullptr) {
                 return false;
             }
-            if (m_requirements.scissorRect && m_inputs->scissorRect == nullptr) {
+            if (m_requirements.viewport && m_inputs->execution.viewport == nullptr) {
                 return false;
             }
-            if (m_requirements.frameCoordinator && m_inputs->frameCoordinator == nullptr) {
+            if (m_requirements.scissorRect && m_inputs->execution.scissorRect == nullptr) {
                 return false;
             }
-            if (m_requirements.frame && m_inputs->frame == nullptr) {
+            if (m_requirements.frameCoordinator && m_inputs->execution.frameCoordinator == nullptr) {
                 return false;
             }
-            if (m_requirements.lightSystem && m_inputs->lightSystem == nullptr) {
+            if (m_requirements.frame && m_inputs->execution.frame == nullptr) {
                 return false;
             }
-            if (m_requirements.frameLight && m_inputs->frameLight == nullptr) {
+            if (m_requirements.lightSystem && m_inputs->lighting.lightSystem == nullptr) {
+                return false;
+            }
+            if (m_requirements.frameLight && m_inputs->lighting.frameLight == nullptr) {
                 return false;
             }
             if (m_requirements.skybox && m_inputs->skybox == nullptr) {
                 return false;
             }
-            if (m_requirements.cameraPV && m_inputs->cameraPV == nullptr) {
+            if (m_requirements.cameraPV && m_inputs->camera.pv == nullptr) {
                 return false;
             }
-            if (m_requirements.cameraPos && m_inputs->cameraPos == nullptr) {
+            if (m_requirements.cameraPos && m_inputs->camera.pos == nullptr) {
                 return false;
             }
             if (m_requirements.ensureSceneTargetsPrepared && !m_services->ensureSceneTargetsPrepared) {

@@ -2,6 +2,7 @@
 #include "ApplicationCore.h"
 #include "ApplicationEntryPoint.h"
 #include "Input/InputSystem.h"
+#include "Renderer/Passes/PostProcessRenderNode.h"
 #include "UI/ImGuiCoordinator.h"
 #include "Foundation/Tools/DebugOutput.h"
 #include "Foundation/Math/MathUtil.h"
@@ -35,10 +36,16 @@ namespace SasamiRenderer
         m_camera->SetClipPlanes(0.0005f, 500.0f);
         m_camera->SetCameraMode(Camera::CameraMode::RayMarch);
 
-        // Replace the default render pass sequence with a single RayMarch pass
+        // Replace the default render pass sequence with RayMarch and the final
+        // SceneColor -> BackBuffer post process pass.
         m_renderNode = std::make_shared<RayMarchRenderNode>();
         app.ClearRenderPasses();
-        app.AddRenderPass(m_renderNode);
+        if (!app.AddRenderPass(m_renderNode) ||
+            !app.AddRenderPass(std::make_shared<PostProcessRenderNode>())) {
+            DebugLog("RayMarchApp: render pass setup failed.\n");
+            app.RequestQuit();
+            return;
+        }
         // Set up directional light (sun)
         DirectionalLight sun{};
         sun.yaw       = 45.0f;

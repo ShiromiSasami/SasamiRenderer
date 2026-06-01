@@ -7,7 +7,7 @@ namespace SasamiRenderer
 {
     void VolumetricCloudRenderNode::BuildRequirements(RenderNodeRequirementBuilder& builder) const
     {
-        builder.RequireGraphicsBase();
+        builder.RequireRhiGraphicsBase();
         builder.RequireLightSystem();
         builder.RequireCameraPV();
         builder.RequireCameraPos();
@@ -43,22 +43,22 @@ namespace SasamiRenderer
 
         const RenderNodeFrameInputs& inputs = context.Inputs();
 
-        if (!inputs.cameraInvPV) {
+        if (!inputs.camera.invPv) {
             DebugLog("VolumetricCloudRenderNode::Execute: cameraInvPV is null.\n");
             return false;
         }
 
-        CommandList*              cmdList = inputs.cmdList;
-        RenderPipelineStateCache& pso    = *inputs.pipelineStateCache;
+        auto*                     enc = inputs.execution.commandEncoder;
+        RenderPipelineStateCache& psc = *inputs.execution.pipelineStateCache;
 
         // --- Root signature / PSO ---
-        cmdList->SetGraphicsRootSignature(pso.GetVolumetricCloudRootSignature());
-        cmdList->SetPipelineState(pso.GetVolumetricCloudPipelineState());
+        enc->SetGraphicsPipelineLayout(RenderPipelineStateCache::MakeLayoutHandle(psc.GetVolumetricCloudRootSignature()));
+        enc->SetGraphicsPipeline(RenderPipelineStateCache::MakePipelineHandle(psc.GetVolumetricCloudPipelineState()));
 
         // --- Viewport / scissor ---
-        cmdList->RSSetViewports(1, inputs.viewport);
-        cmdList->RSSetScissorRects(1, inputs.scissorRect);
-        cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        enc->SetViewports(reinterpret_cast<const RhiViewport*>(inputs.execution.viewport), 1);
+        enc->SetScissors(reinterpret_cast<const RhiRect*>(inputs.execution.scissorRect), 1);
+        enc->SetPrimitiveTopology(RhiPrimitiveTopology::TriangleList);
 
         // --- Build VolumetricCloudCB packed into PushCameraCB slots ---
         // mvp  [16]     = invVP  (for world-space ray reconstruction)
@@ -70,38 +70,38 @@ namespace SasamiRenderer
         // extra1[4]     = reserved
         // extra2[4]     = reserved
 
-        const RenderDirectionalLight& light = inputs.lightSystem->GetDirectionalLightSettings();
+        const RenderDirectionalLight& light = inputs.lighting.lightSystem->GetDirectionalLightSettings();
         float lightFwd[3] = {};
         Math::DirectionFromYawPitch(light.yaw, light.pitch, lightFwd);
 
         const float world[16] = {
-            inputs.cameraPos[0], inputs.cameraPos[1], inputs.cameraPos[2], inputs.sceneTimeSec,
-            -lightFwd[0],         -lightFwd[1],         -lightFwd[2],        light.intensity,
-            light.color[0],       light.color[1],        light.color[2],     m_cloudCover,
-            m_cloudDensity,       m_windSpeed,            m_cloudBaseAlt,     m_cloudTopAlt,
+            inputs.camera.pos[0], inputs.camera.pos[1], inputs.camera.pos[2], inputs.sceneTimeSec,
+            -lightFwd[0],          -lightFwd[1],          -lightFwd[2],         light.intensity,
+            light.color[0],        light.color[1],         light.color[2],      m_cloudCover,
+            m_cloudDensity,        m_windSpeed,             m_cloudBaseAlt,      m_cloudTopAlt,
         };
         const float extra0[4] = {
-            inputs.viewport ? inputs.viewport->Width  : 1.0f,
-            inputs.viewport ? inputs.viewport->Height : 1.0f,
+            inputs.execution.viewport ? inputs.execution.viewport->Width  : 1.0f,
+            inputs.execution.viewport ? inputs.execution.viewport->Height : 1.0f,
             0.0f, 0.0f
         };
         const float extra1[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
         const float extra2[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 
-        const D3D12_GPU_VIRTUAL_ADDRESS cbGpu =
-            inputs.frameCoordinator->PushCameraCB(*inputs.frame,
-                                                  inputs.cameraInvPV,  // as mvp slot = invVP
-                                                  world,
-                                                  extra0,
-                                                  extra1,
-                                                  extra2);
+        const RhiGpuAddress cbGpu =
+            inputs.execution.frameCoordinator->PushCameraCB(*inputs.execution.frame,
+                                                            inputs.camera.invPv,  // as mvp slot = invVP
+                                                            world,
+                                                            extra0,
+                                                            extra1,
+                                                            extra2);
         if (cbGpu != 0) {
             // Root param 0 = CBV b0 in the VolumetricCloud root signature.
-            cmdList->SetGraphicsRootConstantBufferView(0, cbGpu);
+            enc->SetGraphicsConstantBufferView(0, cbGpu);
         }
 
         // --- Fullscreen triangle (no VB/IB needed) ---
-        cmdList->DrawInstanced(3u, 1u, 0u, 0u);
+        enc->Draw({3u, 1u, 0u, 0u});
 
         return true;
     }

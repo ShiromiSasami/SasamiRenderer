@@ -60,6 +60,8 @@ namespace SasamiRenderer
             float roughness = 0.5f;
             float baseColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
             float emissiveOcclusionStrength[4] = {};
+            float transmissionParams[4] = {}; // x: transmission, y: ior, z: shell strength, w: thickness
+            float volumeParams[4] = {};       // rgb: attenuation color, w: attenuation distance
         };
 
         struct GpuInstance

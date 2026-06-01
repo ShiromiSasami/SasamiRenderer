@@ -46,8 +46,9 @@ cbuffer ReSTIRFrameConstants : register(b0)
     uint   g_cbPad1;
 };
 
-Texture2D<float4> g_gbuffer        : register(t6);  // scratch SRV[0]
-Texture2D<float4> g_rasterMaterial : register(t7);  // scratch SRV[1]: rasterized GBufferMaterial (r=roughness)
+Texture2D<float4> g_gbuffer     : register(t6);  // secondary normal.xyz + hit distance
+Texture2D<float4> g_hitMaterial : register(t7);  // secondary baseColor.rgb + roughness
+Texture2D<float4> g_hitPosition : register(t8);  // secondary world position.xyz + valid
 
 struct GpuPointLightRT { float3 pos; float range; float3 colorIntensity; float pad; };
 struct GpuSpotLightRT  { float3 pos; float range; float3 dir; float cosInner;
@@ -80,15 +81,6 @@ float EvalPhat(uint i, float3 pos, float3 N)
     return PhatPoint(pos, N, sl.pos, sl.colorIntensity * spotA, sl.range);
 }
 
-float3 ReconstructWorldPos(int2 pixel, float linearDepth)
-{
-    float ndcX =  ((float(pixel.x) + 0.5f) / float(g_renderWidth))  * 2.0f - 1.0f;
-    float ndcY = -((float(pixel.y) + 0.5f) / float(g_renderHeight)) * 2.0f + 1.0f;
-    float4 viewRayH = mul(float4(ndcX, ndcY, 1.0f, 1.0f), g_invVP);
-    float3 viewRay  = normalize(viewRayH.xyz / viewRayH.w - g_cameraPos);
-    return g_cameraPos + viewRay * linearDepth;
-}
-
 // Maximum spatial search radius (pixels) for fully diffuse surfaces (roughness=1).
 // Smooth/specular surfaces use a much smaller radius so the reflection lobe
 // neighbourhood stays within the valid specular footprint.
@@ -112,14 +104,21 @@ void CS_ReSTIR_Spatial(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    float3 worldPos = ReconstructWorldPos(int2(id.xy), depth);
+    float4 hitPos = g_hitPosition[id.xy];
+    if (hitPos.w <= 0.0f)
+    {
+        g_reservoirOut[pixIdx] = r;
+        return;
+    }
+
+    float3 worldPos = hitPos.xyz;
     float3 N        = normalize(gbuf.xyz);
 
     // Roughness-adaptive search radius.
     // Specular surfaces (roughness ≈ 0) use a tiny radius (≈ 2 px) so spatial
     // reuse only combines near-identical reflection lobes.
     // Fully diffuse surfaces (roughness = 1) use the full kRadius.
-    float roughness = g_rasterMaterial[id.xy].r;
+    float roughness = g_hitMaterial[id.xy].a;
     float effectiveRadius = max(2.0f, float(kRadius) * roughness);
 
     // Roughness-adaptive normal threshold for neighbour acceptance.
@@ -155,16 +154,18 @@ void CS_ReSTIR_Spatial(uint3 id : SV_DispatchThreadID)
         float4 nGbuf  = g_gbuffer[uint2(nPixel)];
         float  nDepth = nGbuf.w;
         if (nDepth < 0.0f) continue;
+        float4 nHitPos = g_hitPosition[uint2(nPixel)];
+        if (nHitPos.w <= 0.0f) continue;
 
         // Geometric similarity tests (normal threshold is roughness-adaptive)
         float3 nN = normalize(nGbuf.xyz);
         if (dot(nN, N) < normalAcceptThresh)            continue;  // normal threshold
-        if (abs(nDepth - depth) > depth * 0.1f + 0.5f) continue;  // depth threshold
+        if (distance(nHitPos.xyz, worldPos) > abs(depth) * 0.1f + 0.5f) continue;
 
         uint nIdx = uint(nPixel.y) * g_reservoirWidth + uint(nPixel.x);
         Reservoir nb = g_reservoirIn[nIdx];
 
-        float3 nWorldPos = ReconstructWorldPos(nPixel, nDepth);
+        float3 nWorldPos = nHitPos.xyz;
         float  p_hat_nb  = EvalPhat(nb.lightIndex, worldPos, N);  // at cur pixel's domain
 
         // Cap neighbour's M to avoid over-confident neighbours dominating

@@ -19,6 +19,10 @@ namespace SasamiRenderer
             uint8_t* cameraCBPtr = nullptr;
             UINT cameraCbCapacity = 0;
             UINT cameraCbCount = 0;
+            Resource boneCB;
+            uint8_t* boneCBPtr = nullptr;
+            UINT boneCbCapacity = 0; // number of skinned object slots
+            UINT boneCbCount = 0;
             LightSystem::FrameResources light;
             UINT64 fenceValue = 0;
         };
@@ -46,13 +50,20 @@ namespace SasamiRenderer
 
         void EnsureCameraBuffers(FrameContext& frame, UINT requiredCount);
         D3D12_GPU_VIRTUAL_ADDRESS PushCameraCB(FrameContext& frame, const float mvp[16], const float world[16]);
+
+        // Bone matrix CB ring buffer — each slot holds Skeleton::kMaxBones float4x4 matrices (8192 bytes)
+        void EnsureBoneBuffers(FrameContext& frame, UINT requiredCount);
+        D3D12_GPU_VIRTUAL_ADDRESS PushBoneCB(FrameContext& frame, const float* boneMatrices);
         D3D12_GPU_VIRTUAL_ADDRESS PushCameraCB(FrameContext& frame,
                                                const float mvp[16],
                                                const float world[16],
                                                const float extra0[4],
                                                const float extra1[4],
                                                const float extra2[4],
-                                               const float extra3[4] = nullptr);
+                                               const float extra3[4] = nullptr,
+                                               const float extra4[4] = nullptr,
+                                               const float extra5[4] = nullptr,
+                                               const float extra6[4] = nullptr);
 
     private:
         void WaitForFrameFence(UINT frameIndex);

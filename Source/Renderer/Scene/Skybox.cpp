@@ -170,9 +170,11 @@ namespace
         }
 
         UpdateSubresources(cmdList->Get(), outTexture.Get(), outUpload.Get(), 0, 0, subresourceCount, subresourceDescs.data());
+        // Use combined state so the cubemap is readable by both PS (skybox, IBL lighting)
+        // and non-pixel shaders (SWRT compute shader IBL fallback sampling).
         auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(outTexture.Get(),
             D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
         cmdList->ResourceBarrier(1, &barrier);
         return true;
     }
@@ -729,211 +731,7 @@ namespace SasamiRenderer
         (void)UploadFallbackSkyboxTexture(cmdList);
     }
 
-    bool Skybox::GenerateHdrIblData(GeneratedIblData& outData) const
-    {
-        if (!m_hdrEquirectLoaded) {
-            return false;
-        }
-
-        const UINT irradianceSize = 16;
-        const UINT prefilterSize = 64;
-        const UINT prefilterMipLevels = 4;
-        const UINT brdfLutSize = 64;
-
-        outData = {};
-        outData.prefilterMipLevels = prefilterMipLevels;
-
-        RendererMathUtility::GenerateIrradianceCubemapFromEquirect(m_hdrEquirectPixels,
-                                                                   m_hdrEquirectWidth,
-                                                                   m_hdrEquirectHeight,
-                                                                   irradianceSize,
-                                                                   outData.irradianceFaces);
-        RendererMathUtility::GeneratePrefilterCubemapFromEquirect(m_hdrEquirectPixels,
-                                                                  m_hdrEquirectWidth,
-                                                                  m_hdrEquirectHeight,
-                                                                  prefilterSize,
-                                                                  prefilterMipLevels,
-                                                                  outData.prefilterSubresources);
-        RendererMathUtility::GenerateBrdfLut(brdfLutSize, brdfLutSize, outData.brdfLutPixels);
-        RendererMathUtility::GenerateDiffuseShCoefficientsFromEquirect(m_hdrEquirectPixels,
-                                                                        m_hdrEquirectWidth,
-                                                                        m_hdrEquirectHeight,
-                                                                        outData.diffuseShCoefficients);
-
-        return outData.irradianceFaces.size() == 6u &&
-               outData.prefilterSubresources.size() == static_cast<size_t>(prefilterMipLevels) * 6u &&
-               !outData.brdfLutPixels.empty();
-    }
-
-    void Skybox::PublishIblSrvs(DXGI_FORMAT cubeFormat, DXGI_FORMAT brdfFormat, UINT prefilterMipLevels)
-    {
-        if (!m_device) {
-            return;
-        }
-
-        const UINT inc = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-        CpuDescriptorHandle irrCpu = m_iblSrvCpu;
-        CpuDescriptorHandle preCpu = { m_iblSrvCpu.ptr + static_cast<SIZE_T>(inc) };
-        CpuDescriptorHandle brdfCpu = { m_iblSrvCpu.ptr + static_cast<SIZE_T>(inc) * 2 };
-
-        D3D12_SHADER_RESOURCE_VIEW_DESC cubeSrvDesc = {};
-        cubeSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        cubeSrvDesc.Format = cubeFormat;
-        cubeSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
-        cubeSrvDesc.TextureCube.MipLevels = 1;
-        cubeSrvDesc.TextureCube.MostDetailedMip = 0;
-        cubeSrvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
-        m_device->CreateShaderResourceView(m_iblIrradianceTexture, &cubeSrvDesc, irrCpu);
-
-        D3D12_SHADER_RESOURCE_VIEW_DESC preCubeSrvDesc = cubeSrvDesc;
-        preCubeSrvDesc.TextureCube.MipLevels = prefilterMipLevels;
-        m_device->CreateShaderResourceView(m_iblPrefilterTexture, &preCubeSrvDesc, preCpu);
-
-        D3D12_SHADER_RESOURCE_VIEW_DESC lutSrvDesc = {};
-        lutSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        lutSrvDesc.Format = brdfFormat;
-        lutSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-        lutSrvDesc.Texture2D.MipLevels = 1;
-        m_device->CreateShaderResourceView(m_iblBrdfLutTexture, &lutSrvDesc, brdfCpu);
-    }
-
-    void Skybox::ApplyIblMetadata(bool enabled, float prefilterMaxMip, bool shValid, const float (*diffuseSh)[3])
-    {
-        m_iblEnabled = enabled;
-        m_iblPrefilterMaxMip = prefilterMaxMip;
-        m_diffuseShValid = shValid;
-        if (shValid && diffuseSh != nullptr) {
-            std::memcpy(m_diffuseSh, diffuseSh, sizeof(m_diffuseSh));
-        } else {
-            std::memset(m_diffuseSh, 0, sizeof(m_diffuseSh));
-        }
-    }
-
-    bool Skybox::UploadGeneratedIblTextures(CommandList* cmdList, const GeneratedIblData& data)
-    {
-        if (!m_device || !cmdList) {
-            return false;
-        }
-
-        const UINT irradianceSize = 16;
-        const UINT prefilterSize = 64;
-        const UINT brdfLutSize = 64;
-        const bool irrOk = CreateTextureCubeFromFloatFacesWithMips(*m_device,
-                                                                    cmdList,
-                                                                    data.irradianceFaces,
-                                                                    irradianceSize,
-                                                                    1,
-                                                                    m_iblIrradianceTexture,
-                                                                    m_iblIrradianceUpload);
-        const bool preOk = CreateTextureCubeFromFloatFacesWithMips(*m_device,
-                                                                    cmdList,
-                                                                    data.prefilterSubresources,
-                                                                    prefilterSize,
-                                                                    data.prefilterMipLevels,
-                                                                    m_iblPrefilterTexture,
-                                                                    m_iblPrefilterUpload);
-        const bool brdfOk = CreateTexture2DFromFloatRgba(*m_device,
-                                                          cmdList,
-                                                          data.brdfLutPixels,
-                                                          brdfLutSize,
-                                                          brdfLutSize,
-                                                          m_iblBrdfLutTexture,
-                                                          m_iblBrdfLutUpload);
-        if (!irrOk || !preOk || !brdfOk) {
-            return false;
-        }
-
-        PublishIblSrvs(DXGI_FORMAT_R16G16B16A16_FLOAT,
-                       DXGI_FORMAT_R16G16B16A16_FLOAT,
-                       data.prefilterMipLevels);
-        m_cpuPrefilterSubresources = data.prefilterSubresources;
-        m_cpuBrdfLutPixels = data.brdfLutPixels;
-        m_cpuPrefilterBaseSize = prefilterSize;
-        m_cpuPrefilterMipLevels = data.prefilterMipLevels;
-        m_cpuBrdfLutWidth = brdfLutSize;
-        m_cpuBrdfLutHeight = brdfLutSize;
-        return true;
-    }
-
-    bool Skybox::UploadFallbackIblTextures(CommandList* cmdList)
-    {
-        if (!m_device || !cmdList) {
-            return false;
-        }
-
-        std::vector<std::vector<uint8_t>> irradianceFaces;
-        std::vector<std::vector<uint8_t>> prefilterFaces;
-        std::vector<uint8_t> brdfPixels;
-        static const uint8_t blackFace[4] = { 0, 0, 0, 255 };
-        static const uint8_t midFace[4] = { 128, 128, 128, 255 };
-
-        irradianceFaces.assign(6, std::vector<uint8_t>(blackFace, blackFace + 4));
-        prefilterFaces.assign(6, std::vector<uint8_t>(blackFace, blackFace + 4));
-        brdfPixels.assign(midFace, midFace + 4);
-
-        if (!CreateTextureCubeFromRgba8Faces(*m_device,
-                                             cmdList,
-                                             irradianceFaces,
-                                             1,
-                                             1,
-                                             m_iblIrradianceTexture,
-                                             m_iblIrradianceUpload)) {
-            return false;
-        }
-        if (!CreateTextureCubeFromRgba8Faces(*m_device,
-                                             cmdList,
-                                             prefilterFaces,
-                                             1,
-                                             1,
-                                             m_iblPrefilterTexture,
-                                             m_iblPrefilterUpload)) {
-            return false;
-        }
-        if (!ResourceUploadUtility::CreateTexture2DFromRgba8(*m_device,
-                                                             cmdList,
-                                                             brdfPixels.data(),
-                                                             1,
-                                                             1,
-                                                             m_iblBrdfLutTexture,
-                                                             m_iblBrdfLutUpload)) {
-            return false;
-        }
-
-        PublishIblSrvs(DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, 1);
-        return true;
-    }
-
-    void Skybox::EnsureIblTexturesUploaded(CommandList* cmdList)
-    {
-        if (!m_device || m_iblUploaded || m_iblUploadAttempted) {
-            return;
-        }
-        m_iblUploadAttempted = true;
-
-        if (EnsureHdrEnvironmentLoaded()) {
-            GeneratedIblData generated{};
-            if (GenerateHdrIblData(generated) && UploadGeneratedIblTextures(cmdList, generated)) {
-                const float maxMip = (generated.prefilterMipLevels > 0u)
-                    ? static_cast<float>(generated.prefilterMipLevels - 1u)
-                    : 0.0f;
-                ApplyIblMetadata(true, maxMip, true, generated.diffuseShCoefficients);
-                m_iblUploaded = true;
-                return;
-            }
-
-            ResetIblResources();
-            m_iblUploadAttempted = true;
-            DebugLog("Runtime equirect->IBL generation failed. Fallback IBL will be used.\n");
-        }
-
-        if (!UploadFallbackIblTextures(cmdList)) {
-            return;
-        }
-        ApplyIblMetadata(false, 0.0f, false, nullptr);
-        m_iblUploaded = true;
-    }
-
-    void Skybox::Render(CommandList* cmdList,
+    void Skybox::Render(IRhiCommandEncoder* enc,
                         RenderPipelineStateCache& pipelineStateCache,
                         DescriptorHeap& srvHeap,
                         const Viewport& viewport,
@@ -943,11 +741,11 @@ namespace SasamiRenderer
                         const RenderDirectionalLight& directionalLight,
                         const PushCameraCbCallback& pushCameraCb) const
     {
-        if (!cmdList || !m_skyboxTextureUploaded || !m_skyboxVB.IsValid()) {
+        if (!enc || !m_skyboxTextureUploaded || !m_skyboxVB.IsValid()) {
             return;
         }
 
-        cmdList->SetGraphicsRootSignature(pipelineStateCache.GetRootSignature());
+        enc->SetGraphicsPipelineLayout(RenderPipelineStateCache::MakeLayoutHandle(pipelineStateCache.GetRootSignature()));
 
         bool useHdrShader = m_skyboxTextureIsHdr;
         if (m_skyboxLoadFormat == SkyboxLoadFormat::LdrEquirect ||
@@ -956,18 +754,17 @@ namespace SasamiRenderer
         }
 
         if (useHdrShader) {
-            cmdList->SetPipelineState(pipelineStateCache.GetSkyboxHdrPipelineState());
+            enc->SetGraphicsPipeline(RenderPipelineStateCache::MakePipelineHandle(pipelineStateCache.GetSkyboxHdrPipelineState()));
         } else {
-            cmdList->SetPipelineState(pipelineStateCache.GetSkyboxLdrPipelineState());
+            enc->SetGraphicsPipeline(RenderPipelineStateCache::MakePipelineHandle(pipelineStateCache.GetSkyboxLdrPipelineState()));
         }
 
-        cmdList->RSSetViewports(1, &viewport);
-        cmdList->RSSetScissorRects(1, &scissorRect);
-        cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        enc->SetViewports(reinterpret_cast<const RhiViewport*>(&viewport), 1);
+        enc->SetScissors(reinterpret_cast<const RhiRect*>(&scissorRect), 1);
+        enc->SetPrimitiveTopology(RhiPrimitiveTopology::TriangleList);
 
-        DescriptorHeap* heaps[] = { &srvHeap };
-        cmdList->SetDescriptorHeaps(1, heaps);
-        cmdList->SetGraphicsRootDescriptorTable(0, m_skyboxSrv);
+        enc->SetDescriptorHeap(RenderPipelineStateCache::MakeDescriptorHeapHandle(srvHeap));
+        enc->SetGraphicsDescriptorTable(0, { m_skyboxSrv.ptr });
 
         float skyboxWorld[16] = {
             1,0,0,0,
@@ -1005,11 +802,12 @@ namespace SasamiRenderer
                                                                        directionalLightColor,
                                                                        directionalLightMarkerParams);
             if (cameraCbGpu != 0) {
-                cmdList->SetGraphicsRootConstantBufferView(2, cameraCbGpu);
+                enc->SetGraphicsConstantBufferView(2, cameraCbGpu);
             }
         }
 
-        cmdList->IASetVertexBuffers(0, 1, &m_skyboxVBV);
-        cmdList->DrawInstanced(static_cast<UINT>(_countof(kSkyboxCubeVertices)), 1, 0, 0);
+        const RhiVertexBufferView rhiVbv{ m_skyboxVBV.BufferLocation, m_skyboxVBV.StrideInBytes, m_skyboxVBV.SizeInBytes };
+        enc->SetVertexBuffers(0, 1, &rhiVbv);
+        enc->Draw({ static_cast<uint32_t>(_countof(kSkyboxCubeVertices)), 1u, 0u, 0u });
     }
 }

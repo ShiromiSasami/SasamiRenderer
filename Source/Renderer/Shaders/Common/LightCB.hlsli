@@ -46,6 +46,7 @@ cbuffer LightCB : register(b1)
     // w:   未使用
     float4 u_cameraPos;   // xyz: camera world position
     row_major float4x4 u_cameraPV;
+    row_major float4x4 u_invCameraPV; // inverse of u_cameraPV, for NDC → world reconstruction
 
     // Image-Based Lighting（IBL）パラメータ。
     // x: IBL 有効フラグ（1.0 = 有効、キューブマップ照明を適用する）
@@ -85,6 +86,13 @@ cbuffer LightCB : register(b1)
     // スポットシャドウのパラメータ。
     // x: 深度バイアス, y: ニアプレーン, z: 有効フラグ(1=有効), w: マップサイズ
     float4 u_spotShadowParams;
+
+    // VSM シャドウのパラメータ。
+    // x: シャドウモード (0/1=CSM系, 2=VSM 1cascade, 3=VSM 4cascade)
+    // y: ライトブリーディング低減値 [0,1]
+    // z: 最小バリアンス
+    // w: ブラー有効フラグ (1=有効)
+    float4 u_vsmParams;
 }
 
 #endif

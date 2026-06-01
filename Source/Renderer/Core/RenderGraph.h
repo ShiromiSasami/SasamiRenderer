@@ -29,15 +29,27 @@ namespace SasamiRenderer
 
     struct ExternalRenderGraphResourceDesc
     {
+        RhiResourceHandle rhiResource{};
+        RhiResourceState rhiInitialState = RhiResourceState::Common;
+        RhiResourceState rhiFinalState = RhiResourceState::Common;
+
+        // Legacy D3D12 compatibility fields. Keep these only at the migration
+        // boundary; new graph resources should populate the Rhi* fields above.
         ID3D12Resource* resource = nullptr;
         D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_STATES finalState = D3D12_RESOURCE_STATE_COMMON;
         bool transitionToFinalState = false;
 
+        RhiCpuDescriptorHandle rhiRtv{};
+        RhiCpuDescriptorHandle rhiDsv{};
+        RhiGpuDescriptorHandle rhiSrv{};
+
         CpuDescriptorHandle rtv{};
         bool hasRtv = false;
         CpuDescriptorHandle dsv{};
         bool hasDsv = false;
+        GpuDescriptorHandle gpuSrv{};
+        bool hasSrv = false;
 
         bool clearColorOnFirstUse = false;
         float clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -64,6 +76,8 @@ namespace SasamiRenderer
         RenderNodeContextView CreateComputeContextView(const RenderNodeRequirements& requirements) const;
         ResourceHandle FindGraphResource(std::string_view resourceName) const;
         std::string_view GetResourceName(ResourceHandle handle) const;
+        RhiGpuDescriptorHandle FindResourceRhiSrv(std::string_view resourceName) const;
+        GpuDescriptorHandle FindResourceSrv(std::string_view resourceName) const;
     };
 
     class ResourceRegistry
@@ -72,17 +86,29 @@ namespace SasamiRenderer
         struct ResourceRecord
         {
             std::string name;
+            RhiResourceHandle rhiResource{};
+            RhiResourceState rhiInitialState = RhiResourceState::Common;
+            RhiResourceState rhiCurrentState = RhiResourceState::Common;
+            RhiResourceState rhiFinalState = RhiResourceState::Common;
+
             bool hasExternalResource = false;
+            // Legacy D3D12 compatibility fields.
             ID3D12Resource* resource = nullptr;
             D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON;
             D3D12_RESOURCE_STATES currentState = D3D12_RESOURCE_STATE_COMMON;
             D3D12_RESOURCE_STATES finalState = D3D12_RESOURCE_STATE_COMMON;
             bool transitionToFinalState = false;
 
+            RhiCpuDescriptorHandle rhiRtv{};
+            RhiCpuDescriptorHandle rhiDsv{};
+            RhiGpuDescriptorHandle rhiSrv{};
+
             CpuDescriptorHandle rtv{};
             bool hasRtv = false;
             CpuDescriptorHandle dsv{};
             bool hasDsv = false;
+            GpuDescriptorHandle gpuSrv{};
+            bool hasSrv = false;
 
             bool clearColorOnFirstUse = false;
             float clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -97,6 +123,8 @@ namespace SasamiRenderer
         ResourceHandle RegisterExternal(std::string_view resourceName, const ExternalRenderGraphResourceDesc& desc);
         ResourceHandle Find(std::string_view resourceName) const;
         std::string_view GetName(ResourceHandle handle) const;
+        RhiGpuDescriptorHandle GetRhiSrv(ResourceHandle handle) const;
+        GpuDescriptorHandle GetSrv(ResourceHandle handle) const;
         ResourceRecord* GetMutable(ResourceHandle handle);
         const ResourceRecord* Get(ResourceHandle handle) const;
         std::vector<ResourceRecord>& MutableRecords() { return m_records; }
@@ -131,6 +159,8 @@ namespace SasamiRenderer
 
         NodeHandle AddNode(const IRenderNode& renderNode,
                            const RenderGraphExecuteContext& executeContext,
+                           // Passed to RenderGraphBuilder for nodes that explicitly
+                           // request pass-order dependency via DependsOnPrevious().
                            NodeHandle previousNode = {});
         PhaseHandle AddPhase(std::string_view phaseName);
         bool AddPhaseCompletionNode(std::string_view phaseName,
@@ -157,9 +187,11 @@ namespace SasamiRenderer
         PhaseHandle FindOrAddPhase(std::string_view phaseName);
         bool ExecutePhaseCompletionNodes(size_t phaseIndex, PhaseCompletionMode mode) const;
         bool BuildExecutionOrder(std::vector<size_t>& outOrder) const;
-        // Group nodes in topological order into parallel levels (same level = no dependency on each other).
+        // Group nodes in topological order into parallel levels. Same-level nodes
+        // have no phase, explicit node, or resource-hazard dependency.
         std::vector<std::vector<size_t>> BuildExecutionLevels(const std::vector<size_t>& topoOrder) const;
         CommandList* GetCommandList() const;
+        IRhiCommandEncoder* GetCommandEncoder() const;
         bool TransitionResource(ResourceRegistry::ResourceRecord& resource, D3D12_RESOURCE_STATES requiredState);
         bool PreparePassResources(const PassNode& pass);
         void FinalizeExternalResources();

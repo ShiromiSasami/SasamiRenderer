@@ -2,6 +2,7 @@
 #include <vector>
 
 #include "Renderer/Core/GraphicsDevice.h"
+#include "Renderer/Core/RhiDevice.h"
 #include "Renderer/Structures/Mesh.h"
 
 namespace SasamiRenderer
@@ -13,6 +14,8 @@ namespace SasamiRenderer
         struct GPUItem {
             Resource vb;
             Resource ib;
+            RhiBufferHandle rhiVb{};
+            RhiBufferHandle rhiIb{};
             VertexBufferView vbv{};
             IndexBufferView  ibv{};
             UINT vertexCount = 0;
@@ -23,7 +26,7 @@ namespace SasamiRenderer
 
         const std::vector<GPUItem>& Items() const { return m_items; }
 
-        void Bind(CommandList* cmdList, size_t i);
+        void Bind(IRhiCommandEncoder* enc, size_t i);
 
     private:
         std::vector<GPUItem> m_items;

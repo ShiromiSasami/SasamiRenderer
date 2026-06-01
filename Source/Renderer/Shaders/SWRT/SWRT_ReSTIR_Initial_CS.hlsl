@@ -1,28 +1,16 @@
 //
 // SWRT_ReSTIR_Initial_CS.hlsl
-// Pass 1 of the ReSTIR DI pipeline.
+// Pass 1 of the ReSTIR reflection DI pipeline.
 //
-// Each thread processes one screen pixel:
-//   1. Trace a primary camera ray to obtain the first hit (GBuffer data).
-//   2. Sample M=8 candidate lights with Weighted Reservoir Sampling (WRS).
-//   3. Store the GBuffer (world normal + NDC depth) and the initial reservoir.
-//
-// Bindings (see GpuSoftwareRayTracer::CreateReSTIRPipelines for root layout):
-//   b0  : ReSTIRFrameConstants (inline CBV)
-//   t0-t5 : BVH SRVs
-//   t6-t11 : per-pass extra SRVs  (scratch – unused in this pass)
-//   u0  : g_gbufferOut   (RWTexture2D<float4>, scratch UAV[0])
-//   t12 : g_pointLights  (StructuredBuffer, inline SRV)
-//   t13 : g_spotLights   (StructuredBuffer, inline SRV)
-//   u3  : g_reservoirOut (RWStructuredBuffer<Reservoir>, inline UAV)
+// Each thread processes one reflection pixel:
+//   1. Read the rasterized primary surface from the GBuffer.
+//   2. Trace the first reflection ray and store the secondary hit surface.
+//   3. Sample M=8 candidate lights for that secondary hit.
 //
 
 #include "SWRT/SWRT_Common.hlsli"
 #include "SWRT/SWRT_Reservoir.hlsli"
 
-// --------------------------------------------------------------------------
-// Per-dispatch constants (shared across all ReSTIR passes)
-// --------------------------------------------------------------------------
 cbuffer ReSTIRFrameConstants : register(b0)
 {
     row_major float4x4 g_invVP;
@@ -39,7 +27,7 @@ cbuffer ReSTIRFrameConstants : register(b0)
     float  g_phiDepth;
     float  g_stepWidth;
     float  g_maxSurfaceRoughness;
-    float  g_maxPrimaryHitDistance;
+    float  g_maxPrimaryHitDistance; // ReSTIR reflection path uses this as max reflection distance.
     float  g_minReflectionEnergy;
     float3 g_dirLightDir;
     float  g_dirLightIntensity;
@@ -49,13 +37,14 @@ cbuffer ReSTIRFrameConstants : register(b0)
     float  g_ambientIntensity;
     uint   g_pointLightCount;
     uint   g_spotLightCount;
-    uint   g_cbPad0;
-    uint   g_cbPad1;
+    uint   g_gbufferWidth;
+    uint   g_gbufferHeight;
 };
 
-// --------------------------------------------------------------------------
-// Light structures (match GpuSoftwareRayTracer::GpuPointLightRT / GpuSpotLightRT)
-// --------------------------------------------------------------------------
+Texture2D<float4> g_rasterNormal   : register(t6); // xyz=N*0.5+0.5, w=camera distance
+Texture2D<float4> g_rasterMaterial : register(t7); // r=roughness, g=metallic, a=reflection strength
+Texture2D<float4> g_rasterAlbedo   : register(t8);
+
 struct GpuPointLightRT { float3 pos; float range; float3 colorIntensity; float pad; };
 struct GpuSpotLightRT  { float3 pos; float range; float3 dir; float cosInner;
                          float3 colorIntensity; float cosOuter; };
@@ -63,27 +52,48 @@ struct GpuSpotLightRT  { float3 pos; float range; float3 dir; float cosInner;
 StructuredBuffer<GpuPointLightRT> g_pointLights : register(t12);
 StructuredBuffer<GpuSpotLightRT>  g_spotLights  : register(t13);
 
-// Outputs
-RWTexture2D<float4>           g_gbufferOut    : register(u0);  // normal.xyz + NDC depth
-RWStructuredBuffer<Reservoir> g_reservoirOut  : register(u3);
+RWTexture2D<float4>           g_gbufferOut     : register(u0); // secondary normal.xyz + reflection hit distance
+RWTexture2D<float4>           g_hitPositionOut : register(u1); // secondary worldPos.xyz + (1 + metallic), 0 = invalid
+RWTexture2D<float4>           g_hitMaterialOut : register(u2); // secondary baseColor.rgb + roughness
+RWStructuredBuffer<Reservoir> g_reservoirOut   : register(u3);
 
-// --------------------------------------------------------------------------
-// Helpers
-// --------------------------------------------------------------------------
-float3 ComputeCameraRayDir(uint2 pixel)
+float3 ComputeCameraRayDir(uint2 pixel, uint2 sourceSize)
 {
-    float ndcX =  ((float(pixel.x) + 0.5f) / float(g_renderWidth))  * 2.0f - 1.0f;
-    float ndcY = -((float(pixel.y) + 0.5f) / float(g_renderHeight)) * 2.0f + 1.0f;
+    float ndcX =  ((float(pixel.x) + 0.5f) / float(sourceSize.x)) * 2.0f - 1.0f;
+    float ndcY = -((float(pixel.y) + 0.5f) / float(sourceSize.y)) * 2.0f + 1.0f;
     float4 dir = mul(float4(ndcX, ndcY, 1.0f, 1.0f), g_invVP);
     return normalize(dir.xyz / dir.w - g_cameraPos);
 }
 
-// --------------------------------------------------------------------------
-// Count total lights (point + spot)
-// --------------------------------------------------------------------------
+float RadicalInverseVdC(uint bits)
+{
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return float(bits) * 2.3283064365386963e-10f;
+}
+
+float3 TangentToWorld(float3 v, float3 N)
+{
+    float3 up = (abs(N.z) < 0.999f) ? float3(0.0f, 0.0f, 1.0f) : float3(1.0f, 0.0f, 0.0f);
+    float3 T = normalize(cross(up, N));
+    float3 B = cross(N, T);
+    return normalize(T * v.x + B * v.y + N * v.z);
+}
+
+float3 SampleGGX_H(float2 xi, float roughness)
+{
+    float a = max(roughness * roughness, 0.0001f);
+    float phi = 6.28318530718f * xi.x;
+    float cosTheta = sqrt((1.0f - xi.y) / max(1.0f + (a * a - 1.0f) * xi.y, 1e-5f));
+    float sinTheta = sqrt(max(1.0f - cosTheta * cosTheta, 0.0f));
+    return float3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
+}
+
 uint TotalLightCount() { return g_pointLightCount + g_spotLightCount; }
 
-// Evaluate p_hat for light index i (merged point+spot list)
 float EvalPhat(uint i, float3 pos, float3 N)
 {
     if (i < g_pointLightCount)
@@ -93,7 +103,6 @@ float EvalPhat(uint i, float3 pos, float3 N)
     }
     uint si = i - g_pointLightCount;
     GpuSpotLightRT sl = g_spotLights[si];
-    // Spot cone pre-cull
     float3 toLight = sl.pos - pos;
     float  dist    = length(toLight);
     if (dist >= sl.range) return 0.0f;
@@ -104,76 +113,177 @@ float EvalPhat(uint i, float3 pos, float3 N)
     return PhatPoint(pos, N, sl.pos, sl.colorIntensity * spotAtten, sl.range);
 }
 
-// --------------------------------------------------------------------------
+void StoreInvalid(uint2 pixel, uint pixIdx)
+{
+    g_gbufferOut[pixel]     = float4(0.0f, 0.0f, 0.0f, -1.0f);
+    g_hitPositionOut[pixel] = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    g_hitMaterialOut[pixel] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+    g_reservoirOut[pixIdx]  = InitReservoir();
+}
+
 [numthreads(16, 16, 1)]
 void CS_ReSTIR_Initial(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= g_renderWidth || id.y >= g_renderHeight) return;
 
+    uint2 pixel = id.xy;
+    uint2 gbufSize = uint2(max(g_gbufferWidth, 1u), max(g_gbufferHeight, 1u));
+    uint2 gbufPixel = uint2(
+        min(uint(float(pixel.x) * float(gbufSize.x) / float(g_renderWidth)),  gbufSize.x - 1u),
+        min(uint(float(pixel.y) * float(gbufSize.y) / float(g_renderHeight)), gbufSize.y - 1u));
     uint pixIdx = id.y * g_reservoirWidth + id.x;
 
-    // Trace primary camera ray
-    float3 rayDir  = ComputeCameraRayDir(id.xy);
-    float3 rayOrig = g_cameraPos;
+    float4 rasterNormal = g_rasterNormal.Load(int3(gbufPixel, 0));
+    float primaryDepth = rasterNormal.w;
+    if (primaryDepth <= 0.0f)
+    {
+        StoreInvalid(pixel, pixIdx);
+        return;
+    }
 
-    // Validate TLAS
     if (g_tlasNodes[0].leftChild == 0 && g_tlasNodes[0].rightOrCount == 0)
     {
-        g_gbufferOut[id.xy] = float4(0, 0, 0, -1.0f);  // depth=-1 = sky/miss
-        g_reservoirOut[pixIdx] = InitReservoir();
+        StoreInvalid(pixel, pixIdx);
         return;
     }
 
-    HitResult primary = TraceClosestHit(rayOrig, rayDir, g_tMin, g_maxPrimaryHitDistance);
-    if (!primary.hit)
+    float3 primaryN = normalize(rasterNormal.xyz * 2.0f - 1.0f);
+    float3 primaryRayDir = ComputeCameraRayDir(gbufPixel, gbufSize);
+    float3 primaryPos = g_cameraPos + primaryRayDir * primaryDepth;
+    float3 V = normalize(-primaryRayDir);
+    if (dot(primaryN, V) < 0.0f) primaryN = -primaryN;
+
+    float4 primaryMat = g_rasterMaterial.Load(int3(gbufPixel, 0));
+    float roughness = primaryMat.r;
+    float reflectionStrength = saturate(primaryMat.a);
+    float roughnessFade = 1.0f - smoothstep(g_maxSurfaceRoughness * 0.7f,
+                                            g_maxSurfaceRoughness,
+                                            roughness);
+    float reflectionEnergy = roughnessFade * reflectionStrength;
+    if (reflectionEnergy < g_minReflectionEnergy)
     {
-        g_gbufferOut[id.xy] = float4(0, 0, 0, -1.0f);  // sky
-        g_reservoirOut[pixIdx] = InitReservoir();
+        StoreInvalid(pixel, pixIdx);
         return;
     }
 
-    float3 hitPos  = rayOrig + rayDir * primary.t;
-    float3 hitNorm = GetWorldNormal(primary);
-    if (dot(hitNorm, -rayDir) < 0.0f) hitNorm = -hitNorm;
+    float3 reflDir = reflect(primaryRayDir, primaryN);
+    if (roughness >= 0.01f)
+    {
+        uint rngState = ReSTIRSeed(pixel, g_frameIndex, 11u);
+        float2 xi = float2(Rand01(rngState), RadicalInverseVdC(rngState));
+        float3 H = TangentToWorld(SampleGGX_H(xi, roughness), primaryN);
+        reflDir = reflect(primaryRayDir, H);
+        if (dot(reflDir, primaryN) <= 0.0f)
+        {
+            StoreInvalid(pixel, pixIdx);
+            return;
+        }
+    }
 
-    // Compute NDC depth of hit point (for reprojection)
-    float4 clipPos = mul(float4(hitPos, 1.0f), transpose(g_invVP)); // invVP^-T = VP, approximate
-    // Actually we want: clipPos = VP * worldPos. We have invVP, not VP.
-    // Workaround: store linear depth (distance from camera) instead.
-    float linearDepth = primary.t;  // world-space distance from camera
+    float3 secondaryOrigin = OffsetRay(primaryPos, primaryN);
+    float3 secondaryDir = reflDir;
+    float remainingDistance = g_maxPrimaryHitDistance;
+    HitResult secondary;
+    secondary.hit = false;
+    secondary.t = 0.0f;
+    secondary.u = 0.0f;
+    secondary.v = 0.0f;
+    secondary.instanceIndex = 0u;
+    secondary.triLocalIndex = 0u;
+    float transparentThroughput = 1.0f;
+    float transparentTravel = 0.0f;
+    float3 transparentTint = float3(1.0f, 1.0f, 1.0f);
+    float3 transparentSurfaceColor = float3(0.0f, 0.0f, 0.0f);
 
-    // Write GBuffer: normal.xyz + linearDepth
-    g_gbufferOut[id.xy] = float4(hitNorm, linearDepth);
+    [loop]
+    for (uint transparentLayer = 0u; transparentLayer < 4u; ++transparentLayer)
+    {
+        HitResult candidate = TraceClosestHit(
+            secondaryOrigin, secondaryDir, g_tMin, remainingDistance);
+        if (!candidate.hit)
+            break;
 
-    // --- Initial candidate sampling (M=8 WRS) ---
+        GpuInstanceInfo candidateInst = g_instances[candidate.instanceIndex];
+        GpuMaterial candidateMat = g_materials[candidateInst.materialIndex];
+        if (!SWRT_IsTransparentMaterial(candidateMat))
+        {
+            secondary = candidate;
+            break;
+        }
+
+        float surfaceOpacity = SWRT_MaterialSurfaceOpacity(candidateMat);
+        transparentSurfaceColor += transparentTint * saturate(candidateMat.baseColor.rgb) * surfaceOpacity;
+        transparentTint *= SWRT_MaterialTransmittanceTint(candidateMat) * (1.0f - surfaceOpacity);
+        transparentThroughput *= (1.0f - surfaceOpacity);
+        if (transparentThroughput < 0.02f)
+        {
+            secondary = candidate;
+            break;
+        }
+
+        float3 candidatePos = secondaryOrigin + secondaryDir * candidate.t;
+        float3 candidateN = GetWorldNormal(candidate);
+        if (dot(candidateN, -secondaryDir) < 0.0f)
+            candidateN = -candidateN;
+
+        float3 transmittedDir = refract(secondaryDir, candidateN, 1.0f / max(candidateMat.ior, 1.0f));
+        if (dot(transmittedDir, transmittedDir) <= 1e-6f)
+            transmittedDir = secondaryDir;
+        transmittedDir = normalize(transmittedDir);
+
+        transparentTravel += candidate.t;
+        remainingDistance = max(remainingDistance - candidate.t, 0.0f);
+        secondaryOrigin = candidatePos + transmittedDir * max(g_tMin, 0.01f);
+        secondaryDir = transmittedDir;
+    }
+
+    if (!secondary.hit)
+    {
+        // Store reflDir in xyz so the shade pass can sample sky color on miss.
+        // w = -2.0f distinguishes "miss with valid reflDir" from w = -1.0f (fully invalid).
+        g_gbufferOut[pixel]     = float4(secondaryDir, -2.0f);
+        g_hitPositionOut[pixel] = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        g_hitMaterialOut[pixel] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+        g_reservoirOut[pixIdx]  = InitReservoir();
+        return;
+    }
+
+    float3 hitPos = secondaryOrigin + secondaryDir * secondary.t;
+    float hitDistance = transparentTravel + secondary.t;
+    float3 hitN = GetWorldNormal(secondary);
+    if (dot(hitN, -secondaryDir) < 0.0f) hitN = -hitN;
+
+    GpuInstanceInfo inst = g_instances[secondary.instanceIndex];
+    GpuMaterial mat = g_materials[inst.materialIndex];
+    float3 baseColor = saturate(transparentSurfaceColor + transparentTint * saturate(mat.baseColor.rgb));
+    float hitRoughness = saturate(mat.roughness);
+    float hitMetallic = saturate(mat.metallic);
+
+    g_gbufferOut[pixel]     = float4(hitN, hitDistance);
+    g_hitPositionOut[pixel] = float4(hitPos, 1.0f + hitMetallic);
+    g_hitMaterialOut[pixel] = float4(baseColor, hitRoughness);
+
     uint totalLights = TotalLightCount();
     Reservoir r = InitReservoir();
-
     if (totalLights == 0u)
     {
-        r.W = 0.0f;
         g_reservoirOut[pixIdx] = r;
         return;
     }
 
     static const uint kM = 8u;
-    uint rngState = ReSTIRSeed(id.xy, g_frameIndex, 0u);
-
+    uint rngState = ReSTIRSeed(pixel, g_frameIndex, 0u);
     for (uint s = 0; s < kM; ++s)
     {
-        // Pick random light
         uint lightIdx = (uint)(Rand01(rngState) * float(totalLights));
         lightIdx = min(lightIdx, totalLights - 1u);
-
-        float w = EvalPhat(lightIdx, hitPos, hitNorm) * float(totalLights);
+        float w = EvalPhat(lightIdx, hitPos, hitN) * float(totalLights);
         UpdateReservoir(r, lightIdx, w, Rand01(rngState));
     }
 
-    // Compute final W
     float p_hat_y = (r.lightIndex != 0xFFFFFFFFu)
-                  ? EvalPhat(r.lightIndex, hitPos, hitNorm)
+                  ? EvalPhat(r.lightIndex, hitPos, hitN)
                   : 0.0f;
     FinalizeReservoir(r, p_hat_y);
-
     g_reservoirOut[pixIdx] = r;
 }

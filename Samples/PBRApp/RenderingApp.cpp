@@ -9,8 +9,11 @@
 #include "imgui.h"
 
 #include <windows.h>
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
+#include <vector>
 
 namespace SasamiRenderer
 {
@@ -18,7 +21,82 @@ namespace SasamiRenderer
     {
         constexpr const char* kSkyboxPanoramaPath = "Assets/HDR/citrus_orchard_road_puresky_4k.hdr";
         constexpr const char* kStanfordBunnyPath = "Models/stanford_bunny_pbr/scene.gltf";
+
+        float DefaultReflectionStrength(float roughness, float metallic)
+        {
+            const float smoothness = 1.0f - std::fmin(std::fmax(roughness, 0.0f), 1.0f);
+            const float strength = std::fmin(std::fmax(metallic, 0.0f), 1.0f) * smoothness;
+            return std::fmin(std::fmax(strength, 0.0f), 1.0f);
+        }
         constexpr const char* kSponzaPath = "Models/Sponza/glTF/Sponza.gltf";
+
+        struct RenderPassBuilderUiEntry
+        {
+            const char* label = "";
+            RendererEnums::RenderNodeType type = RendererEnums::RenderNodeType::Opaque;
+        };
+
+        constexpr std::array<RenderPassBuilderUiEntry, 11> kRenderPassBuilderUiEntries = {{
+            { "Shadow", RendererEnums::RenderNodeType::Shadow },
+            { "Opaque", RendererEnums::RenderNodeType::Opaque },
+            { "Runtime AO", RendererEnums::RenderNodeType::RuntimeAO },
+            { "Lighting", RendererEnums::RenderNodeType::Lighting },
+            { "Skybox", RendererEnums::RenderNodeType::Skybox },
+            { "Procedural Sky", RendererEnums::RenderNodeType::ProceduralSky },
+            { "Transparent Backface Distance", RendererEnums::RenderNodeType::TransparentBackfaceDistance },
+            { "Transparent", RendererEnums::RenderNodeType::Transparent },
+            { "Transparent Lighting", RendererEnums::RenderNodeType::TransparentLighting },
+            { "Transparent Composite", RendererEnums::RenderNodeType::TransparentComposite },
+            { "Post Process", RendererEnums::RenderNodeType::PostProcess },
+        }};
+
+        bool HasRenderPass(const std::vector<ApplicationCore::RenderNodeType>& sequence,
+                           RendererEnums::RenderNodeType type)
+        {
+            return std::find(sequence.begin(), sequence.end(), type) != sequence.end();
+        }
+
+        void DrawRenderPassBuilderControls(ApplicationCore& app)
+        {
+            if (!ImGui::CollapsingHeader("Render Pass Builder", ImGuiTreeNodeFlags_DefaultOpen)) {
+                return;
+            }
+
+            std::vector<ApplicationCore::RenderNodeType> currentSequence = app.GetRenderNodeSequence();
+            std::vector<ApplicationCore::RenderNodeType> nextSequence;
+            nextSequence.reserve(kRenderPassBuilderUiEntries.size());
+            bool changed = false;
+
+            for (const RenderPassBuilderUiEntry& entry : kRenderPassBuilderUiEntries) {
+                bool enabled = HasRenderPass(currentSequence, entry.type);
+                if (ImGui::Checkbox(entry.label, &enabled)) {
+                    changed = true;
+                }
+                if (enabled) {
+                    nextSequence.push_back(entry.type);
+                }
+            }
+
+            if (ImGui::Button("Reset Passes")) {
+                nextSequence = {
+                    RendererEnums::RenderNodeType::Shadow,
+                    RendererEnums::RenderNodeType::Opaque,
+                    RendererEnums::RenderNodeType::RuntimeAO,
+                    RendererEnums::RenderNodeType::Lighting,
+                    RendererEnums::RenderNodeType::Skybox,
+                    RendererEnums::RenderNodeType::TransparentBackfaceDistance,
+                    RendererEnums::RenderNodeType::Transparent,
+                    RendererEnums::RenderNodeType::TransparentLighting,
+                    RendererEnums::RenderNodeType::TransparentComposite,
+                    RendererEnums::RenderNodeType::PostProcess,
+                };
+                changed = true;
+            }
+
+            if (changed && !nextSequence.empty()) {
+                app.SetRenderNodeSequence(nextSequence);
+            }
+        }
 
         void ApplyProbeGridPreset(ApplicationCore& app, int presetIndex)
         {
@@ -52,6 +130,7 @@ namespace SasamiRenderer
             material.emissive[2] = emissiveB;
             material.roughness = roughness;
             material.metallic = metallic;
+            material.reflectionStrength = DefaultReflectionStrength(roughness, metallic);
             material.occlusionStrength = 1.0f;
             return material;
         }
@@ -98,9 +177,13 @@ namespace SasamiRenderer
                 changed |= ImGui::SliderFloat("Metallic", &material.metallic, 0.0f, 1.0f);
             }
             changed |= ImGui::ColorEdit3("Emissive", material.emissive);
+            changed |= ImGui::SliderFloat("Reflection Strength", &material.reflectionStrength, 0.0f, 1.0f);
             changed |= ImGui::SliderFloat("AO Strength", &material.occlusionStrength, 0.0f, 1.0f);
             changed |= ImGui::SliderFloat("Transmission", &material.transmission, 0.0f, 1.0f);
             changed |= ImGui::SliderFloat("IOR", &material.ior, 1.0f, 2.5f);
+            if (material.baseColor[3] < 0.999f || material.transmission > 0.0f) {
+                changed |= ImGui::SliderFloat("Transparent Shell", &material.transparentShellStrength, 0.0f, 2.0f);
+            }
             ImGui::PopID();
             return changed;
         }
@@ -129,8 +212,10 @@ namespace SasamiRenderer
             ApplicationCore::RenderNodeType::RuntimeAO,
             ApplicationCore::RenderNodeType::Lighting,
             ApplicationCore::RenderNodeType::Skybox,
+            ApplicationCore::RenderNodeType::TransparentBackfaceDistance,
             ApplicationCore::RenderNodeType::Transparent,
             ApplicationCore::RenderNodeType::TransparentLighting,
+            ApplicationCore::RenderNodeType::TransparentComposite,
             ApplicationCore::RenderNodeType::PostProcess,
         });
 
@@ -364,7 +449,7 @@ namespace SasamiRenderer
             auto light = app.GetDirectionalLight();
             bool changed = false;
             changed |= ImGui::SliderAngle("Yaw", &light.yaw, -180.0f, 180.0f);
-            changed |= ImGui::SliderAngle("Pitch", &light.pitch, -89.0f, 89.0f);
+            changed |= ImGui::SliderAngle("Pitch", &light.pitch, -180.0f, 180.0f);
             changed |= ImGui::SliderFloat("Distance", &light.distance, 0.1f, 50.0f);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Shadow camera distance from the scene center.\nThis is not physical light falloff distance.");
@@ -380,7 +465,15 @@ namespace SasamiRenderer
             int shadowMode = static_cast<int>(light.shadowMode);
             changed |= ImGui::RadioButton("Single Shadow", &shadowMode, static_cast<int>(DirectionalShadowMode::Single));
             changed |= ImGui::RadioButton("CSM4", &shadowMode, static_cast<int>(DirectionalShadowMode::Csm4));
+            changed |= ImGui::RadioButton("VSM", &shadowMode, static_cast<int>(DirectionalShadowMode::Vsm));
+            changed |= ImGui::RadioButton("VSM4", &shadowMode, static_cast<int>(DirectionalShadowMode::Vsm4));
             light.shadowMode = static_cast<DirectionalShadowMode>(shadowMode);
+            if (shadowMode >= static_cast<int>(DirectionalShadowMode::Vsm)) {
+                bool vsmBlur = app.GetVsmBlurEnabled();
+                if (ImGui::Checkbox("VSM Blur", &vsmBlur)) {
+                    app.SetVsmBlurEnabled(vsmBlur);
+                }
+            }
             changed |= ImGui::SliderFloat("Shadow Distance", &light.shadowDistance, 5.0f, 250.0f);
             changed |= ImGui::SliderFloat("Cascade Exponent", &light.cascadeDistributionExponent, 1.0f, 4.0f);
             changed |= ImGui::SliderFloat("Cascade Blend", &light.cascadeBlendFraction, 0.0f, 0.3f);
@@ -749,6 +842,10 @@ namespace SasamiRenderer
 
             ImGui::Separator();
             if (isRasterRenderType) {
+                DrawRenderPassBuilderControls(app);
+                ImGui::Separator();
+            }
+            if (isRasterRenderType) {
                 // --- Geometry pipeline comparison ---
                 bool useMeshShader   = app.GetUseMeshShader();
                 bool useTessellation = app.GetUseTessellation();
@@ -818,14 +915,24 @@ namespace SasamiRenderer
                     app.SetRasterSoftwareRayTracedDirectionalShadowEnabled(softwareDirectionalShadow);
                 }
                 bool softwareReflections = app.GetRasterSoftwareRayTracedReflectionEnabled();
-                if (ImGui::Checkbox("SWRT Reflections", &softwareReflections)) {
-                    app.SetRasterSoftwareRayTracedReflectionEnabled(softwareReflections);
-                }
                 bool screenSpaceReflections = app.GetRasterScreenSpaceReflectionEnabled();
-                if (ImGui::Checkbox("Screen Space Reflections", &screenSpaceReflections)) {
-                    app.SetRasterScreenSpaceReflectionEnabled(screenSpaceReflections);
+                int reflectionMode = softwareReflections ? 1 : (screenSpaceReflections ? 2 : 0);
+                if (ImGui::Combo("Reflection Mode", &reflectionMode,
+                                 "None\0Software Ray Traced\0Screen Space\0")) {
+                    if (reflectionMode == 1) {
+                        app.SetRasterScreenSpaceReflectionEnabled(false);
+                        app.SetRasterSoftwareRayTracedReflectionEnabled(true);
+                    } else if (reflectionMode == 2) {
+                        app.SetRasterSoftwareRayTracedReflectionEnabled(false);
+                        app.SetRasterScreenSpaceReflectionEnabled(true);
+                    } else {
+                        app.SetRasterSoftwareRayTracedReflectionEnabled(false);
+                        app.SetRasterScreenSpaceReflectionEnabled(false);
+                    }
+                    softwareReflections = app.GetRasterSoftwareRayTracedReflectionEnabled();
+                    screenSpaceReflections = app.GetRasterScreenSpaceReflectionEnabled();
                 }
-                ImGui::SetItemTooltip("Raster reflection: screen-space depth hit uses previous SceneColor; misses fall back to IBL. SWRT reflections take priority when enabled.");
+                ImGui::SetItemTooltip("Raster reflection mode. SWRT and screen-space reflections are mutually exclusive; SSR uses screen-space depth hits and IBL fallback.");
                 int aoMode = app.GetAmbientOcclusionModeIndex();
                 if (ImGui::Combo("AO Mode", &aoMode, "Material Only\0Runtime AO Only\0RTAO Only\0Hybrid (Material * Runtime AO)\0")) {
                     app.SetAmbientOcclusionModeIndex(aoMode);

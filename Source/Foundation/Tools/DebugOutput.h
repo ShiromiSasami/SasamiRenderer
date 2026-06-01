@@ -1,8 +1,45 @@
 #pragma once
 
 #include <exception>
+#include <fstream>
 #include <string>
 #include <windows.h>
+
+namespace SasamiRenderer::Internal
+{
+    inline std::ofstream& GetDebugLogFile()
+    {
+        static std::ofstream sFile = []() {
+            std::ofstream f;
+            wchar_t exePath[MAX_PATH] = {};
+            GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+            std::wstring logPath = std::wstring(exePath) + L".log";
+            f.open(logPath, std::ios::out | std::ios::trunc);
+            return f;
+        }();
+        return sFile;
+    }
+
+    inline void WriteToLogFile(const char* message)
+    {
+        auto& f = GetDebugLogFile();
+        if (f.is_open() && message) {
+            f << message;
+            f.flush();
+        }
+    }
+
+    inline void WriteToLogFile(const wchar_t* message)
+    {
+        auto& f = GetDebugLogFile();
+        if (f.is_open() && message) {
+            while (*message) {
+                f << static_cast<char>(*message++);
+            }
+            f.flush();
+        }
+    }
+}
 
 namespace SasamiRenderer
 {
@@ -41,6 +78,7 @@ namespace SasamiRenderer
             return;
         }
         ::OutputDebugStringA(message);
+        Internal::WriteToLogFile(message);
     }
 
     inline void DebugLog(const wchar_t* message)
@@ -49,6 +87,7 @@ namespace SasamiRenderer
             return;
         }
         ::OutputDebugStringW(message);
+        Internal::WriteToLogFile(message);
     }
 
     inline int DebugLogDialog(const wchar_t* message,

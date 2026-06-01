@@ -203,7 +203,7 @@ namespace SasamiRenderer
 
     void DebugProbeGridRenderNode::BuildRequirements(RenderNodeRequirementBuilder& builder) const
     {
-        builder.RequireGraphicsBase();
+        builder.RequireRhiGraphicsBase();
         builder.RequireCameraPV();
         builder.RequireFrameCoordinator();
         builder.RequireFrame();
@@ -241,20 +241,19 @@ namespace SasamiRenderer
         }
 
         const RenderNodeFrameInputs& inputs = context.Inputs();
-        CommandList* cmdList = inputs.cmdList;
+        auto* enc = inputs.execution.commandEncoder;
 
-        // --- Root signature / PSO ---
-        // Use raw D3D12 API since m_rootSig/m_pso are ComPtr, not the SasamiRenderer wrapper types.
-        (*cmdList)->SetGraphicsRootSignature(m_rootSig.Get());
-        (*cmdList)->SetPipelineState(m_pso.Get());
+        // --- Root signature / PSO (ComPtr raw pointers converted to opaque handles) ---
+        enc->SetGraphicsPipelineLayout(RhiPipelineLayoutHandle{ reinterpret_cast<uint64_t>(m_rootSig.Get()) });
+        enc->SetGraphicsPipeline(RhiPipelineHandle{ reinterpret_cast<uint64_t>(m_pso.Get()) });
 
         // --- Viewport / scissor ---
-        cmdList->RSSetViewports(1, inputs.viewport);
-        cmdList->RSSetScissorRects(1, inputs.scissorRect);
-        cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        enc->SetViewports(reinterpret_cast<const RhiViewport*>(inputs.execution.viewport), 1);
+        enc->SetScissors(reinterpret_cast<const RhiRect*>(inputs.execution.scissorRect), 1);
+        enc->SetPrimitiveTopology(RhiPrimitiveTopology::TriangleList);
 
         // --- [0] Camera CB (b0): viewProj + probeRadius in extra0.x ---
-        const float* vp = inputs.cameraPV;
+        const float* vp = inputs.camera.pv;
         const float identity[16] = {
             1,0,0,0,
             0,1,0,0,
@@ -265,9 +264,9 @@ namespace SasamiRenderer
         const float extra1[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
         const float extra2[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 
-        const D3D12_GPU_VIRTUAL_ADDRESS cameraCbGpu =
-            inputs.frameCoordinator->PushCameraCB(*inputs.frame,
-                                                   vp,
+        const RhiGpuAddress cameraCbGpu =
+            inputs.execution.frameCoordinator->PushCameraCB(*inputs.execution.frame,
+                                                            vp,
                                                    identity,
                                                    extra0,
                                                    extra1,
@@ -276,21 +275,22 @@ namespace SasamiRenderer
             DebugLog("DebugProbeGridRenderNode::Execute: PushCameraCB returned 0.\n");
             return false;
         }
-        cmdList->SetGraphicsRootConstantBufferView(0, cameraCbGpu);
+        enc->SetGraphicsConstantBufferView(0, cameraCbGpu);
 
         // --- [1] GI Probe Grid CB (b2) ---
-        const D3D12_GPU_VIRTUAL_ADDRESS probeCbGpu = m_probeGrid->GetProbeGridCbGpuAddress();
+        const RhiGpuAddress probeCbGpu = m_probeGrid->GetProbeGridCbGpuAddress();
         if (probeCbGpu == 0) return true;
-        cmdList->SetGraphicsRootConstantBufferView(1, probeCbGpu);
+        enc->SetGraphicsConstantBufferView(1, probeCbGpu);
 
         // --- [2] Probe SH data inline SRV (t10) ---
-        const D3D12_GPU_VIRTUAL_ADDRESS probeVA = m_probeGrid->GetProbeDataGpuVA();
+        const RhiGpuAddress probeVA = m_probeGrid->GetProbeDataGpuVA();
         if (probeVA == 0) return true;
-        cmdList->SetGraphicsRootShaderResourceView(2, probeVA);
+        enc->SetGraphicsShaderResourceView(2, probeVA);
 
         // --- Vertex buffer + instanced draw ---
-        cmdList->IASetVertexBuffers(0, 1, &m_sphereVBV);
-        cmdList->DrawInstanced(m_sphereVertexCount, probeCount, 0, 0);
+        const RhiVertexBufferView rhiVbv{ m_sphereVBV.BufferLocation, m_sphereVBV.StrideInBytes, m_sphereVBV.SizeInBytes };
+        enc->SetVertexBuffers(0, 1, &rhiVbv);
+        enc->Draw({ m_sphereVertexCount, probeCount, 0u, 0u });
 
         return true;
     }

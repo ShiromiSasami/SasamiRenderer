@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="RHI">
+    <EnableVulkanBackend Condition="'$(EnableVulkanBackend)'==''">false</EnableVulkanBackend>
+    <EnableDirectX11Backend Condition="'$(EnableDirectX11Backend)'==''">false</EnableDirectX11Backend>
+    <EnableOpenGLBackend Condition="'$(EnableOpenGLBackend)'==''">false</EnableOpenGLBackend>
+
+    <RhiDirectX12 Condition="'$(EnableVulkanBackend)'=='true'">0</RhiDirectX12>
+    <RhiDirectX12 Condition="'$(EnableDirectX11Backend)'=='true'">0</RhiDirectX12>
+    <RhiDirectX12 Condition="'$(EnableOpenGLBackend)'=='true'">0</RhiDirectX12>
+    <RhiDirectX12 Condition="'$(RhiDirectX12)'==''">1</RhiDirectX12>
+    <RhiDirectX11 Condition="'$(EnableDirectX11Backend)'=='true'">1</RhiDirectX11>
+    <RhiDirectX11 Condition="'$(RhiDirectX11)'==''">0</RhiDirectX11>
+    <RhiVulkan Condition="'$(EnableVulkanBackend)'=='true'">1</RhiVulkan>
+    <RhiVulkan Condition="'$(RhiVulkan)'==''">0</RhiVulkan>
+    <RhiOpenGL Condition="'$(EnableOpenGLBackend)'=='true'">1</RhiOpenGL>
+    <RhiOpenGL Condition="'$(RhiOpenGL)'==''">0</RhiOpenGL>
+
+    <RhiPreprocessorDefinitions>RHI_DIRECTX12=$(RhiDirectX12);RHI_DIRECTX11=$(RhiDirectX11);RHI_VULKAN=$(RhiVulkan);RHI_OPENGL=$(RhiOpenGL)</RhiPreprocessorDefinitions>
+    <RhiOutputSubdir Condition="'$(EnableVulkanBackend)'=='true'">Vulkan\</RhiOutputSubdir>
+    <RhiOutputSubdir Condition="'$(EnableDirectX11Backend)'=='true'">DirectX11\</RhiOutputSubdir>
+    <RhiOutputSubdir Condition="'$(EnableOpenGLBackend)'=='true'">OpenGL\</RhiOutputSubdir>
+    <RhiOutputSubdir Condition="'$(RhiOutputSubdir)'==''"></RhiOutputSubdir>
+
+    <RhiVulkanIncludeDirectories Condition="'$(VULKAN_SDK)'!=''">$(VULKAN_SDK)\Include</RhiVulkanIncludeDirectories>
+    <RhiVulkanLibraryDirectories Condition="'$(VULKAN_SDK)'!='' and '$(Platform)'=='x64'">$(VULKAN_SDK)\Lib</RhiVulkanLibraryDirectories>
+    <RhiVulkanLibraryDirectories Condition="'$(VULKAN_SDK)'!='' and '$(Platform)'=='Win32'">$(VULKAN_SDK)\Lib32</RhiVulkanLibraryDirectories>
+    <RhiVulkanAdditionalDependencies Condition="'$(EnableVulkanBackend)'=='true'">vulkan-1.lib</RhiVulkanAdditionalDependencies>
+    <RhiDirectX11AdditionalDependencies Condition="'$(EnableDirectX11Backend)'=='true'">d3d11.lib</RhiDirectX11AdditionalDependencies>
+    <RhiOpenGLAdditionalDependencies Condition="'$(EnableOpenGLBackend)'=='true'">opengl32.lib;gdi32.lib</RhiOpenGLAdditionalDependencies>
+    <RhiAdditionalDependencies>$(RhiVulkanAdditionalDependencies);$(RhiDirectX11AdditionalDependencies);$(RhiOpenGLAdditionalDependencies)</RhiAdditionalDependencies>
+  </PropertyGroup>
+
+  <Target Name="EnsureVulkanSdkForRhi" BeforeTargets="PrepareForBuild" Condition="'$(EnableVulkanBackend)'=='true' and '$(VULKAN_SDK)'==''">
+    <Error Text="EnableVulkanBackend=true requires the VULKAN_SDK environment variable." />
+  </Target>
+</Project>

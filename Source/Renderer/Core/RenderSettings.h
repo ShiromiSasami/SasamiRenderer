@@ -31,7 +31,7 @@ namespace SasamiRenderer
         bool     rasterSoftwareRayTracedAmbientOcclusionEnabled     = false;
         AmbientOcclusionMode ambientOcclusionMode                  = AmbientOcclusionMode::Hybrid;
         RuntimeAmbientOcclusionMethod runtimeAoMethod              = RuntimeAmbientOcclusionMethod::SSAO;
-        bool     swrtUseReSTIR                                      = false;
+        bool     swrtUseReSTIR                                      = true;
         uint32_t swrtSamplingMode                                   = 2u;
         uint32_t swrtSamplesPerPixel                                = 2u;
         uint32_t swrtMaxBounces                                     = 2u;
@@ -55,5 +55,6 @@ namespace SasamiRenderer
         uint32_t swrtAoSampleCount                                  = 16u;
         GBufferDebugView gBufferDebugView                          = GBufferDebugView::FinalLit;
         float    hardwareRayTracingResolutionScale                  = 0.75f;
+        bool     vsmBlurEnabled                                     = true;
     };
 }

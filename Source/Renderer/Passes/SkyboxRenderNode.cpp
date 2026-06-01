@@ -6,7 +6,8 @@ namespace SasamiRenderer
 {
     void SkyboxRenderNode::BuildRequirements(RenderNodeRequirementBuilder& builder) const
     {
-        builder.RequireGraphicsBase();
+        builder.RequireRhiGraphicsBase();
+        builder.RequireSrvHeap();
         builder.RequireSkybox();
         builder.RequireLightSystem();
         builder.RequireCameraPV();
@@ -39,31 +40,31 @@ namespace SasamiRenderer
         }
         const RenderNodeFrameInputs& inputs = context.Inputs();
 
-        Execute(inputs.cmdList,
+        Execute(inputs.execution.commandEncoder,
                 *inputs.skybox,
-                *inputs.pipelineStateCache,
-                *inputs.srvHeap,
-                *inputs.viewport,
-                *inputs.scissorRect,
-                inputs.cameraPV,
-                inputs.cameraPos,
-                inputs.lightSystem->GetDirectionalLightSettings(),
+                *inputs.execution.pipelineStateCache,
+                *inputs.execution.srvHeap,
+                *inputs.execution.viewport,
+                *inputs.execution.scissorRect,
+                inputs.camera.pv,
+                inputs.camera.pos,
+                inputs.lighting.lightSystem->GetDirectionalLightSettings(),
                 [inputs](const float mvp[16],
                          const float world[16],
                          const float extra0[4],
                          const float extra1[4],
                          const float extra2[4]) -> D3D12_GPU_VIRTUAL_ADDRESS {
-                    return inputs.frameCoordinator->PushCameraCB(*inputs.frame,
-                                                                 mvp,
-                                                                 world,
-                                                                 extra0,
-                                                                 extra1,
-                                                                 extra2);
+                    return inputs.execution.frameCoordinator->PushCameraCB(*inputs.execution.frame,
+                                                                           mvp,
+                                                                           world,
+                                                                           extra0,
+                                                                           extra1,
+                                                                           extra2);
                 });
         return true;
     }
 
-    void SkyboxRenderNode::Execute(CommandList* cmdList,
+    void SkyboxRenderNode::Execute(IRhiCommandEncoder* enc,
                                    const Skybox& skybox,
                                    RenderPipelineStateCache& pipelineStateCache,
                                    DescriptorHeap& srvHeap,
@@ -74,7 +75,7 @@ namespace SasamiRenderer
                                    const RenderDirectionalLight& directionalLight,
                                    const Skybox::PushCameraCbCallback& pushCameraCb) const
     {
-        skybox.Render(cmdList,
+        skybox.Render(enc,
                       pipelineStateCache,
                       srvHeap,
                       viewport,

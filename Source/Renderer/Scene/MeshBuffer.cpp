@@ -1,5 +1,6 @@
 #include "Renderer/Scene/MeshBuffer.h"
 #include <cstring>
+#include <utility>
 
 namespace SasamiRenderer
 {
@@ -9,6 +10,52 @@ namespace SasamiRenderer
         m_items.reserve(meshes.size());
         if (meshes.empty()) {
             return false;
+        }
+
+        if (!device.GetCapabilities().supportsD3D12CompatibilitySurface &&
+            device.GetCapabilities().supportsRhiResourceCreation) {
+            for (const auto& m : meshes) {
+                GPUItem item{};
+
+                if (!m.vertices.empty()) {
+                    const uint64_t vbBytes = static_cast<uint64_t>(sizeof(Vertex)) * m.vertices.size();
+                    RhiBufferDesc vbDesc{};
+                    vbDesc.sizeInBytes = vbBytes;
+                    vbDesc.strideInBytes = sizeof(Vertex);
+                    vbDesc.usage = RhiBufferUsageFlags::Vertex;
+                    vbDesc.memoryUsage = RhiMemoryUsage::CpuToGpu;
+                    vbDesc.initialState = RhiResourceState::Common;
+                    item.rhiVb = device.CreateRhiBuffer(vbDesc, m.vertices.data());
+                    if (!item.rhiVb.IsValid()) {
+                        return false;
+                    }
+                    item.vbv.BufferLocation = item.rhiVb.id;
+                    item.vbv.StrideInBytes = sizeof(Vertex);
+                    item.vbv.SizeInBytes = static_cast<UINT>(vbBytes);
+                    item.vertexCount = static_cast<UINT>(m.vertices.size());
+                }
+
+                if (!m.indices.empty()) {
+                    const uint64_t ibBytes = static_cast<uint64_t>(sizeof(uint32_t)) * m.indices.size();
+                    RhiBufferDesc ibDesc{};
+                    ibDesc.sizeInBytes = ibBytes;
+                    ibDesc.strideInBytes = sizeof(uint32_t);
+                    ibDesc.usage = RhiBufferUsageFlags::Index;
+                    ibDesc.memoryUsage = RhiMemoryUsage::CpuToGpu;
+                    ibDesc.initialState = RhiResourceState::Common;
+                    item.rhiIb = device.CreateRhiBuffer(ibDesc, m.indices.data());
+                    if (!item.rhiIb.IsValid()) {
+                        return false;
+                    }
+                    item.ibv.BufferLocation = item.rhiIb.id;
+                    item.ibv.SizeInBytes = static_cast<UINT>(ibBytes);
+                    item.ibv.Format = DXGI_FORMAT_R32_UINT;
+                    item.indexCount = static_cast<UINT>(m.indices.size());
+                }
+
+                m_items.push_back(std::move(item));
+            }
+            return !m_items.empty();
         }
 
         CommandAllocator uploadAlloc;
@@ -116,13 +163,25 @@ namespace SasamiRenderer
         return !m_items.empty();
     }
 
-    void MeshBuffer::Bind(CommandList* cmdList, size_t i)
+    void MeshBuffer::Bind(IRhiCommandEncoder* enc, size_t i)
     {
-        if (i >= m_items.size()) return;
+        if (!enc || i >= m_items.size()) return;
         auto& it = m_items[i];
-        if (it.vb.IsValid()) { cmdList->IASetVertexBuffers(0, 1, &it.vbv); }
-        if (it.ib.IsValid()) { cmdList->IASetIndexBuffer(&it.ibv); }
-        // Topology is set by the caller (render node) before the draw callback,
-        // so it must not be overridden here.
+        if (it.rhiVb.IsValid()) {
+            RhiVertexBufferView vbv{ it.rhiVb.id, it.vbv.StrideInBytes, it.vbv.SizeInBytes };
+            enc->SetVertexBuffers(0, 1, &vbv);
+        } else if (it.vb.IsValid()) {
+            RhiVertexBufferView vbv{ it.vbv.BufferLocation, it.vbv.StrideInBytes, it.vbv.SizeInBytes };
+            enc->SetVertexBuffers(0, 1, &vbv);
+        }
+        if (it.rhiIb.IsValid()) {
+            RhiIndexBufferView ibv{ it.rhiIb.id, it.ibv.SizeInBytes,
+                                    it.ibv.Format == DXGI_FORMAT_R32_UINT };
+            enc->SetIndexBuffer(ibv);
+        } else if (it.ib.IsValid()) {
+            RhiIndexBufferView ibv{ it.ibv.BufferLocation, it.ibv.SizeInBytes,
+                                    it.ibv.Format == DXGI_FORMAT_R32_UINT };
+            enc->SetIndexBuffer(ibv);
+        }
     }
 }

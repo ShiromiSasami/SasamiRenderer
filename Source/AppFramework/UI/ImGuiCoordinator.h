@@ -22,6 +22,7 @@ namespace SasamiRenderer
     public:
         static ImGuiCoordinator& Instance();
 
+        bool InitializePlatformOnly(HWND hWnd);
         bool Initialize(HWND hWnd,
             ID3D12Device* device,
             ID3D12CommandQueue* queue,
@@ -46,9 +47,24 @@ namespace SasamiRenderer
         ImGuiCoordinator(const ImGuiCoordinator&) = delete;
         ImGuiCoordinator& operator=(const ImGuiCoordinator&) = delete;
 
+        static void AllocateSrvDescriptorForImGui(ImGui_ImplDX12_InitInfo* info,
+                                                  D3D12_CPU_DESCRIPTOR_HANDLE* outCpuHandle,
+                                                  D3D12_GPU_DESCRIPTOR_HANDLE* outGpuHandle);
+        static void FreeSrvDescriptorForImGui(ImGui_ImplDX12_InitInfo* info,
+                                              D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle,
+                                              D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle);
+        void ResetSrvDescriptorAllocator(UINT descriptorCount);
+        void AllocateSrvDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE* outCpuHandle,
+                                   D3D12_GPU_DESCRIPTOR_HANDLE* outGpuHandle);
+        void FreeSrvDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle,
+                               D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle);
+
         // Data
         Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_srvHeap;
+        UINT m_srvDescriptorSize = 0;
+        std::vector<UINT> m_freeSrvDescriptorIndices;
         std::vector<std::pair<std::string, std::function<void()>>> m_windows;
         bool m_initialized = false;
+        bool m_dx12BackendInitialized = false;
     };
 }

@@ -298,320 +298,6 @@ namespace SasamiRenderer
         }
     }
 
-    bool DxrRayTracer::Initialize(IRHIDevice& device, const DescriptorSet& descriptors)
-    {
-        m_descriptors = descriptors;
-        m_supported = device.SupportsHardwareRayTracing();
-        if (!m_supported) {
-            return true;
-        }
-
-        if (!CompileShadersAndCreateStateObject(device)) {
-            m_supported = false;
-            return false;
-        }
-        if (!CreateShaderTables(device)) {
-            m_supported = false;
-            return false;
-        }
-        if (!EnsureFrameConstantBuffer(device)) {
-            m_supported = false;
-            return false;
-        }
-
-        return true;
-    }
-
-    void DxrRayTracer::UpdateScene(IRHIDevice& device, const RayTracingScene& scene)
-    {
-        const bool geometryChanged = scene.geometryVersion != m_uploadedGeometryVersion;
-        const bool materialChanged = scene.materialVersion != m_uploadedMaterialVersion;
-        const bool instanceChanged = scene.instanceVersion != m_uploadedInstanceVersion;
-        m_scene = scene;
-        m_sceneDirty = geometryChanged || instanceChanged;
-        if (!m_supported) {
-            return;
-        }
-
-        if (!geometryChanged && !materialChanged && !instanceChanged) {
-            return;
-        }
-
-        const auto buildStartTime = std::chrono::high_resolution_clock::now();
-        if (!UploadSceneBuffers(device)) {
-            DebugLog("DxrRayTracer::UpdateScene: failed to upload scene buffers.\n");
-            return;
-        }
-        if ((geometryChanged || instanceChanged) && !BuildAccelerationStructures(device)) {
-            DebugLog("DxrRayTracer::UpdateScene: failed to build acceleration structures.\n");
-            return;
-        }
-        const auto buildEndTime = std::chrono::high_resolution_clock::now();
-        m_lastSceneBuildMs = std::chrono::duration<float, std::milli>(buildEndTime - buildStartTime).count();
-        m_reportSceneBuildCost = true;
-        m_uploadedGeometryVersion = scene.geometryVersion;
-        m_uploadedMaterialVersion = scene.materialVersion;
-        m_uploadedInstanceVersion = scene.instanceVersion;
-        m_sceneDirty = false;
-    }
-
-    bool DxrRayTracer::EnsureFrameConstantBuffer(IRHIDevice& device)
-    {
-        if (m_frameConstantsBuffer.IsValid() && m_frameConstantsPtr) {
-            return true;
-        }
-
-        return ResourceUploadUtility::CreateUploadBuffer(device,
-                                                         (sizeof(FrameConstants) + 255u) & ~255u,
-                                                         m_frameConstantsBuffer,
-                                                         reinterpret_cast<void**>(&m_frameConstantsPtr));
-    }
-
-    void DxrRayTracer::FillFrameConstants(const RayTracingFrameDesc& frameDesc, FrameConstants& outConstants) const
-    {
-        std::memset(&outConstants, 0, sizeof(outConstants));
-        outConstants.renderWidth = frameDesc.renderWidth;
-        outConstants.renderHeight = frameDesc.renderHeight;
-        outConstants.outputWidth = frameDesc.width;
-        outConstants.outputHeight = frameDesc.height;
-        outConstants.outputDescriptorIndex = m_descriptors.outputDescriptorIndex;
-        outConstants.vertexDescriptorIndex = m_descriptors.vertexDescriptorIndex;
-        outConstants.indexDescriptorIndex = m_descriptors.indexDescriptorIndex;
-        outConstants.materialDescriptorIndex = m_descriptors.materialDescriptorIndex;
-        outConstants.instanceDescriptorIndex = m_descriptors.instanceDescriptorIndex;
-        outConstants.pointLightBudget = frameDesc.pointLightBudget;
-        outConstants.spotLightBudget = frameDesc.spotLightBudget;
-        outConstants.qualityTier = frameDesc.qualityTier;
-        outConstants.debugView = frameDesc.debugView;
-        outConstants.flags = frameDesc.flags;
-        outConstants.maxBounceCount = std::clamp(frameDesc.maxBounceCount,
-                                                 kMinRayTracingBounceCount,
-                                                 kMaxRayTracingBounceCount);
-        outConstants.dynamicResolutionScale = frameDesc.dynamicResolutionScale;
-        outConstants.cameraPosition[0] = frameDesc.cameraPosition[0];
-        outConstants.cameraPosition[1] = frameDesc.cameraPosition[1];
-        outConstants.cameraPosition[2] = frameDesc.cameraPosition[2];
-        outConstants.cameraPosition[3] = 1.0f;
-        std::memcpy(outConstants.inverseViewProjection,
-                    frameDesc.inverseViewProjection,
-                    sizeof(outConstants.inverseViewProjection));
-
-        float forward[3] = {};
-        Math::DirectionFromYawPitch(frameDesc.directionalLight.yaw,
-                                    frameDesc.directionalLight.pitch,
-                                    forward);
-        outConstants.directionalLightDirection[0] = -forward[0];
-        outConstants.directionalLightDirection[1] = -forward[1];
-        outConstants.directionalLightDirection[2] = -forward[2];
-        outConstants.directionalLightDirection[3] = 0.0f;
-
-        outConstants.directionalLightColorIntensity[0] = frameDesc.directionalLight.color[0];
-        outConstants.directionalLightColorIntensity[1] = frameDesc.directionalLight.color[1];
-        outConstants.directionalLightColorIntensity[2] = frameDesc.directionalLight.color[2];
-        outConstants.directionalLightColorIntensity[3] = frameDesc.directionalLight.intensity;
-        outConstants.directionalLightMarkerParams[0] = frameDesc.directionalLightMarkerEnabled ? 1.0f : 0.0f;
-        outConstants.directionalLightMarkerParams[1] = frameDesc.directionalLightMarkerAngularRadius;
-        outConstants.directionalLightMarkerParams[2] = frameDesc.directionalLightMarkerHaloAngularRadius;
-        outConstants.directionalLightMarkerParams[3] = frameDesc.directionalLightMarkerBrightness;
-
-        if (frameDesc.pointLights) {
-            outConstants.pointLightCount = std::min<uint32_t>(kMaxPointLights, static_cast<uint32_t>(frameDesc.pointLights->size()));
-            for (uint32_t i = 0; i < outConstants.pointLightCount; ++i) {
-                const RenderPointLight& light = (*frameDesc.pointLights)[i];
-                outConstants.pointLights[i].posRange[0] = light.pos[0];
-                outConstants.pointLights[i].posRange[1] = light.pos[1];
-                outConstants.pointLights[i].posRange[2] = light.pos[2];
-                outConstants.pointLights[i].posRange[3] = light.range;
-                outConstants.pointLights[i].colorIntensity[0] = light.color[0];
-                outConstants.pointLights[i].colorIntensity[1] = light.color[1];
-                outConstants.pointLights[i].colorIntensity[2] = light.color[2];
-                outConstants.pointLights[i].colorIntensity[3] = light.intensity;
-            }
-        }
-
-        if (frameDesc.spotLights) {
-            outConstants.spotLightCount = std::min<uint32_t>(kMaxSpotLights, static_cast<uint32_t>(frameDesc.spotLights->size()));
-            for (uint32_t i = 0; i < outConstants.spotLightCount; ++i) {
-                const RenderSpotLight& light = (*frameDesc.spotLights)[i];
-                float direction[3] = {};
-                Math::DirectionFromYawPitch(light.yaw, light.pitch, direction);
-                outConstants.spotLights[i].posRange[0] = light.pos[0];
-                outConstants.spotLights[i].posRange[1] = light.pos[1];
-                outConstants.spotLights[i].posRange[2] = light.pos[2];
-                outConstants.spotLights[i].posRange[3] = light.range;
-                outConstants.spotLights[i].dirCosInner[0] = direction[0];
-                outConstants.spotLights[i].dirCosInner[1] = direction[1];
-                outConstants.spotLights[i].dirCosInner[2] = direction[2];
-                outConstants.spotLights[i].dirCosInner[3] = std::cos(light.innerAngle);
-                outConstants.spotLights[i].colorIntensity[0] = light.color[0];
-                outConstants.spotLights[i].colorIntensity[1] = light.color[1];
-                outConstants.spotLights[i].colorIntensity[2] = light.color[2];
-                outConstants.spotLights[i].colorIntensity[3] = light.intensity;
-                outConstants.spotLights[i].params[0] = std::cos(light.outerAngle);
-            }
-        }
-    }
-
-    bool DxrRayTracer::CompileShadersAndCreateStateObject(IRHIDevice& device)
-    {
-        if (!m_supported) {
-            return false;
-        }
-
-        ID3D12Device5* dxrDevice = device.GetRayTracingDevice();
-        if (!dxrDevice) {
-            return false;
-        }
-
-        ComPtr<IDxcBlob> shaderLibrary;
-        if (!CompileShaderLibrary(GetShaderSourceRoot() / L"RayTracing" / L"RayTracing.hlsl", shaderLibrary)) {
-            return false;
-        }
-
-        D3D12_ROOT_PARAMETER rootParameters[2] = {};
-        rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-        rootParameters[0].Descriptor.ShaderRegister = 0;
-        rootParameters[0].Descriptor.RegisterSpace = 0;
-        rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-        rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
-        rootParameters[1].Descriptor.ShaderRegister = 0;
-        rootParameters[1].Descriptor.RegisterSpace = 0;
-        rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-        D3D12_STATIC_SAMPLER_DESC samplerDesc{};
-        samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-        samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        samplerDesc.ShaderRegister = 0;
-        samplerDesc.RegisterSpace = 0;
-        samplerDesc.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-        D3D12_ROOT_SIGNATURE_DESC rootSignatureDesc{};
-        rootSignatureDesc.NumParameters = _countof(rootParameters);
-        rootSignatureDesc.pParameters = rootParameters;
-        rootSignatureDesc.NumStaticSamplers = 1;
-        rootSignatureDesc.pStaticSamplers = &samplerDesc;
-        rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
-
-        ComPtr<ID3DBlob> serializedRootSignature;
-        ComPtr<ID3DBlob> rootSignatureErrors;
-        if (FAILED(D3D12SerializeRootSignature(&rootSignatureDesc,
-                                               D3D_ROOT_SIGNATURE_VERSION_1,
-                                               &serializedRootSignature,
-                                               &rootSignatureErrors))) {
-            if (rootSignatureErrors && rootSignatureErrors->GetBufferPointer()) {
-                DebugLog(static_cast<const char*>(rootSignatureErrors->GetBufferPointer()));
-                DebugLog("\n");
-            }
-            return false;
-        }
-
-        if (FAILED(dxrDevice->CreateRootSignature(0,
-                                                  serializedRootSignature->GetBufferPointer(),
-                                                  serializedRootSignature->GetBufferSize(),
-                                                  IID_PPV_ARGS(&m_globalRootSignature)))) {
-            DebugLog("DxrRayTracer: failed to create global root signature.\n");
-            return false;
-        }
-
-        D3D12_DXIL_LIBRARY_DESC dxilLibraryDesc{};
-        D3D12_SHADER_BYTECODE shaderBytecode{};
-        shaderBytecode.pShaderBytecode = shaderLibrary->GetBufferPointer();
-        shaderBytecode.BytecodeLength = shaderLibrary->GetBufferSize();
-        dxilLibraryDesc.DXILLibrary = shaderBytecode;
-
-        D3D12_HIT_GROUP_DESC hitGroupDesc{};
-        hitGroupDesc.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
-        hitGroupDesc.ClosestHitShaderImport = L"ClosestHitShader";
-        hitGroupDesc.HitGroupExport = L"SceneHitGroup";
-
-        D3D12_RAYTRACING_SHADER_CONFIG shaderConfig{};
-        shaderConfig.MaxPayloadSizeInBytes = 32u;
-        shaderConfig.MaxAttributeSizeInBytes = D3D12_RAYTRACING_MAX_ATTRIBUTE_SIZE_IN_BYTES;
-
-        LPCWSTR shaderExports[] = {
-            L"RayGenShader",
-            L"MissShader",
-            L"ShadowMissShader",
-            L"SceneHitGroup",
-        };
-
-        D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION shaderConfigAssociation{};
-        shaderConfigAssociation.NumExports = _countof(shaderExports);
-        shaderConfigAssociation.pExports = shaderExports;
-
-        D3D12_GLOBAL_ROOT_SIGNATURE globalRootSignature{};
-        globalRootSignature.pGlobalRootSignature = m_globalRootSignature.Get();
-
-        D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig{};
-        pipelineConfig.MaxTraceRecursionDepth = kMaxRayTracingBounceCount + 1u;
-
-        D3D12_STATE_SUBOBJECT subobjects[6] = {};
-        subobjects[0].Type = D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY;
-        subobjects[0].pDesc = &dxilLibraryDesc;
-        subobjects[1].Type = D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP;
-        subobjects[1].pDesc = &hitGroupDesc;
-        subobjects[2].Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG;
-        subobjects[2].pDesc = &shaderConfig;
-        shaderConfigAssociation.pSubobjectToAssociate = &subobjects[2];
-        subobjects[3].Type = D3D12_STATE_SUBOBJECT_TYPE_SUBOBJECT_TO_EXPORTS_ASSOCIATION;
-        subobjects[3].pDesc = &shaderConfigAssociation;
-        subobjects[4].Type = D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE;
-        subobjects[4].pDesc = &globalRootSignature;
-        subobjects[5].Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG;
-        subobjects[5].pDesc = &pipelineConfig;
-
-        D3D12_STATE_OBJECT_DESC stateObjectDesc{};
-        stateObjectDesc.Type = D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE;
-        stateObjectDesc.NumSubobjects = _countof(subobjects);
-        stateObjectDesc.pSubobjects = subobjects;
-
-        if (FAILED(dxrDevice->CreateStateObject(&stateObjectDesc, IID_PPV_ARGS(&m_stateObject))) ||
-            FAILED(m_stateObject.As(&m_stateObjectProperties))) {
-            DebugLog("DxrRayTracer: failed to create state object.\n");
-            return false;
-        }
-
-        m_pipelineReady = true;
-        return true;
-    }
-
-    bool DxrRayTracer::CreateShaderTables(IRHIDevice& device)
-    {
-        if (!m_pipelineReady || !m_stateObjectProperties) {
-            return false;
-        }
-
-        m_rayGenShaderRecordSize = AlignUp(D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES, D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT);
-        m_missShaderRecordSize = m_rayGenShaderRecordSize;
-        m_hitGroupShaderRecordSize = m_rayGenShaderRecordSize;
-
-        const UINT rayGenTableSize = AlignUp(m_rayGenShaderRecordSize, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
-        const UINT missTableSize = AlignUp(m_missShaderRecordSize * 2u, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
-        const UINT hitGroupTableSize = AlignUp(m_hitGroupShaderRecordSize, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
-
-        auto createShaderTable = [&device](UINT size, Resource& outResource, uint8_t*& outMappedPtr) -> bool {
-            return ResourceUploadUtility::CreateUploadBuffer(device, size, outResource, reinterpret_cast<void**>(&outMappedPtr));
-        };
-
-        uint8_t* rayGenMapped = nullptr;
-        uint8_t* missMapped = nullptr;
-        uint8_t* hitGroupMapped = nullptr;
-        if (!createShaderTable(rayGenTableSize, m_rayGenShaderTable, rayGenMapped) ||
-            !createShaderTable(missTableSize, m_missShaderTable, missMapped) ||
-            !createShaderTable(hitGroupTableSize, m_hitGroupShaderTable, hitGroupMapped)) {
-            return false;
-        }
-
-        WriteShaderIdentifierRecord(rayGenMapped, m_stateObjectProperties.Get(), L"RayGenShader");
-        WriteShaderIdentifierRecord(missMapped + m_missShaderRecordSize * 0u, m_stateObjectProperties.Get(), L"MissShader");
-        WriteShaderIdentifierRecord(missMapped + m_missShaderRecordSize * 1u, m_stateObjectProperties.Get(), L"ShadowMissShader");
-        WriteShaderIdentifierRecord(hitGroupMapped, m_stateObjectProperties.Get(), L"SceneHitGroup");
-
-        return true;
-    }
 
     bool DxrRayTracer::UploadSceneBuffers(IRHIDevice& device)
     {
@@ -641,6 +327,14 @@ namespace SasamiRenderer
             gpuMaterial.emissiveOcclusionStrength[1] = material.material.emissive[1];
             gpuMaterial.emissiveOcclusionStrength[2] = material.material.emissive[2];
             gpuMaterial.emissiveOcclusionStrength[3] = material.material.occlusionStrength;
+            gpuMaterial.transmissionParams[0] = material.material.transmission;
+            gpuMaterial.transmissionParams[1] = material.material.ior;
+            gpuMaterial.transmissionParams[2] = material.material.transparentShellStrength;
+            gpuMaterial.transmissionParams[3] = material.material.thickness;
+            gpuMaterial.volumeParams[0] = material.material.attenuationColor[0];
+            gpuMaterial.volumeParams[1] = material.material.attenuationColor[1];
+            gpuMaterial.volumeParams[2] = material.material.attenuationColor[2];
+            gpuMaterial.volumeParams[3] = material.material.attenuationDistance;
             materials.push_back(gpuMaterial);
         }
 
@@ -812,14 +506,14 @@ namespace SasamiRenderer
             return false;
         }
 
-        ID3D12Device5* dxrDevice = device.GetRayTracingDevice();
-        if (!dxrDevice || !m_vertexBuffer.IsValid() || !m_indexBuffer.IsValid()) {
-            return false;
-        }
-
         if (m_scene.instances.empty() || m_meshRecords.empty()) {
             m_tlas.Reset();
             return true;
+        }
+
+        ID3D12Device5* dxrDevice = device.GetRayTracingDevice();
+        if (!dxrDevice || !m_vertexBuffer.IsValid() || !m_indexBuffer.IsValid()) {
+            return false;
         }
 
         CommandAllocator allocator;
@@ -904,7 +598,7 @@ namespace SasamiRenderer
             instanceDesc.InstanceContributionToHitGroupIndex = 0u;
             instanceDesc.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_FORCE_OPAQUE;
             instanceDesc.AccelerationStructure = m_meshRecords[sceneInstance.meshIndex].blas->GetGPUVirtualAddress();
-            instanceDesc.InstanceMask = 0xFFu;
+            instanceDesc.InstanceMask = sceneInstance.transparent ? 0x01u : 0xFFu;
         }
 
         Resource instanceDescBuffer;

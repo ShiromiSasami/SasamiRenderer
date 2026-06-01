@@ -36,38 +36,38 @@ namespace SasamiRenderer
             return true;
         }
 
-        if (!inputs.ssaoResource || inputs.ssaoRtv.ptr == 0 || inputs.ssaoCbGpu == 0)
+        if (!inputs.ao.ssaoResource || inputs.ao.ssaoRtv.ptr == 0 || inputs.ao.ssaoCbGpu == 0)
         {
             // SSAO resources not ready — skip silently
             return true;
         }
 
         // Pass 1: raw SSAO
-        Execute(inputs.cmdList,
-                *inputs.pipelineStateCache,
-                *inputs.srvHeap,
-                *inputs.viewport,
-                inputs.depthSrv,
-                inputs.gbufferNormalSrv,
-                inputs.depthResource,
-                inputs.ssaoRtv,
-                inputs.ssaoResource,
-                inputs.ssaoCbGpu);
+        Execute(inputs.execution.cmdList,
+                *inputs.execution.pipelineStateCache,
+                *inputs.execution.srvHeap,
+                *inputs.execution.viewport,
+                inputs.gbuffer.depthSrv,
+                inputs.gbuffer.normalSrv,
+                inputs.gbuffer.depthResource,
+                inputs.ao.ssaoRtv,
+                inputs.ao.ssaoResource,
+                inputs.ao.ssaoCbGpu);
 
         // Pass 2: bilateral blur (only if blur resources are ready)
-        if (inputs.ssaoBlurResource && inputs.ssaoBlurRtv.ptr != 0 && inputs.ssaoRawSrv.ptr != 0)
+        if (inputs.ao.ssaoBlurResource && inputs.ao.ssaoBlurRtv.ptr != 0 && inputs.ao.ssaoRawSrv.ptr != 0)
         {
-            ExecuteBlur(inputs.cmdList,
-                        *inputs.pipelineStateCache,
-                        *inputs.srvHeap,
-                        *inputs.viewport,
-                        inputs.ssaoRawSrv,
-                        inputs.depthSrv,
-                        inputs.gbufferNormalSrv,
-                        inputs.depthResource,
-                        inputs.ssaoBlurRtv,
-                        inputs.ssaoBlurResource,
-                        inputs.ssaoCbGpu);
+            ExecuteBlur(inputs.execution.cmdList,
+                        *inputs.execution.pipelineStateCache,
+                        *inputs.execution.srvHeap,
+                        *inputs.execution.viewport,
+                        inputs.ao.ssaoRawSrv,
+                        inputs.gbuffer.depthSrv,
+                        inputs.gbuffer.normalSrv,
+                        inputs.gbuffer.depthResource,
+                        inputs.ao.ssaoBlurRtv,
+                        inputs.ao.ssaoBlurResource,
+                        inputs.ao.ssaoCbGpu);
         }
 
         return true;

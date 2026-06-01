@@ -35,6 +35,7 @@ namespace SasamiRenderer
                      bool useSoftwareRayTracedReflections,
                      float reflectionMode,
                      bool useTessellationPath,
+                     bool vsmBlurEnabled,
                      bool iblEnabled,
                      float iblIntensity,
                      float iblPrefilterMaxMip,

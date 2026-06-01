@@ -7,7 +7,7 @@ namespace SasamiRenderer
 {
     void SdfFluidRenderNode::BuildRequirements(RenderNodeRequirementBuilder& builder) const
     {
-        builder.RequireGraphicsBase();
+        builder.RequireRhiGraphicsBase();
         builder.RequireLightSystem();
         builder.RequireCameraPV();   // cameraPV is unused but needed for IsSatisfied check
         builder.RequireCameraPos();
@@ -39,22 +39,22 @@ namespace SasamiRenderer
         const RenderNodeFrameInputs& inputs = context.Inputs();
 
         // Require cameraInvPV (not validated by IsSatisfied since it's not a standard requirement)
-        if (!inputs.cameraInvPV) {
+        if (!inputs.camera.invPv) {
             DebugLog("SdfFluidRenderNode::Execute: cameraInvPV is null.\n");
             return false;
         }
 
-        CommandList*             cmdList  = inputs.cmdList;
-        RenderPipelineStateCache& pso     = *inputs.pipelineStateCache;
+        auto*                     enc = inputs.execution.commandEncoder;
+        RenderPipelineStateCache& psc = *inputs.execution.pipelineStateCache;
 
         // --- Root signature / PSO ---
-        cmdList->SetGraphicsRootSignature(pso.GetSdfFluidRootSignature());
-        cmdList->SetPipelineState(pso.GetSdfFluidPipelineState());
+        enc->SetGraphicsPipelineLayout(RenderPipelineStateCache::MakeLayoutHandle(psc.GetSdfFluidRootSignature()));
+        enc->SetGraphicsPipeline(RenderPipelineStateCache::MakePipelineHandle(psc.GetSdfFluidPipelineState()));
 
         // --- Viewport / scissor ---
-        cmdList->RSSetViewports(1, inputs.viewport);
-        cmdList->RSSetScissorRects(1, inputs.scissorRect);
-        cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        enc->SetViewports(reinterpret_cast<const RhiViewport*>(inputs.execution.viewport), 1);
+        enc->SetScissors(reinterpret_cast<const RhiRect*>(inputs.execution.scissorRect), 1);
+        enc->SetPrimitiveTopology(RhiPrimitiveTopology::TriangleList);
 
         // --- Build SdfFluidCB packed into CameraCBData slots ---
         // mvp  [16]    -> cameraInvPV (invVP for ray reconstruction)
@@ -66,33 +66,33 @@ namespace SasamiRenderer
         // extra1[4]    -> fluidColor.rgb, fluidDensity
         // extra2[4]    -> fluidSpeed, fluidDetail, fluidRoughness, fluidIOR
 
-        const RenderDirectionalLight& light = inputs.lightSystem->GetDirectionalLightSettings();
+        const RenderDirectionalLight& light = inputs.lighting.lightSystem->GetDirectionalLightSettings();
         float lightFwd[3] = {};
         Math::DirectionFromYawPitch(light.yaw, light.pitch, lightFwd);
 
         const float world[16] = {
-            inputs.cameraPos[0], inputs.cameraPos[1], inputs.cameraPos[2], inputs.sceneTimeSec,
-            -lightFwd[0],        -lightFwd[1],         -lightFwd[2],       light.intensity,
-            light.color[0],      light.color[1],        light.color[2],    m_cloudCover,
-            inputs.viewport->Width, inputs.viewport->Height, static_cast<float>(m_fluidMode), m_cloudDensity,
+            inputs.camera.pos[0], inputs.camera.pos[1], inputs.camera.pos[2], inputs.sceneTimeSec,
+            -lightFwd[0],         -lightFwd[1],          -lightFwd[2],         light.intensity,
+            light.color[0],       light.color[1],         light.color[2],      m_cloudCover,
+            inputs.execution.viewport->Width, inputs.execution.viewport->Height, static_cast<float>(m_fluidMode), m_cloudDensity,
         };
         const float extra0[4] = { m_center[0],  m_center[1],  m_center[2],  m_radius   };
         const float extra1[4] = { m_color[0],   m_color[1],   m_color[2],   m_density  };
         const float extra2[4] = { m_speed,       m_detail,     m_roughness,  m_ior      };
 
-        const D3D12_GPU_VIRTUAL_ADDRESS cbGpu =
-            inputs.frameCoordinator->PushCameraCB(*inputs.frame,
-                                                  inputs.cameraInvPV, // as mvp slot = invVP
-                                                  world,
-                                                  extra0,
-                                                  extra1,
-                                                  extra2);
+        const RhiGpuAddress cbGpu =
+            inputs.execution.frameCoordinator->PushCameraCB(*inputs.execution.frame,
+                                                            inputs.camera.invPv, // as mvp slot = invVP
+                                                            world,
+                                                            extra0,
+                                                            extra1,
+                                                            extra2);
         if (cbGpu != 0) {
-            cmdList->SetGraphicsRootConstantBufferView(0, cbGpu);
+            enc->SetGraphicsConstantBufferView(0, cbGpu);
         }
 
         // --- Fullscreen triangle (no VB, no index buffer) ---
-        cmdList->DrawInstanced(3u, 1u, 0u, 0u);
+        enc->Draw({3u, 1u, 0u, 0u});
 
         return true;
     }

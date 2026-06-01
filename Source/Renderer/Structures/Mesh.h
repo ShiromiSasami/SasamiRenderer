@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "Renderer/Structures/Vertex.h"
+#include "Renderer/Structures/SkinnedVertex.h"
 
 namespace SasamiRenderer
 {
@@ -53,6 +54,16 @@ namespace SasamiRenderer
 
         std::vector<Vertex>   vertices;
         std::vector<uint32_t> indices; // triangle list, multiple of 3
+
+        bool HasIndices() const { return !indices.empty(); }
+        uint32_t VertexCount() const { return static_cast<uint32_t>(vertices.size()); }
+        uint32_t IndexCount()  const { return static_cast<uint32_t>(indices.size()); }
+    };
+
+    struct SkinnedMesh
+    {
+        std::vector<SkinnedVertex> vertices;
+        std::vector<uint32_t>      indices;
 
         bool HasIndices() const { return !indices.empty(); }
         uint32_t VertexCount() const { return static_cast<uint32_t>(vertices.size()); }

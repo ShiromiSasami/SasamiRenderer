@@ -58,6 +58,7 @@ namespace SasamiRenderer
             // シェーダーで視線ベクトルや反射方向の計算に使う。
             float cameraPos[4];
             float cameraPV[16];
+            float invCameraPV[16];
 
             // Image-Based Lighting（IBL）パラメータ。
             // x: IBL 有効フラグ（1.0 = 有効）
@@ -103,6 +104,13 @@ namespace SasamiRenderer
             // z: 有効フラグ（1.0 = シャドウ有効）
             // w: シャドウマップの一辺のサイズ（テクセルサイズ計算用）
             float spotShadowParams[4];
+
+            // VSM シャドウのパラメータ。
+            // x: シャドウモード（0/1=CSM系, 2=VSM 1cascade, 3=VSM 4cascade）
+            // y: ライトブリーディング低減値 [0,1]（デフォルト 0.2）
+            // z: 最小バリアンス（デフォルト 0.00002）
+            // w: ブラー有効フラグ（1.0 = 有効）
+            float vsmParams[4];
         };
     }
 }

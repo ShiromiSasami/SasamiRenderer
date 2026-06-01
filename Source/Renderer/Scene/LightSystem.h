@@ -3,6 +3,7 @@
 #include "Renderer/Core/GraphicsDevice.h"
 #include "Renderer/Core/RenderPipelineStateCache.h"
 #include "Renderer/Scene/RenderLightProxy.h"
+#include "Renderer/Scene/ShadowMapManager.h"
 #include "Renderer/Structures/RendererEnums.h"
 
 #include <functional>
@@ -101,10 +102,12 @@ namespace SasamiRenderer
                                float reflectionStrength,
                                uint32_t renderWidth,
                                uint32_t renderHeight,
-                               const DrawShadowCallback& drawCallback);
+                               const DrawShadowCallback& drawCallback,
+                               bool vsmBlurEnabled = true);
 
-        GpuDescriptorHandle GetShadowSrv()    const { return m_shadowSrv; }
-        GpuDescriptorHandle GetSpotShadowSrv() const { return m_spotShadowSrv; }
+        GpuDescriptorHandle GetShadowSrv()     const { return m_shadowMapManager.GetShadowSrv(); }
+        GpuDescriptorHandle GetSpotShadowSrv() const { return m_shadowMapManager.GetSpotShadowSrv(); }
+        GpuDescriptorHandle GetVsmSrv()        const { return m_shadowMapManager.GetVsmSrv(); }
 
         DirectionalLightSettings GetDirectionalLightSettings() const;
         void SetDirectionalLightSettings(const DirectionalLightSettings& settings);
@@ -126,27 +129,11 @@ namespace SasamiRenderer
         }
 
     private:
-        bool EnsureShadowResources();
-        bool EnsureSpotShadowResources();
         void EnsureLightBuffers(FrameResources& frame, size_t pointCount, size_t spotCount);
-        CpuDescriptorHandle GetDirectionalCascadeDsv(uint32_t cascadeIndex) const;
 
         IRHIDevice* m_device = nullptr;
 
-        Resource m_shadowMap;
-        DescriptorHeap m_dsvHeapShadow;
-        CpuDescriptorHandle m_shadowSrvCpu{};
-        UINT m_shadowMapSize = 4096;
-        Viewport m_shadowViewport{};
-        Rect m_shadowScissor{};
-        GpuDescriptorHandle m_shadowSrv{};
-
-        Resource m_spotShadowMap;
-        DescriptorHeap m_spotDsvHeap;
-        CpuDescriptorHandle m_spotShadowSrvCpu{};
-        GpuDescriptorHandle m_spotShadowSrv{};
-        UINT m_spotShadowMapSize = 512;
-        bool m_spotShadowResourcesReady = false;
+        ShadowMapManager m_shadowMapManager;
 
         float m_lightYaw = 3.14159265f;  // 180 deg
         float m_lightPitch = 1.55334306f; // 89 deg

@@ -21,7 +21,7 @@ namespace SasamiRenderer
         void Setup(RenderGraphBuilder& builder) const override;
         bool Execute(const RenderNodeContextView& context) const override;
 
-        void Execute(CommandList* cmdList,
+        void Execute(IRhiCommandEncoder* enc,
                      const Skybox& skybox,
                      RenderPipelineStateCache& pipelineStateCache,
                      DescriptorHeap& srvHeap,

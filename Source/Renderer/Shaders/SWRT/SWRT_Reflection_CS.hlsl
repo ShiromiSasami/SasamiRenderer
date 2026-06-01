@@ -17,6 +17,7 @@
 //
 
 #include "SWRT/SWRT_Common.hlsli"
+#include "ProceduralSky/ProceduralSky.hlsli"
 
 // --------------------------------------------------------------------------
 // Per-dispatch constants
@@ -50,7 +51,7 @@ cbuffer ReflectionFrameConstants : register(b0)
     float  g_iblEnabled;
     float  g_iblIntensity;
     float  g_iblPrefilterMaxMip;
-    float  g_padIbl;
+    float  g_proceduralSkyEnabled;  // 1.0 = evaluate ComputeSkyColor on ray miss (no IBL prefilter)
 
     // Point light count (up to 16)
     uint  g_pointLightCount;
@@ -81,11 +82,18 @@ cbuffer ReflectionFrameConstants : register(b0)
 Texture2D<float4> g_gbufferNormal   : register(t6);
 Texture2D<float4> g_gbufferMaterial : register(t7);
 Texture2D<float4> g_gbufferAlbedo   : register(t8);
-TextureCube       g_iblPrefilter    : register(t9);
 
 SamplerState LinearClamp : register(s0);
 
+TextureCube<float4> g_iblPrefilterTex : register(t9);
+
 RWTexture2D<float4> g_reflOutput : register(u0);
+
+struct GpuPointLightRT { float3 pos; float range; float3 colorIntensity; float pad; };
+struct GpuSpotLightRT  { float3 pos; float range; float3 dir; float cosInner;
+                         float3 colorIntensity; float cosOuter; };
+StructuredBuffer<GpuPointLightRT> g_pointLights : register(t12);
+StructuredBuffer<GpuSpotLightRT>  g_spotLights  : register(t13);
 
 // --------------------------------------------------------------------------
 // Helpers
@@ -201,36 +209,76 @@ float3 ShadeDirectPBR(float3 pos, float3 N, float3 V, GpuMaterial mat)
         // Note: point/spot light NEE removed — G-Buffer path uses directional light only.
         // The reflection hit point's local lights are evaluated via ShadePBR at the
         // secondary hit, which can be extended in future iterations.
-    } // end NEE block
-
-    // ---- Ambient/Sky (IS Only / MIS) ----------------------------------------
-    // NEE Only モードのときはスキップ。
-    if (g_samplingMode != SWRT_SAMPLE_NEE)
-    {
-        float3 diffuseIblRadiance = g_ambientColor * g_ambientIntensity;
-        float3 specularIblRadiance = diffuseIblRadiance;
-        if (g_iblEnabled > 0.5f)
+        [loop]
+        for (uint i = 0; i < g_pointLightCount; ++i)
         {
-            diffuseIblRadiance += g_iblPrefilter.SampleLevel(
-                LinearClamp, N, max(g_iblPrefilterMaxMip, 0.0f)).rgb * g_iblIntensity;
+            GpuPointLightRT pl = g_pointLights[i];
+            float3 toLight = pl.pos - pos;
+            float dist = length(toLight);
+            if (dist <= 1e-4f || dist >= pl.range) continue;
 
-            float3 R = reflect(-V, N);
-            float  specularMip = saturate(roughness) * max(g_iblPrefilterMaxMip, 0.0f);
-            specularIblRadiance = g_iblPrefilter.SampleLevel(
-                LinearClamp, R, specularMip).rgb * g_iblIntensity;
+            float3 L = toLight / dist;
+            float NdotL = max(dot(N, L), 0.0f);
+            if (NdotL <= 0.0f) continue;
+
+            bool inShadow = TraceAnyHit(OffsetRay(pos, N), L, g_tMin, dist - 0.001f);
+            if (inShadow) continue;
+
+            float t = dist / max(pl.range, 1e-4f);
+            float atten = saturate(1.0f - t * t);
+            atten *= atten;
+
+            float3 H = normalize(L + V);
+            float NdotV = max(dot(N, V), 0.001f);
+            float NdotH = saturate(dot(N, H));
+            float VdotH = saturate(dot(V, H));
+            float3 F = FresnelSchlick(VdotH, F0);
+            float D = GGX_D(NdotH, max(roughness, 0.05f));
+            float Vis = GGX_V(NdotL, NdotV, max(roughness, 0.05f));
+            float3 specular = (F * D * Vis) / max(4.0f * NdotL * NdotV, 0.001f);
+            float3 diffuse = diffuseReflectance / 3.14159265f;
+            float3 kd = (1.0f - F);
+
+            outColor += (kd * diffuse + specular) * NdotL * pl.colorIntensity * atten;
         }
 
-        float  NdotV = saturate(dot(N, V));
-        float3 F_ibl = FresnelSchlick(NdotV, F0);
-        float  smoothness = 1.0f - roughness;
-        float  dielectricVisibility = 0.08f * smoothness * smoothness;
-        float3 specularVisibility = max(F_ibl, float3(dielectricVisibility,
-                                                       dielectricVisibility,
-                                                       dielectricVisibility));
+        [loop]
+        for (uint i = 0; i < g_spotLightCount; ++i)
+        {
+            GpuSpotLightRT sl = g_spotLights[i];
+            float3 toLight = sl.pos - pos;
+            float dist = length(toLight);
+            if (dist <= 1e-4f || dist >= sl.range) continue;
 
-        outColor += diffuseReflectance * diffuseIblRadiance;
-        outColor += specularVisibility * specularIblRadiance;
-    }
+            float3 L = toLight / dist;
+            float cosA = dot(-L, normalize(sl.dir));
+            if (cosA < sl.cosOuter) continue;
+
+            float NdotL = max(dot(N, L), 0.0f);
+            if (NdotL <= 0.0f) continue;
+
+            bool inShadow = TraceAnyHit(OffsetRay(pos, N), L, g_tMin, dist - 0.001f);
+            if (inShadow) continue;
+
+            float spotAtten = smoothstep(sl.cosOuter, sl.cosInner, cosA);
+            float t = dist / max(sl.range, 1e-4f);
+            float atten = saturate(1.0f - t * t);
+            atten = atten * atten * spotAtten;
+
+            float3 H = normalize(L + V);
+            float NdotV = max(dot(N, V), 0.001f);
+            float NdotH = saturate(dot(N, H));
+            float VdotH = saturate(dot(V, H));
+            float3 F = FresnelSchlick(VdotH, F0);
+            float D = GGX_D(NdotH, max(roughness, 0.05f));
+            float Vis = GGX_V(NdotL, NdotV, max(roughness, 0.05f));
+            float3 specular = (F * D * Vis) / max(4.0f * NdotL * NdotV, 0.001f);
+            float3 diffuse = diffuseReflectance / 3.14159265f;
+            float3 kd = (1.0f - F);
+
+            outColor += (kd * diffuse + specular) * NdotL * sl.colorIntensity * atten;
+        }
+    } // end NEE block
 
     return outColor;
 }
@@ -246,15 +294,78 @@ float3 EvaluateReflectionHitAmbientFloor(GpuMaterial mat)
     return visibleColor * kHitAmbientFloor;
 }
 
-float3 SampleReflectionEnvironment(float3 dir, float roughness)
+float3 SampleReflectionEnvironment(float3 rayDir, float roughness)
 {
-    float3 skyColor = g_ambientColor * g_ambientIntensity;
     if (g_iblEnabled > 0.5f)
     {
-        const float mip = saturate(roughness) * max(g_iblPrefilterMaxMip, 0.0f);
-        skyColor = g_iblPrefilter.SampleLevel(LinearClamp, dir, mip).rgb * g_iblIntensity;
+        float mip = saturate(roughness) * g_iblPrefilterMaxMip;
+        return g_iblPrefilterTex.SampleLevel(LinearClamp, rayDir, mip).rgb * g_iblIntensity;
     }
-    return skyColor;
+    if (g_proceduralSkyEnabled > 0.5f)
+    {
+        return ComputeSkyColor(rayDir,
+                               g_dirLightDir,
+                               g_dirLightColor,
+                               g_dirLightIntensity);
+    }
+    return float3(0.0f, 0.0f, 0.0f);
+}
+
+float3 ResolveReflectionRayThroughTransparent(float3 rayOrigin,
+                                              float3 rayDir,
+                                              float maxDistance,
+                                              float3 initialThroughput,
+                                              out bool resolvedRadiance)
+{
+    static const uint kMaxTransparentLayers = 4u;
+    float3 color = float3(0.0f, 0.0f, 0.0f);
+    float3 throughput = initialThroughput;
+    float traveled = 0.0f;
+    resolvedRadiance = false;
+
+    [loop]
+    for (uint layer = 0u; layer < kMaxTransparentLayers; ++layer)
+    {
+        HitResult hit = TraceClosestHit(rayOrigin, rayDir, g_tMin, max(maxDistance - traveled, 0.0f));
+        if (!hit.hit)
+        {
+            color += throughput * SampleReflectionEnvironment(rayDir, 0.0f);
+            resolvedRadiance = true;
+            break;
+        }
+
+        GpuInstanceInfo inst = g_instances[hit.instanceIndex];
+        GpuMaterial mat = g_materials[inst.materialIndex];
+        float3 hitPos = rayOrigin + rayDir * hit.t;
+        float3 hitNorm = GetWorldNormal(hit);
+        if (dot(hitNorm, -rayDir) < 0.0f)
+            hitNorm = -hitNorm;
+
+        float3 V = normalize(-rayDir);
+        float surfaceOpacity = SWRT_MaterialSurfaceOpacity(mat);
+        float3 direct = ShadeDirectPBR(hitPos, hitNorm, V, mat) + EvaluateReflectionHitAmbientFloor(mat);
+        color += throughput * direct * surfaceOpacity;
+        resolvedRadiance = true;
+
+        if (!SWRT_IsTransparentMaterial(mat) || surfaceOpacity > 0.995f)
+            break;
+
+        float3 transmittedDir = refract(rayDir, hitNorm, 1.0f / max(mat.ior, 1.0f));
+        if (dot(transmittedDir, transmittedDir) <= 1e-6f)
+            transmittedDir = rayDir;
+        transmittedDir = normalize(transmittedDir);
+
+        float3 transmittance = SWRT_MaterialTransmittanceTint(mat) * (1.0f - surfaceOpacity);
+        throughput *= transmittance;
+        if (dot(throughput, float3(0.2126f, 0.7152f, 0.0722f)) < 0.01f)
+            break;
+
+        traveled += hit.t;
+        rayOrigin = hitPos + transmittedDir * max(g_tMin, 0.01f);
+        rayDir = transmittedDir;
+    }
+
+    return color;
 }
 
 // --------------------------------------------------------------------------
@@ -337,6 +448,7 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
     float4 gbufAlbedo   = g_gbufferAlbedo.Load(int3(gbufPx, 0));
     float  roughness    = gbufMaterial.r;
     float  metallic     = gbufMaterial.g;
+    float  reflectionStrength = saturate(gbufMaterial.a);
     float3 albedo       = gbufAlbedo.rgb;
 
     if (g_debugView == DEBUG_VIEW_SWRT_REFLECTION_HIT_DISTANCE)
@@ -355,16 +467,18 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    // Roughness-based fade: smooth falloff instead of hard cutoff, but keep a
-    // small metallic tail so rough metal still contributes blurred reflection.
+    if (reflectionStrength <= 0.001f)
+    {
+        g_reflOutput[id.xy] = float4(0, 0, 0, 0);
+        return;
+    }
+
+    // Roughness-based fade: smooth falloff instead of a hard cutoff. Whether the
+    // primary surface is reflective is authored through GBufferMaterial.a.
     float roughnessFade = 1.0f - smoothstep(g_maxSurfaceRoughness * 0.7f,
                                             g_maxSurfaceRoughness,
                                             roughness);
-    float roughnessTail = saturate((roughness - g_maxSurfaceRoughness) /
-                                   max(1.0f - g_maxSurfaceRoughness, 1e-4f));
-    roughnessFade = max(roughnessFade, roughnessTail * lerp(0.08f, 0.22f, metallic));
-    // Energy estimate for early-out (metallic surfaces have more energy)
-    float energyEstimate = roughnessFade * lerp(0.04f, 1.0f, metallic);
+    float energyEstimate = roughnessFade * reflectionStrength;
     if (energyEstimate < g_minReflectionEnergy)
     {
         g_reflOutput[id.xy] = float4(0, 0, 0, 0);
@@ -384,6 +498,7 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
     // --------------------------------------------------------------------------
     float3 reflColorAccum = (float3)0;
     float  weightAccum    = 0.0f;
+    float  resolvedAccum  = 0.0f;
 
     uint sampleCount = max(1u, g_samplesPerPixel);
     uint maxBounces  = max(1u, g_maxBounces);
@@ -397,6 +512,7 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
         float  pathRough  = roughness;     // roughness of current surface
         float3 throughput = float3(1.0f, 1.0f, 1.0f);
         float3 sampleColor = float3(0.0f, 0.0f, 0.0f);
+        bool sampleResolvedRadiance = false;
 
         for (uint b = 0; b < maxBounces; ++b)
         {
@@ -446,10 +562,11 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
 
             if (!hit.hit)
             {
-                // Missed geometry → sky contribution
                 sampleColor += throughput * SampleReflectionEnvironment(reflDir, pathRough);
+                sampleResolvedRadiance = true;
                 break;
             }
+            sampleResolvedRadiance = true;
 
             // ---- Shade hit point (NEE) ----
             GpuInstanceInfo inst    = g_instances[hit.instanceIndex];
@@ -460,9 +577,21 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
                 hitNorm_b = -hitNorm_b;
 
             float3 V_b = normalize(-reflDir);
+            if (SWRT_IsTransparentMaterial(mat))
+            {
+                bool transparentResolved = false;
+                sampleColor += ResolveReflectionRayThroughTransparent(
+                    pathOrigin,
+                    reflDir,
+                    g_maxReflectionDistance,
+                    throughput,
+                    transparentResolved);
+                sampleResolvedRadiance = sampleResolvedRadiance || transparentResolved;
+                break;
+            }
+
             float3 hitDirect = ShadeDirectPBR(hitPos_b, hitNorm_b, V_b, mat);
-            float3 hitFloor  = EvaluateReflectionHitAmbientFloor(mat);
-            sampleColor += throughput * (hitDirect + hitFloor);
+            sampleColor += throughput * hitDirect;
 
             // ---- Check whether to continue bouncing ----
             bool lastBounce = (b + 1u >= maxBounces);
@@ -494,6 +623,7 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
 
         reflColorAccum += sampleColor;
         weightAccum    += 1.0f;
+        resolvedAccum  += sampleResolvedRadiance ? 1.0f : 0.0f;
     }
 
     float3 reflColor = (weightAccum > 0.0f) ? (reflColorAccum / weightAccum) : (float3)0;
@@ -502,9 +632,9 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
     // using the surface's F0 so that colored metals get correct per-channel tint.
     // Storing scalar fresnelWeight here (the old approach) collapsed the float3 Fresnel
     // to a luminance value, which caused green/blue bleed on red/gold metals.
-    float roughnessAtten = roughnessFade * roughnessFade;
+    float reflectionConfidence = (weightAccum > 0.0f) ? saturate(resolvedAccum / weightAccum) : 0.0f;
 
-    // Store raw reflColor in RGB, roughnessAtten in alpha.
-    // PBR_PS.hlsl multiplies by per-channel F (FresnelSchlick) at compositing time.
-    g_reflOutput[id.xy] = float4(reflColor, roughnessAtten);
+    // Store scene-hit reflection radiance in RGB and hit confidence in alpha.
+    // Misses stay black; the composite pass suppresses them via alpha.
+    g_reflOutput[id.xy] = float4(reflColor, reflectionConfidence);
 }

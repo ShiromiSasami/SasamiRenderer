@@ -100,6 +100,8 @@ namespace SasamiRenderer
             SSAO = RuntimeAO, // backward compatibility alias
             ProceduralSky = 8,
             SdfFluid = 9,
+            TransparentBackfaceDistance = 10,
+            TransparentComposite = 11,
         };
     }
 }

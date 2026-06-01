@@ -8,6 +8,8 @@ namespace SasamiRenderer
     {
         Single = 0u,
         Csm4   = 1u,
+        Vsm    = 2u,  // VSM 1 cascade
+        Vsm4   = 3u,  // VSM 4 cascades
     };
 
     enum class DirectionalShadowDepthRangeMode : uint32_t

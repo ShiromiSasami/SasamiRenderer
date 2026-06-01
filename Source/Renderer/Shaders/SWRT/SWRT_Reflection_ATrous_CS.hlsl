@@ -16,6 +16,8 @@ cbuffer FilterCB : register(b0)
     uint  g_width;
     uint  g_height;
     float g_phiDepth;
+    uint  g_gbufferWidth;
+    uint  g_gbufferHeight;
 };
 
 Texture2D<float4> g_source      : register(t0);
@@ -28,6 +30,17 @@ float3 DecodeNormal(float3 encodedNormal)
     return normalize(encodedNormal * 2.0f - 1.0f);
 }
 
+uint2 MapToGBufferPixel(uint2 reflectionPixel)
+{
+    const uint gbufferWidth = max(g_gbufferWidth, 1u);
+    const uint gbufferHeight = max(g_gbufferHeight, 1u);
+    const uint reflectionWidth = max(g_width, 1u);
+    const uint reflectionHeight = max(g_height, 1u);
+    return uint2(
+        min(uint(float(reflectionPixel.x) * float(gbufferWidth) / float(reflectionWidth)), gbufferWidth - 1u),
+        min(uint(float(reflectionPixel.y) * float(gbufferHeight) / float(reflectionHeight)), gbufferHeight - 1u));
+}
+
 [numthreads(16, 16, 1)]
 void CS_ReflectionATrous(uint3 id : SV_DispatchThreadID)
 {
@@ -35,9 +48,10 @@ void CS_ReflectionATrous(uint3 id : SV_DispatchThreadID)
         return;
 
     const int2 pixel = int2(id.xy);
+    const uint2 centerGBufferPixel = MapToGBufferPixel(id.xy);
     const float4 centerRadiance = g_source.Load(int3(pixel, 0));
-    const float4 centerGBuffer = g_normalDepth.Load(int3(pixel, 0));
-    const float4 centerMaterial = g_material.Load(int3(pixel, 0));
+    const float4 centerGBuffer = g_normalDepth.Load(int3(centerGBufferPixel, 0));
+    const float4 centerMaterial = g_material.Load(int3(centerGBufferPixel, 0));
     const float3 centerNormal = DecodeNormal(centerGBuffer.xyz);
     const float centerDepth = centerGBuffer.w;
     const float centerRoughness = saturate(centerMaterial.r);
@@ -66,9 +80,10 @@ void CS_ReflectionATrous(uint3 id : SV_DispatchThreadID)
             const int2 samplePixel = clamp(pixel + int2(ox, oy) * stepWidth,
                                            int2(0, 0),
                                            int2(int(g_width) - 1, int(g_height) - 1));
+            const uint2 sampleGBufferPixel = MapToGBufferPixel(uint2(samplePixel));
             const float4 sampleRadiance = g_source.Load(int3(samplePixel, 0));
-            const float4 sampleGBuffer = g_normalDepth.Load(int3(samplePixel, 0));
-            const float4 sampleMaterial = g_material.Load(int3(samplePixel, 0));
+            const float4 sampleGBuffer = g_normalDepth.Load(int3(sampleGBufferPixel, 0));
+            const float4 sampleMaterial = g_material.Load(int3(sampleGBufferPixel, 0));
             const float3 sampleNormal = DecodeNormal(sampleGBuffer.xyz);
             const float sampleDepth = sampleGBuffer.w;
             const float sampleRoughness = saturate(sampleMaterial.r);

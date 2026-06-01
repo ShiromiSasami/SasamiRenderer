@@ -166,8 +166,8 @@ namespace SasamiRenderer
 
     std::vector<RenderProxy> MeshComponent::BuildRenderProxies() const
     {
-        static constexpr float kOpaqueAlphaThreshold = 0.5f;
-        static constexpr float kTransparentTransmissionThreshold = 0.5f;
+        static constexpr float kOpaqueAlphaThreshold = 0.999f;
+        static constexpr float kTransparentTransmissionThreshold = 0.01f;
 
         std::vector<RenderProxy> proxies;
         proxies.reserve(m_staticMeshes.size());

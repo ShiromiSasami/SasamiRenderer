@@ -31,8 +31,7 @@ namespace SasamiRenderer
 
         bool UsesReflectionDebugView(RendererEnums::GBufferDebugView view)
         {
-            return view == RendererEnums::GBufferDebugView::FinalLit ||
-                   view == RendererEnums::GBufferDebugView::ReflectionRadiance ||
+            return view == RendererEnums::GBufferDebugView::ReflectionRadiance ||
                    view == RendererEnums::GBufferDebugView::ReflectionAlpha ||
                    view == RendererEnums::GBufferDebugView::SwrtReflectionHitDistance ||
                    view == RendererEnums::GBufferDebugView::SwrtReflectionComposite;
@@ -124,7 +123,7 @@ namespace SasamiRenderer
         case RayTracingPerformancePreset::UltraFast:
             b.shadowMapSize            = 128u;
             b.shadowUpdateInterval     = 3u;
-            b.reflectionResolutionScale  = 0.20f;
+            b.reflectionResolutionScale  = 1.0f;
             b.reflectionUpdateInterval   = 4u;
             b.reflectionPhaseCount       = 4u;
             b.reflectionMaxRoughness     = 0.55f;
@@ -135,10 +134,10 @@ namespace SasamiRenderer
         case RayTracingPerformancePreset::Performance:
             b.shadowMapSize            = 256u;
             b.shadowUpdateInterval     = 2u;
-            b.reflectionResolutionScale  = 0.25f;
+            b.reflectionResolutionScale  = 1.0f;
             b.reflectionUpdateInterval   = 3u;
             b.reflectionPhaseCount       = 2u;
-            b.reflectionMaxRoughness     = 0.75f;
+            b.reflectionMaxRoughness     = 0.65f;
             b.reflectionMinEnergy        = 0.01f;
             b.reflectionMaxHitDistance   = 25.0f;
             b.reflectionMaxTraceDistance = 45.0f;
@@ -545,6 +544,10 @@ namespace SasamiRenderer
         }
 
         const bool reflectionDebugView = UsesReflectionDebugView(settings.gBufferDebugView);
+        const bool finalLitReflectionView =
+            settings.gBufferDebugView == RendererEnums::GBufferDebugView::FinalLit;
+        const bool forceDenoisedFinalReflection =
+            finalLitReflectionView && settings.swrtDenoiserEnabled;
         const float reflectionScale = reflectionDebugView ? 1.0f : behavior.reflectionResolutionScale;
         const uint32_t reflectionWidth  = ComputeScaledDimension(static_cast<uint32_t>(ctx.viewportWidth),  reflectionScale);
         const uint32_t reflectionHeight = ComputeScaledDimension(static_cast<uint32_t>(ctx.viewportHeight), reflectionScale);
@@ -566,9 +569,10 @@ namespace SasamiRenderer
         const bool sceneChanged       = (m_cache.reflectionSceneVersion  != sceneVersion);
         const bool lightingChanged    = (m_cache.reflectionLightingHash   != lightingHash);
         const bool cameraChanged      = m_cache.reflectionValid && HasReflectionCameraChanged(ctx.cameraPos, ctx.cameraInvPV);
-        const bool forceFullRefresh   = resourceChanged || sceneChanged || lightingChanged || cameraChanged || reflectionDebugView;
+        const bool forceFullRefresh   = resourceChanged || sceneChanged || lightingChanged || cameraChanged ||
+                                        reflectionDebugView || forceDenoisedFinalReflection;
         const bool needsRefresh       = forceFullRefresh || m_cache.reflectionPendingPhasePasses > 0u;
-        const bool intervalSatisfied  = reflectionDebugView ||
+        const bool intervalSatisfied  = reflectionDebugView || forceDenoisedFinalReflection ||
                                         (m_cache.framesSinceReflectionUpdate + 1u) >= behavior.reflectionUpdateInterval;
 
         outStats.reflectionWidth           = reflectionWidth;
@@ -619,6 +623,7 @@ namespace SasamiRenderer
         reflectionDesc.atrousIterations           = reflectionDebugView ? 0u : settings.swrtReflectionAtrousIterations;
         reflectionDesc.atrousPhiDepth             = settings.swrtReflectionAtrousPhiDepth;
         reflectionDesc.iblEnabled                 = m_skybox && m_skybox->IsIblEnabled();
+        reflectionDesc.proceduralSkyEnabled       = m_skybox && !m_skybox->IsIblEnabled();
         reflectionDesc.iblIntensity               = settings.iblIntensity;
         reflectionDesc.iblPrefilterMaxMip         = m_skybox ? m_skybox->GetIblPrefilterMaxMip() : 0.0f;
         reflectionDesc.frameDesc.directionalLight = m_lightSystem->GetDirectionalLightSettings();
@@ -662,9 +667,8 @@ namespace SasamiRenderer
             }
         }
 
-        // Reflections run as a Scene phase completion node after the lighting pass.
-        // At this point the G-Buffer is still bound as render targets in the render
-        // graph, so transition from RENDER_TARGET rather than PIXEL_SHADER_RESOURCE.
+        // Reflections run immediately after the lighting draw while the G-Buffer is
+        // still in render-target state, so transition from RENDER_TARGET here.
         if (m_renderTargetPool->GetGBufferNormal().IsValid() &&
             m_renderTargetPool->GetGBufferMaterial().IsValid() &&
             m_renderTargetPool->GetGBufferAlbedo().IsValid())
@@ -715,26 +719,17 @@ namespace SasamiRenderer
                     D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                 cmdList->ResourceBarrier(1u, &shadowToUav);
 
-                RayTracingRuntimeStats restirPrepStats{};
-                const bool restirPrepared = m_gpuSoftwareRayTracer->PrepareReSTIRFrame(
-                    reflectionDesc,
-                    *m_device,
-                    *cmdList,
-                    m_renderTargetPool->GetReSTIRShadowTexture(),
-                    restirPrepStats);
-
-                if (restirPrepared)
+                // RenderReflectionTexture() already populated the internal ReSTIR
+                // GBuffer when ReSTIR mode is active. Reusing it here avoids a
+                // second full ReSTIR reflection dispatch on the shadow texture.
+                RayTracingRuntimeStats shadowStats{};
+                if (!m_gpuSoftwareRayTracer->RenderShadowReSTIR(reflectionDesc,
+                                                                 *m_device,
+                                                                 *cmdList,
+                                                                 m_renderTargetPool->GetReSTIRShadowTexture(),
+                                                                 shadowStats))
                 {
-                    RayTracingRuntimeStats shadowStats{};
-                    m_gpuSoftwareRayTracer->RenderShadowReSTIR(reflectionDesc,
-                                                               *m_device,
-                                                               *cmdList,
-                                                               m_renderTargetPool->GetReSTIRShadowTexture(),
-                                                               shadowStats);
-                }
-                else
-                {
-                    DebugLog("SWRTExecutor::ExecuteReflections: ReSTIR frame preparation failed; skipping ReSTIR shadow.\n");
+                    DebugLog("SWRTExecutor::ExecuteReflections: ReSTIR shadow pass failed.\n");
                 }
 
                 const auto shadowToSrv = CD3DX12_RESOURCE_BARRIER::Transition(

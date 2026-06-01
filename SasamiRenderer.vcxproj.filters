@@ -58,21 +58,48 @@
     <Filter Include="Shader Files\RayMarch">
       <UniqueIdentifier>{e5f6a7b8-c9d0-1234-ef45-670891ab2345}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Shader Files\Shadow">
+      <UniqueIdentifier>{f6a7b8c9-d0e1-2345-f056-781ab9cd2345}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="Libraries\packages.config" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Source\Renderer\Core\Dx11GraphicsDevice.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Renderer\Core\Dx12GraphicsDevice.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Core\GraphicsDevice.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\OpenGLGraphicsDevice.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\RhiDevice.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\RhiTypes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\RenderFeatureSettings.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\RenderFrameOrchestrator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Renderer\Core\RenderGraph.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\RenderNodeBuilder.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Renderer\Core\RenderPipelineStateCache.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\ShaderCompilationService.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Core\RenderSettings.h">
@@ -87,7 +114,16 @@
     <ClInclude Include="Source\Renderer\Core\Renderer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\SceneSynchronizer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\EnvironmentManager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Renderer\Core\SrvDescriptorAllocator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Core\VulkanGraphicsDevice.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Core\CameraState.h">
@@ -105,7 +141,16 @@
     <ClInclude Include="Source\Renderer\Scene\MeshBuffer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\SkinnedMeshBuffer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\AnimationController.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Renderer\Scene\LightSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\ShadowMapManager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Scene\Skybox.h">
@@ -124,6 +169,15 @@
       <Filter>Header Files\Struct</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Structures\Vertex.h">
+      <Filter>Header Files\Struct</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Structures\SkinnedVertex.h">
+      <Filter>Header Files\Struct</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Structures\SkeletonAnimation.h">
+      <Filter>Header Files\Struct</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Structures\Skeleton.h">
       <Filter>Header Files\Struct</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Scene\RenderLightProxy.h">
@@ -154,6 +208,12 @@
       <Filter>Header Files\RenderNode</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Passes\TransparentLightingRenderNode.h">
+      <Filter>Header Files\RenderNode</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\TransparentBackfaceDistanceRenderNode.h">
+      <Filter>Header Files\RenderNode</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\TransparentCompositeRenderNode.h">
       <Filter>Header Files\RenderNode</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Passes\IRenderNode.h">
@@ -221,16 +281,34 @@
     <ClCompile Include="Source\Renderer\Scene\MeshBuffer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Renderer\Scene\SkinnedMeshBuffer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Scene\AnimationController.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Renderer\Scene\DrawCommandBuilder.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Core\RenderGraph.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Renderer\Core\RenderNodeBuilder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Core\RenderFrameOrchestrator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Renderer\Core\RenderTargetPool.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Core\Renderer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Core\SceneSynchronizer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Core\EnvironmentManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Core\SrvDescriptorAllocator.cpp">
@@ -245,10 +323,25 @@
     <ClCompile Include="Source\Renderer\Core\RenderPipelineStateCache.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Renderer\Core\ShaderCompilationService.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Core\Dx11GraphicsDevice.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Renderer\Core\Dx12GraphicsDevice.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Renderer\Core\OpenGLGraphicsDevice.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Core\VulkanGraphicsDevice.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Renderer\Scene\LightSystem.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Scene\ShadowMapManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Scene\Skybox.cpp">
@@ -270,6 +363,12 @@
       <Filter>Source Files\RenderNode</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Passes\TransparentLightingRenderNode.cpp">
+      <Filter>Source Files\RenderNode</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\TransparentBackfaceDistanceRenderNode.cpp">
+      <Filter>Source Files\RenderNode</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\TransparentCompositeRenderNode.cpp">
       <Filter>Source Files\RenderNode</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Passes\PostProcessRenderNode.cpp">
@@ -328,6 +427,15 @@
     <CustomBuild Include="Source\Renderer\Shaders\CookTorranceGGX_PS.hlsl">
       <Filter>Shader Files</Filter>
     </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Transparent\TransparentBackfaceDistance_PS.hlsl">
+      <Filter>Shader Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Transparent\TransparentOIT_PS.hlsl">
+      <Filter>Shader Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\Transparent\TransparentOITComposite_PS.hlsl">
+      <Filter>Shader Files</Filter>
+    </CustomBuild>
     <CustomBuild Include="Source\Renderer\Shaders\Opaque_VS.hlsl">
       <Filter>Shader Files</Filter>
     </CustomBuild>
@@ -364,6 +472,9 @@
     <CustomBuild Include="Source\Renderer\Shaders\SWRT\SWRT_ReflectionComposite_PS.hlsl">
       <Filter>Shader Files</Filter>
     </CustomBuild>
+    <CustomBuild Include="Source\Renderer\Shaders\PostProcess\ToneMap_PS.hlsl">
+      <Filter>Shader Files</Filter>
+    </CustomBuild>
     <CustomBuild Include="Source\Renderer\Shaders\VolumetricCloud\VolumetricCloud_VS.hlsl">
       <Filter>Shader Files\VolumetricCloud</Filter>
     </CustomBuild>
@@ -392,6 +503,15 @@
     </None>
     <None Include="Source\Renderer\Shaders\Debug\Tessellation_Debug_PS.hlsl">
       <Filter>Shader Files\Debug</Filter>
+    </None>
+    <None Include="Source\Renderer\Shaders\Shadow\ShadowVSM_PS.hlsl">
+      <Filter>Shader Files\Shadow</Filter>
+    </None>
+    <None Include="Source\Renderer\Shaders\Shadow\ShadowVSM_GaussBlur_CS.hlsl">
+      <Filter>Shader Files\Shadow</Filter>
+    </None>
+    <None Include="Source\Renderer\Shaders\SkinnedMesh_VS.hlsl">
+      <Filter>Shader Files</Filter>
     </None>
   </ItemGroup>
 </Project>

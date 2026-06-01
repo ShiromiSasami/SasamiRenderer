@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "Renderer/Scene/AnimationController.h"
 #include "Renderer/Scene/SurfaceMaterial.h"
 #include "Renderer/Structures/Mesh.h"
 
@@ -28,6 +29,23 @@ namespace SasamiRenderer
         bool transparent = false;
         std::string debugLabel;
         float model[16] = {
+            1,0,0,0,
+            0,1,0,0,
+            0,0,1,0,
+            0,0,0,1,
+        };
+    };
+
+    // Proxy for a skinned (bone-animated) mesh. AnimationController is owned by the caller.
+    struct SkinnedRenderProxy
+    {
+        SkinnedMesh                             mesh;
+        AnimationController*                    animController = nullptr; // must remain alive
+        std::shared_ptr<const CpuTextureRgba8>  albedoTexture;
+        std::shared_ptr<const CpuTextureRgba8>  occlusionTexture;
+        SurfaceMaterial                         material;
+        bool                                    transparent = false;
+        float                                   model[16] = {
             1,0,0,0,
             0,1,0,0,
             0,0,1,0,

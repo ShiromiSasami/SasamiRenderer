@@ -31,12 +31,10 @@ void CS_NRD_Pack(uint3 id : SV_DispatchThreadID)
     float4 gbuf     = g_gbuffer[coord];
     float4 material = g_material[coord];
 
-    // GBuffer layout: .xyz = normal * 0.5 + 0.5 (octahedral or direct), .w = linear depth
-    float3 normalWS = gbuf.xyz * 2.0 - 1.0;
-    normalWS = normalize(normalWS);
+    float3 normalWS = normalize(gbuf.xyz);
 
     float linearDepth = gbuf.w;
-    float roughness   = material.r;
+    float roughness   = material.a;
 
     // Pack radiance + hitDist for RELAX diffuse input.
     // hitDist = 1.0 is a placeholder (we have no per-pixel hit distance).

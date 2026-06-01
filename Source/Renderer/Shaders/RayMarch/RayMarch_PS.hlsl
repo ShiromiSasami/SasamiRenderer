@@ -524,7 +524,6 @@ float4 PSMain(float4 svPos : SV_POSITION) : SV_TARGET
         if (u_extra0.x > 0.5f) return float4(1.0f, 1.0f, 1.0f, 1.0f);
         float3 sunDir = normalize(u_sunDir);
         float3 col = ComputeSkyColor(rd, sunDir, u_sunColor, u_sunI);
-        col = col / (col + 1.0f); // Reinhard
 
         if (rd.y > 0.01f && u_cloudCover > 0.01f) {
             float cloudDensity = max(u_cloudDensity, 0.5f);
@@ -536,7 +535,6 @@ float4 PSMain(float4 svPos : SV_POSITION) : SV_TARGET
             col = lerp(col, clouds.rgb / max(clouds.a, 1e-4f), saturate(clouds.a));
         }
 
-        col = pow(max(col, 0.0f), 1.0f / 2.2f);
         return float4(col, 1.0f);
     }
 
@@ -571,10 +569,6 @@ float4 PSMain(float4 svPos : SV_POSITION) : SV_TARGET
     // Atmospheric fog
     float fogFactor = 1.0f - exp(-t * 0.007f);
     color = lerp(color, skyColor(rd) * 0.55f, fogFactor);
-
-    // Reinhard tone map + gamma
-    color = color / (color + 1.0f);
-    color = pow(saturate(color), 1.0f / 2.2f);
 
     // ── DEBUG: Distance Heatmap ──────────────────────────────────────────────
     // u_extra0.x > 0.5 → override output with hit-distance color.

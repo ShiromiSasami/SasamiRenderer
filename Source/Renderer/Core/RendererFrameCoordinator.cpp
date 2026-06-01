@@ -16,6 +16,9 @@ namespace
         float extra1[4];
         float extra2[4];
         float extra3[4];
+        float extra4[4];
+        float extra5[4];
+        float extra6[4];
     };
 }
 
@@ -262,7 +265,7 @@ namespace SasamiRenderer
                                                                      const float mvp[16],
                                                                      const float world[16])
     {
-        return PushCameraCB(frame, mvp, world, nullptr, nullptr, nullptr);
+        return PushCameraCB(frame, mvp, world, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
     }
 
     D3D12_GPU_VIRTUAL_ADDRESS RendererFrameCoordinator::PushCameraCB(FrameContext& frame,
@@ -270,8 +273,11 @@ namespace SasamiRenderer
                                                                      const float world[16],
                                                                      const float extra0[4],
                                                                      const float extra1[4],
-                                                                     const float extra2[4],
-                                                                     const float extra3[4])
+                                                                      const float extra2[4],
+                                                                      const float extra3[4],
+                                                                      const float extra4[4],
+                                                                      const float extra5[4],
+                                                                      const float extra6[4])
     {
         if (!frame.cameraCB.IsValid() || !frame.cameraCBPtr || frame.cameraCbCapacity == 0) {
             return 0;
@@ -309,7 +315,75 @@ namespace SasamiRenderer
         } else {
             std::memset(dst->extra3, 0, sizeof(dst->extra3));
         }
+        if (extra4) {
+            std::memcpy(dst->extra4, extra4, sizeof(dst->extra4));
+        } else {
+            std::memset(dst->extra4, 0, sizeof(dst->extra4));
+        }
+        if (extra5) {
+            std::memcpy(dst->extra5, extra5, sizeof(dst->extra5));
+        } else {
+            std::memset(dst->extra5, 0, sizeof(dst->extra5));
+        }
+        if (extra6) {
+            std::memcpy(dst->extra6, extra6, sizeof(dst->extra6));
+        } else {
+            std::memset(dst->extra6, 0, sizeof(dst->extra6));
+        }
 
         return frame.cameraCB->GetGPUVirtualAddress() + static_cast<UINT64>(cbSize) * static_cast<UINT64>(slot);
+    }
+
+    void RendererFrameCoordinator::EnsureBoneBuffers(FrameContext& frame, UINT requiredCount)
+    {
+        if (!m_device) return;
+
+        // Each slot: 128 bones × 16 floats × 4 bytes = 8192 bytes (already 256-aligned)
+        static constexpr UINT kBoneSlotBytes = 128u * 16u * sizeof(float); // 8192
+        const UINT needed = (requiredCount > 0) ? requiredCount : 1u;
+
+        if (frame.boneCB.IsValid() && frame.boneCBPtr && frame.boneCbCapacity >= needed) {
+            frame.boneCbCount = 0;
+            return;
+        }
+
+        UINT newCapacity = (frame.boneCbCapacity > 0) ? frame.boneCbCapacity : 4u;
+        while (newCapacity < needed) newCapacity *= 2u;
+
+        if (frame.boneCB.IsValid() && frame.boneCBPtr) {
+            frame.boneCB->Unmap(0, nullptr);
+            frame.boneCBPtr = nullptr;
+        }
+        frame.boneCB.Reset();
+        frame.boneCbCapacity = 0;
+        frame.boneCbCount    = 0;
+
+        if (!ResourceUploadUtility::CreateUploadBuffer(*m_device,
+                                                       static_cast<UINT64>(kBoneSlotBytes) * static_cast<UINT64>(newCapacity),
+                                                       frame.boneCB,
+                                                       reinterpret_cast<void**>(&frame.boneCBPtr))) {
+            DebugLog("RendererFrameCoordinator::EnsureBoneBuffers: bone CB grow failed.\n");
+            return;
+        }
+        frame.boneCbCapacity = newCapacity;
+    }
+
+    D3D12_GPU_VIRTUAL_ADDRESS RendererFrameCoordinator::PushBoneCB(FrameContext& frame, const float* boneMatrices)
+    {
+        if (!frame.boneCB.IsValid() || !frame.boneCBPtr || frame.boneCbCapacity == 0) return 0;
+
+        static constexpr UINT kBoneSlotBytes = 128u * 16u * sizeof(float);
+
+        UINT slot = frame.boneCbCount;
+        if (slot >= frame.boneCbCapacity) {
+            slot = frame.boneCbCapacity - 1;
+        } else {
+            ++frame.boneCbCount;
+        }
+
+        uint8_t* dst = frame.boneCBPtr + static_cast<size_t>(kBoneSlotBytes) * slot;
+        std::memcpy(dst, boneMatrices, kBoneSlotBytes);
+
+        return frame.boneCB->GetGPUVirtualAddress() + static_cast<UINT64>(kBoneSlotBytes) * slot;
     }
 }

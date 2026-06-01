@@ -38,17 +38,18 @@ namespace SasamiRenderer
             return true;
         }
 
-        Execute(inputs.cmdList,
-                *inputs.lightSystem,
-                *inputs.frameLight,
-                *inputs.pipelineStateCache,
-                *inputs.srvHeap,
-                inputs.cameraPos,
-                inputs.cameraPV,
+        Execute(inputs.execution.cmdList,
+                *inputs.lighting.lightSystem,
+                *inputs.lighting.frameLight,
+                *inputs.execution.pipelineStateCache,
+                *inputs.execution.srvHeap,
+                inputs.camera.pos,
+                inputs.camera.pv,
                 policy.useSoftwareRayTracedDirectionalShadow,
                 policy.useSoftwareRayTracedReflections,
                 policy.reflectionMode,
                 policy.useShadowTessellationPath,
+                policy.vsmBlurEnabled,
                 inputs.skybox->IsIblEnabled(),
                 policy.iblIntensity,
                 inputs.skybox->GetIblPrefilterMaxMip(),
@@ -75,6 +76,7 @@ namespace SasamiRenderer
                                    bool useSoftwareRayTracedReflections,
                                    float reflectionMode,
                                    bool useTessellationPath,
+                                   bool vsmBlurEnabled,
                                    bool iblEnabled,
                                    float iblIntensity,
                                    float iblPrefilterMaxMip,
@@ -140,6 +142,7 @@ namespace SasamiRenderer
                                       1.0f,
                                       renderWidth,
                                       renderHeight,
-                                      drawCallback);
+                                      drawCallback,
+                                      vsmBlurEnabled);
     }
 }

@@ -9,7 +9,8 @@ namespace SasamiRenderer
 
     void ProceduralSkyRenderNode::BuildRequirements(RenderNodeRequirementBuilder& builder) const
     {
-        builder.RequireGraphicsBase();
+        builder.RequireRhiGraphicsBase();
+        builder.RequireSrvHeap();
         builder.RequireSkybox();         // for cube VB
         builder.RequireLightSystem();
         builder.RequireCameraPV();
@@ -50,28 +51,27 @@ namespace SasamiRenderer
             return false;
         }
 
-        CommandList* cmdList = inputs.cmdList;
+        auto*                     enc = inputs.execution.commandEncoder;
+        RenderPipelineStateCache& pso = *inputs.execution.pipelineStateCache;
 
         // --- Root signature / PSO ---
-        RenderPipelineStateCache& pso = *inputs.pipelineStateCache;
-        cmdList->SetGraphicsRootSignature(pso.GetRootSignature());
-        cmdList->SetPipelineState(pso.GetProceduralSkyPipelineState());
+        enc->SetGraphicsPipelineLayout(RenderPipelineStateCache::MakeLayoutHandle(pso.GetRootSignature()));
+        enc->SetGraphicsPipeline(RenderPipelineStateCache::MakePipelineHandle(pso.GetProceduralSkyPipelineState()));
 
         // --- Viewport / scissor ---
-        cmdList->RSSetViewports(1, inputs.viewport);
-        cmdList->RSSetScissorRects(1, inputs.scissorRect);
-        cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        enc->SetViewports(reinterpret_cast<const RhiViewport*>(inputs.execution.viewport), 1);
+        enc->SetScissors(reinterpret_cast<const RhiRect*>(inputs.execution.scissorRect), 1);
+        enc->SetPrimitiveTopology(RhiPrimitiveTopology::TriangleList);
 
         // --- Descriptor heap (root param 0 = SRV table; ProceduralSky PS samples no texture,
         //     but the root signature slot must be bound to a valid GPU handle) ---
-        DescriptorHeap* heaps[] = { inputs.srvHeap };
-        cmdList->SetDescriptorHeaps(1, heaps);
+        enc->SetDescriptorHeap(RenderPipelineStateCache::MakeDescriptorHeapHandle(*inputs.execution.srvHeap));
         // Bind IBL SRV table as a dummy at slot 0 — ProceduralSky_PS.hlsl does not declare t0
-        cmdList->SetGraphicsRootDescriptorTable(0, skybox.GetIblSrvTable());
+        enc->SetGraphicsDescriptorTable(0, { skybox.GetIblSrvTable().ptr });
 
         // --- Camera CB ---
-        const float* cameraPV  = inputs.cameraPV;
-        const float* cameraPos = inputs.cameraPos;
+        const float* cameraPV  = inputs.camera.pv;
+        const float* cameraPos = inputs.camera.pos;
 
         float skyboxWorld[16] = {
             1,0,0,0,
@@ -82,7 +82,7 @@ namespace SasamiRenderer
         float skyboxMVP[16];
         Mul4x4(skyboxWorld, cameraPV, skyboxMVP);
 
-        const RenderDirectionalLight& light = inputs.lightSystem->GetDirectionalLightSettings();
+        const RenderDirectionalLight& light = inputs.lighting.lightSystem->GetDirectionalLightSettings();
         float lightForward[3] = {};
         Math::DirectionFromYawPitch(light.yaw, light.pitch, lightForward);
 
@@ -106,22 +106,23 @@ namespace SasamiRenderer
             0.0f
         };
 
-        auto& frameCoord = *inputs.frameCoordinator;
-        const D3D12_GPU_VIRTUAL_ADDRESS cameraCbGpu =
-            frameCoord.PushCameraCB(*inputs.frame,
+        auto& frameCoord = *inputs.execution.frameCoordinator;
+        const RhiGpuAddress cameraCbGpu =
+            frameCoord.PushCameraCB(*inputs.execution.frame,
                                     skyboxMVP,
                                     skyboxWorld,
                                     sunDir,
                                     sunColor,
                                     skyParams);
         if (cameraCbGpu != 0) {
-            cmdList->SetGraphicsRootConstantBufferView(2, cameraCbGpu);
+            enc->SetGraphicsConstantBufferView(2, cameraCbGpu);
         }
 
         // --- Draw skybox cube ---
         const VertexBufferView vbv = skybox.GetSkyboxVBV();
-        cmdList->IASetVertexBuffers(0, 1, &vbv);
-        cmdList->DrawInstanced(36u, 1u, 0u, 0u);
+        const RhiVertexBufferView rhiVbv{ vbv.BufferLocation, vbv.StrideInBytes, vbv.SizeInBytes };
+        enc->SetVertexBuffers(0, 1, &rhiVbv);
+        enc->Draw({36u, 1u, 0u, 0u});
 
         return true;
     }

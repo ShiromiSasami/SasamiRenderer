@@ -13,92 +13,40 @@
 
 namespace SasamiRenderer
 {
-    ResourceHandle ResourceRegistry::Register(std::string_view resourceName)
+    namespace
     {
-        if (resourceName.empty()) {
-            return {};
+        RhiResourceState ToRhiResourceState(D3D12_RESOURCE_STATES state)
+        {
+            if ((state & D3D12_RESOURCE_STATE_RENDER_TARGET) != 0) {
+                return RhiResourceState::RenderTarget;
+            }
+            if ((state & D3D12_RESOURCE_STATE_DEPTH_WRITE) != 0) {
+                return RhiResourceState::DepthWrite;
+            }
+            if ((state & D3D12_RESOURCE_STATE_DEPTH_READ) != 0) {
+                return RhiResourceState::DepthRead;
+            }
+            if ((state & D3D12_RESOURCE_STATE_UNORDERED_ACCESS) != 0) {
+                return RhiResourceState::UnorderedAccess;
+            }
+            if ((state & D3D12_RESOURCE_STATE_COPY_SOURCE) != 0) {
+                return RhiResourceState::CopySource;
+            }
+            if ((state & D3D12_RESOURCE_STATE_COPY_DEST) != 0) {
+                return RhiResourceState::CopyDest;
+            }
+            if ((state & D3D12_RESOURCE_STATE_PRESENT) != 0) {
+                return RhiResourceState::Present;
+            }
+            if ((state & (D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                          D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)) != 0) {
+                return RhiResourceState::ShaderResource;
+            }
+            return RhiResourceState::Common;
         }
-
-        auto it = m_nameToIndex.find(std::string(resourceName));
-        if (it != m_nameToIndex.end()) {
-            return ResourceHandle{ it->second };
-        }
-
-        const size_t index = m_records.size();
-        m_records.push_back(ResourceRecord{});
-        m_records.back().name.assign(resourceName.begin(), resourceName.end());
-        m_nameToIndex.emplace(m_records.back().name, index);
-        return ResourceHandle{ index };
     }
 
-    ResourceHandle ResourceRegistry::RegisterExternal(std::string_view resourceName,
-                                                      const ExternalRenderGraphResourceDesc& desc)
-    {
-        const ResourceHandle handle = Register(resourceName);
-        ResourceRecord* record = GetMutable(handle);
-        if (!record) {
-            return {};
-        }
-
-        record->hasExternalResource = true;
-        record->resource = desc.resource;
-        record->initialState = desc.initialState;
-        record->currentState = desc.initialState;
-        record->finalState = desc.finalState;
-        record->transitionToFinalState = desc.transitionToFinalState;
-        record->rtv = desc.rtv;
-        record->hasRtv = desc.hasRtv;
-        record->dsv = desc.dsv;
-        record->hasDsv = desc.hasDsv;
-        record->clearColorOnFirstUse = desc.clearColorOnFirstUse;
-        record->clearColor[0] = desc.clearColor[0];
-        record->clearColor[1] = desc.clearColor[1];
-        record->clearColor[2] = desc.clearColor[2];
-        record->clearColor[3] = desc.clearColor[3];
-        record->clearDepthOnFirstUse = desc.clearDepthOnFirstUse;
-        record->clearDepth = desc.clearDepth;
-        record->clearStencil = desc.clearStencil;
-        record->colorCleared = false;
-        record->depthCleared = false;
-        return handle;
-    }
-
-    ResourceHandle ResourceRegistry::Find(std::string_view resourceName) const
-    {
-        auto it = m_nameToIndex.find(std::string(resourceName));
-        if (it == m_nameToIndex.end()) {
-            return {};
-        }
-        return ResourceHandle{ it->second };
-    }
-
-    std::string_view ResourceRegistry::GetName(ResourceHandle handle) const
-    {
-        const ResourceRecord* record = Get(handle);
-        return record ? std::string_view(record->name) : std::string_view{};
-    }
-
-    ResourceRegistry::ResourceRecord* ResourceRegistry::GetMutable(ResourceHandle handle)
-    {
-        if (!handle.IsValid() || handle.index >= m_records.size()) {
-            return nullptr;
-        }
-        return &m_records[handle.index];
-    }
-
-    const ResourceRegistry::ResourceRecord* ResourceRegistry::Get(ResourceHandle handle) const
-    {
-        if (!handle.IsValid() || handle.index >= m_records.size()) {
-            return nullptr;
-        }
-        return &m_records[handle.index];
-    }
-
-    void ResourceRegistry::Clear()
-    {
-        m_nameToIndex.clear();
-        m_records.clear();
-    }
+    // ResourceRegistry implementation → RenderGraph_Registry.cpp
 
     RenderGraph::NodeHandle RenderGraph::AddPassInternal(const std::string& name,
                                                          const ExecuteCallback& execute,
@@ -182,10 +130,6 @@ namespace SasamiRenderer
         m_passes[node.index].preferCompute = preferCompute;
         if (phase.IsValid() && phase.index < m_phases.size()) {
             ++m_phases[phase.index].passCount;
-        }
-
-        if (previousNode.IsValid()) {
-            DependsOn(node, previousNode);
         }
 
         RenderGraphBuilder builder(*this, m_resources, node, previousNode);
@@ -318,6 +262,18 @@ namespace SasamiRenderer
             }
         }
 
+        // Phase order is a render-pass-level dependency. Nodes in the same phase
+        // are ordered by explicit node dependencies and resource hazards only.
+        for (size_t i = 0; i < passCount; ++i) {
+            for (size_t j = i + 1; j < passCount; ++j) {
+                if (m_passes[i].phaseIndex < m_passes[j].phaseIndex) {
+                    addEdge(i, j);
+                } else if (m_passes[j].phaseIndex < m_passes[i].phaseIndex) {
+                    addEdge(j, i);
+                }
+            }
+        }
+
         auto hasConflict = [](const std::vector<ResourceHandle>& writes,
                               const std::vector<ResourceHandle>& readsOrWrites) -> bool {
             for (const ResourceHandle write : writes) {
@@ -373,13 +329,47 @@ namespace SasamiRenderer
         if (!m_hasExecuteContext || !m_executeContext.frameInputs) {
             return nullptr;
         }
-        return m_executeContext.frameInputs->cmdList;
+        return m_executeContext.frameInputs->execution.cmdList;
+    }
+
+    IRhiCommandEncoder* RenderGraph::GetCommandEncoder() const
+    {
+        if (!m_hasExecuteContext || !m_executeContext.frameInputs) {
+            return nullptr;
+        }
+        return m_executeContext.frameInputs->execution.commandEncoder;
     }
 
     bool RenderGraph::TransitionResource(ResourceRegistry::ResourceRecord& resource,
                                          D3D12_RESOURCE_STATES requiredState)
     {
-        if (!resource.hasExternalResource || resource.resource == nullptr) {
+        if (!resource.hasExternalResource) {
+            return false;
+        }
+
+        if (resource.rhiResource.IsValid()) {
+            const RhiResourceState requiredRhiState = ToRhiResourceState(requiredState);
+            if (resource.rhiCurrentState == requiredRhiState) {
+                resource.currentState = requiredState;
+                return true;
+            }
+
+            IRhiCommandEncoder* encoder = GetCommandEncoder();
+            if (!encoder) {
+                return false;
+            }
+
+            RhiResourceTransitionDesc transition{};
+            transition.resource = resource.rhiResource;
+            transition.before = resource.rhiCurrentState;
+            transition.after = requiredRhiState;
+            encoder->TransitionResources(&transition, 1);
+            resource.rhiCurrentState = requiredRhiState;
+            resource.currentState = requiredState;
+            return true;
+        }
+
+        if (resource.resource == nullptr) {
             return false;
         }
 
@@ -411,51 +401,116 @@ namespace SasamiRenderer
         }
 
         CommandList* cmdList = GetCommandList();
-        if (!cmdList) {
-            DebugLog("RenderGraph::PreparePassResources: command list is null.\n");
+        IRhiCommandEncoder* encoder = GetCommandEncoder();
+        if (!cmdList && !encoder) {
+            DebugLog("RenderGraph::PreparePassResources: command list and RHI encoder are null.\n");
             return false;
         }
 
+        // Transition read-only resources to PIXEL_SHADER_RESOURCE state.
+        // Skip any resource that is also bound as a color or depth target in this pass.
+        for (const ResourceHandle handle : pass.reads) {
+            ResourceRegistry::ResourceRecord* resource = m_resources.GetMutable(handle);
+            if (!resource || !resource->hasExternalResource ||
+                (!resource->rhiResource.IsValid() && resource->resource == nullptr)) {
+                continue;
+            }
+            const bool isColorTarget = std::find(
+                pass.colorTargets.begin(), pass.colorTargets.end(), handle) != pass.colorTargets.end();
+            const bool isDepthTarget = (pass.depthTarget == handle);
+            if (!isColorTarget && !isDepthTarget) {
+                TransitionResource(*resource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+            }
+        }
+
+        const bool useRhiTargets = encoder != nullptr && cmdList == nullptr;
         std::vector<CpuDescriptorHandle> rtvs;
+        std::vector<RhiCpuDescriptorHandle> rhiRtvs;
         rtvs.reserve(pass.colorTargets.size());
+        rhiRtvs.reserve(pass.colorTargets.size());
         for (const ResourceHandle handle : pass.colorTargets) {
             ResourceRegistry::ResourceRecord* resource = m_resources.GetMutable(handle);
-            if (!resource || !resource->hasExternalResource || resource->resource == nullptr || !resource->hasRtv) {
+            if (!resource || !resource->hasExternalResource) {
                 DebugLog("RenderGraph::PreparePassResources: color target import is missing.\n");
+                return false;
+            }
+            if (useRhiTargets) {
+                if (!resource->rhiResource.IsValid() || !resource->rhiRtv.IsValid()) {
+                    DebugLog("RenderGraph::PreparePassResources: RHI color target import is missing.\n");
+                    return false;
+                }
+            } else if (resource->resource == nullptr || !resource->hasRtv) {
+                DebugLog("RenderGraph::PreparePassResources: D3D12 color target import is missing.\n");
                 return false;
             }
             if (!TransitionResource(*resource, D3D12_RESOURCE_STATE_RENDER_TARGET)) {
                 DebugLog("RenderGraph::PreparePassResources: failed to transition color target.\n");
                 return false;
             }
-            rtvs.push_back(resource->rtv);
+            if (useRhiTargets) {
+                rhiRtvs.push_back(resource->rhiRtv);
+            } else {
+                rtvs.push_back(resource->rtv);
+            }
         }
 
         CpuDescriptorHandle dsv{};
         CpuDescriptorHandle* dsvPtr = nullptr;
+        RhiCpuDescriptorHandle rhiDsv{};
+        RhiCpuDescriptorHandle* rhiDsvPtr = nullptr;
         if (pass.depthTarget.IsValid()) {
             ResourceRegistry::ResourceRecord* resource = m_resources.GetMutable(pass.depthTarget);
-            if (!resource || !resource->hasExternalResource || resource->resource == nullptr || !resource->hasDsv) {
+            if (!resource || !resource->hasExternalResource) {
                 DebugLog("RenderGraph::PreparePassResources: depth target import is missing.\n");
+                return false;
+            }
+            if (useRhiTargets) {
+                if (!resource->rhiResource.IsValid() || !resource->rhiDsv.IsValid()) {
+                    DebugLog("RenderGraph::PreparePassResources: RHI depth target import is missing.\n");
+                    return false;
+                }
+            } else if (resource->resource == nullptr || !resource->hasDsv) {
+                DebugLog("RenderGraph::PreparePassResources: D3D12 depth target import is missing.\n");
                 return false;
             }
             if (!TransitionResource(*resource, D3D12_RESOURCE_STATE_DEPTH_WRITE)) {
                 DebugLog("RenderGraph::PreparePassResources: failed to transition depth target.\n");
                 return false;
             }
-            dsv = resource->dsv;
-            dsvPtr = &dsv;
+            if (useRhiTargets) {
+                rhiDsv = resource->rhiDsv;
+                rhiDsvPtr = &rhiDsv;
+            } else {
+                dsv = resource->dsv;
+                dsvPtr = &dsv;
+            }
         }
 
-        cmdList->OMSetRenderTargets(static_cast<UINT>(rtvs.size()),
-                                    rtvs.empty() ? nullptr : rtvs.data(),
-                                    FALSE,
-                                    dsvPtr);
+        if (useRhiTargets) {
+            encoder->SetRenderTargets(static_cast<uint32_t>(rhiRtvs.size()),
+                                      rhiRtvs.empty() ? nullptr : rhiRtvs.data(),
+                                      rhiDsvPtr);
+        } else {
+            cmdList->OMSetRenderTargets(static_cast<UINT>(rtvs.size()),
+                                        rtvs.empty() ? nullptr : rtvs.data(),
+                                        FALSE,
+                                        dsvPtr);
+        }
 
         for (const ResourceHandle handle : pass.colorTargets) {
             ResourceRegistry::ResourceRecord* resource = m_resources.GetMutable(handle);
             if (resource && resource->clearColorOnFirstUse && !resource->colorCleared) {
-                cmdList->ClearRenderTargetView(resource->rtv, resource->clearColor, 0, nullptr);
+                if (useRhiTargets) {
+                    const RhiClearColor clearColor{
+                        resource->clearColor[0],
+                        resource->clearColor[1],
+                        resource->clearColor[2],
+                        resource->clearColor[3],
+                    };
+                    encoder->ClearRenderTarget(resource->rhiRtv, clearColor);
+                } else {
+                    cmdList->ClearRenderTargetView(resource->rtv, resource->clearColor, 0, nullptr);
+                }
                 resource->colorCleared = true;
             }
         }
@@ -463,12 +518,16 @@ namespace SasamiRenderer
         if (pass.depthTarget.IsValid()) {
             ResourceRegistry::ResourceRecord* resource = m_resources.GetMutable(pass.depthTarget);
             if (resource && resource->clearDepthOnFirstUse && !resource->depthCleared) {
-                cmdList->ClearDepthStencilView(resource->dsv,
-                                               D3D12_CLEAR_FLAG_DEPTH,
-                                               resource->clearDepth,
-                                               resource->clearStencil,
-                                               0,
-                                               nullptr);
+                if (useRhiTargets) {
+                    encoder->ClearDepthStencil(resource->rhiDsv, resource->clearDepth, resource->clearStencil);
+                } else {
+                    cmdList->ClearDepthStencilView(resource->dsv,
+                                                   D3D12_CLEAR_FLAG_DEPTH,
+                                                   resource->clearDepth,
+                                                   resource->clearStencil,
+                                                   0,
+                                                   nullptr);
+                }
                 resource->depthCleared = true;
             }
         }
@@ -479,12 +538,14 @@ namespace SasamiRenderer
     void RenderGraph::FinalizeExternalResources()
     {
         CommandList* cmdList = GetCommandList();
-        if (!cmdList) {
+        IRhiCommandEncoder* encoder = GetCommandEncoder();
+        if (!cmdList && !encoder) {
             return;
         }
 
         for (ResourceRegistry::ResourceRecord& resource : m_resources.MutableRecords()) {
-            if (!resource.hasExternalResource || !resource.transitionToFinalState || resource.resource == nullptr) {
+            if (!resource.hasExternalResource || !resource.transitionToFinalState ||
+                (!resource.rhiResource.IsValid() && resource.resource == nullptr)) {
                 continue;
             }
             (void)TransitionResource(resource, resource.finalState);
@@ -521,6 +582,11 @@ namespace SasamiRenderer
             // resources we read/write). Iterate previous nodes in topoOrder.
             for (size_t j = 0; j < i; ++j) {
                 const size_t prevIdx = topoOrder[j];
+                if (m_passes[prevIdx].phaseIndex < m_passes[nodeIdx].phaseIndex) {
+                    level[nodeIdx] = (std::max)(level[nodeIdx], level[prevIdx] + 1);
+                    continue;
+                }
+
                 bool hasConflict = false;
                 for (const ResourceHandle w : m_passes[prevIdx].writes) {
                     if (!w.IsValid()) continue;
@@ -608,7 +674,10 @@ namespace SasamiRenderer
                 }
             }
             if (!pass.execute()) {
-                DebugLog("RenderGraph::Execute: pass execution failed.\n");
+                std::string message = "RenderGraph::Execute: pass execution failed: ";
+                message += pass.name;
+                message += "\n";
+                DebugLog(message.c_str());
                 return false;
             }
             if (pass.phaseIndex < m_phases.size() && !phaseCompletionFired[pass.phaseIndex]) {
@@ -843,5 +912,21 @@ namespace SasamiRenderer
             return {};
         }
         return resources->GetName(handle);
+    }
+
+    GpuDescriptorHandle RenderGraphExecuteContext::FindResourceSrv(std::string_view resourceName) const
+    {
+        if (resources == nullptr) {
+            return {};
+        }
+        return resources->GetSrv(resources->Find(resourceName));
+    }
+
+    RhiGpuDescriptorHandle RenderGraphExecuteContext::FindResourceRhiSrv(std::string_view resourceName) const
+    {
+        if (resources == nullptr) {
+            return {};
+        }
+        return resources->GetRhiSrv(resources->Find(resourceName));
     }
 }

@@ -18,7 +18,7 @@ namespace SasamiRenderer
         void Setup(RenderGraphBuilder& builder) const override;
         bool Execute(const RenderNodeContextView& context) const override;
 
-        void Execute(CommandList* cmdList,
+        void Execute(IRhiCommandEncoder* enc,
                      RenderPipelineStateCache& pipelineStateCache,
                      DescriptorHeap& srvHeap,
                      const Viewport& viewport,
@@ -33,5 +33,6 @@ namespace SasamiRenderer
                      bool useTessellation,
                      bool tessDebugColors,
                      const std::function<void()>& drawCallback) const;
+
     };
 }

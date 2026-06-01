@@ -28,7 +28,7 @@ namespace SasamiRenderer
             float    reflectionResolutionScale = 1.0f;
             uint32_t reflectionUpdateInterval  = 2u;
             uint32_t reflectionPhaseCount      = 2u;
-            float    reflectionMaxRoughness    = 1.0f;
+            float    reflectionMaxRoughness    = 0.65f;
             float    reflectionMinEnergy       = 0.005f;
             float    reflectionMaxHitDistance  = 35.0f;
             float    reflectionMaxTraceDistance = 60.0f;

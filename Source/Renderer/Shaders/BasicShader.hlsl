@@ -101,7 +101,7 @@ float4 PSMain(PSInput input) : SV_TARGET
     float4 texColor = tex0.Sample(samp0, input.uv);
     // Fallback: if no texture/alpha, render vertex color
     float4 base = (texColor.a > 0.001f)
-        ? float4(texColor.rgb * texColor.a, texColor.a)
+        ? float4(texColor.rgb, texColor.a)
         : float4(1.0f, 1.0f, 1.0f, 1.0f);
 
     // Shadow sampling (manual 2x2 PCF):

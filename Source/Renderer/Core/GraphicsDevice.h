@@ -7,6 +7,8 @@
 #include <dxgi1_6.h>
 
 #include "d3dx12.h"
+#include "Renderer/Core/RhiDevice.h"
+#include "Renderer/Core/RhiTypes.h"
 
 #ifndef PLATFORM_WINDOWS
 #if defined(_WIN32)
@@ -200,7 +202,10 @@ namespace SasamiRenderer
             m_list->ClearDepthStencilView(dsv, flags, depth, stencil, numRects, rects);
         }
         void SetPipelineState(PipelineState& state) { m_list->SetPipelineState(state.Get()); }
+        void SetPipelineState(ID3D12PipelineState* state) { m_list->SetPipelineState(state); }
         void SetGraphicsRootSignature(RootSignature& sig) { m_list->SetGraphicsRootSignature(sig.Get()); }
+        void SetComputeRootSignature(RootSignature& sig) { m_list->SetComputeRootSignature(sig.Get()); }
+        void SetComputeRootSignature(ID3D12RootSignature* sig) { m_list->SetComputeRootSignature(sig); }
         void SetDescriptorHeaps(UINT count, DescriptorHeap* const* heaps)
         {
             std::vector<ID3D12DescriptorHeap*> native;
@@ -209,6 +214,10 @@ namespace SasamiRenderer
                 native.push_back(heaps[i] ? heaps[i]->Get() : nullptr);
             }
             m_list->SetDescriptorHeaps(count, native.data());
+        }
+        void SetDescriptorHeaps(UINT count, ID3D12DescriptorHeap* const* heaps)
+        {
+            m_list->SetDescriptorHeaps(count, heaps);
         }
         void SetGraphicsRootDescriptorTable(UINT rootIndex, GpuDescriptorHandle handle)
         {
@@ -221,6 +230,26 @@ namespace SasamiRenderer
         void SetGraphicsRootShaderResourceView(UINT rootIndex, D3D12_GPU_VIRTUAL_ADDRESS address)
         {
             m_list->SetGraphicsRootShaderResourceView(rootIndex, address);
+        }
+        void SetComputeRoot32BitConstants(UINT rootIndex, UINT num32BitValues, const void* data, UINT destOffset)
+        {
+            m_list->SetComputeRoot32BitConstants(rootIndex, num32BitValues, data, destOffset);
+        }
+        void SetComputeRootDescriptorTable(UINT rootIndex, GpuDescriptorHandle handle)
+        {
+            m_list->SetComputeRootDescriptorTable(rootIndex, handle);
+        }
+        void SetComputeRootConstantBufferView(UINT rootIndex, D3D12_GPU_VIRTUAL_ADDRESS address)
+        {
+            m_list->SetComputeRootConstantBufferView(rootIndex, address);
+        }
+        void SetComputeRootShaderResourceView(UINT rootIndex, D3D12_GPU_VIRTUAL_ADDRESS address)
+        {
+            m_list->SetComputeRootShaderResourceView(rootIndex, address);
+        }
+        void SetComputeRootUnorderedAccessView(UINT rootIndex, D3D12_GPU_VIRTUAL_ADDRESS address)
+        {
+            m_list->SetComputeRootUnorderedAccessView(rootIndex, address);
         }
         void IASetPrimitiveTopology(PrimitiveTopology topology) { m_list->IASetPrimitiveTopology(topology); }
         void IASetVertexBuffers(UINT startSlot, UINT numViews, const VertexBufferView* views)
@@ -235,6 +264,10 @@ namespace SasamiRenderer
         void DrawInstanced(UINT vertexCount, UINT instanceCount, UINT startVertex, UINT startInstance)
         {
             m_list->DrawInstanced(vertexCount, instanceCount, startVertex, startInstance);
+        }
+        void Dispatch(UINT threadGroupCountX, UINT threadGroupCountY, UINT threadGroupCountZ)
+        {
+            m_list->Dispatch(threadGroupCountX, threadGroupCountY, threadGroupCountZ);
         }
         void CopyResource(Resource& dst, Resource& src) { m_list->CopyResource(dst.Get(), src.Get()); }
         void CopyBufferRegion(Resource& dst, UINT64 dstOffset, Resource& src, UINT64 srcOffset, UINT64 numBytes)
@@ -285,7 +318,7 @@ namespace SasamiRenderer
         friend class Dx12GraphicsDevice;
     };
 
-    class IRHIDevice
+    class IRHIDevice : public IRhiDevice
     {
     public:
         virtual ~IRHIDevice() = default;
@@ -296,13 +329,135 @@ namespace SasamiRenderer
         virtual void* GetNativeGraphicsQueueHandle() const = 0;
         virtual ID3D12Device* GetDevice() const = 0;
         virtual ID3D12Device5* GetRayTracingDevice() const = 0;
+        virtual const RhiBackendCapabilities& GetCapabilities() const = 0;
         virtual bool SupportsHardwareRayTracing() const = 0;
         virtual CommandQueue& GetCommandQueue() = 0;
         virtual CommandQueue& GetComputeQueue() = 0;
         virtual SwapChain& GetSwapChain() = 0;
         virtual UINT GetDescriptorHandleIncrementSize(DescriptorHeapType type) const = 0;
         virtual void WaitForGPU() = 0;
+        RhiBackendApi GetRhiBackendApi() const override { return GetCapabilities().api; }
+        const RhiBackendCapabilities& GetRhiCapabilities() const override { return GetCapabilities(); }
+        bool WaitForRhiIdle() override
+        {
+            WaitForGPU();
+            return true;
+        }
+        virtual bool RenderBackendClearFrame(const float clearColor[4])
+        {
+            (void)clearColor;
+            return false;
+        }
+        bool ExecuteBackendFrame(const RhiBackendFrameDesc& frameDesc) override
+        {
+            const float clearColor[] = {
+                frameDesc.clearColor.r,
+                frameDesc.clearColor.g,
+                frameDesc.clearColor.b,
+                frameDesc.clearColor.a,
+            };
+            return RenderBackendClearFrame(clearColor);
+        }
 
+        RhiTextureHandle CreateRhiTexture(const RhiTextureDesc& desc) override
+        {
+            (void)desc;
+            return {};
+        }
+        RhiBufferHandle CreateRhiBuffer(const RhiBufferDesc& desc, const void* initialData = nullptr) override
+        {
+            (void)desc;
+            (void)initialData;
+            return {};
+        }
+        RhiShaderHandle CreateRhiShaderModule(const RhiShaderModuleDesc& desc) override
+        {
+            (void)desc;
+            return {};
+        }
+        RhiPipelineLayoutHandle CreateRhiPipelineLayout(const RhiPipelineLayoutDesc& desc) override
+        {
+            (void)desc;
+            return {};
+        }
+        RhiPipelineHandle CreateRhiGraphicsPipeline(const RhiGraphicsPipelineDesc& desc) override
+        {
+            (void)desc;
+            return {};
+        }
+        RhiPipelineHandle CreateRhiComputePipeline(const RhiComputePipelineDesc& desc) override
+        {
+            (void)desc;
+            return {};
+        }
+        RhiDescriptorAllocation AllocateRhiDescriptors(RhiDescriptorHeapType type,
+                                                      uint32_t count,
+                                                      bool shaderVisible) override
+        {
+            (void)type;
+            (void)count;
+            (void)shaderVisible;
+            return {};
+        }
+        bool CreateRhiShaderResourceView(RhiResourceHandle resource,
+                                         const RhiTextureViewDesc& desc,
+                                         RhiCpuDescriptorHandle destination) override
+        {
+            (void)resource;
+            (void)desc;
+            (void)destination;
+            return false;
+        }
+        bool CreateRhiRenderTargetView(RhiTextureHandle texture,
+                                       const RhiRenderTargetViewDesc& desc,
+                                       RhiCpuDescriptorHandle destination) override
+        {
+            (void)texture;
+            (void)desc;
+            (void)destination;
+            return false;
+        }
+        bool CreateRhiDepthStencilView(RhiTextureHandle texture,
+                                       const RhiDepthStencilViewDesc& desc,
+                                       RhiCpuDescriptorHandle destination) override
+        {
+            (void)texture;
+            (void)desc;
+            (void)destination;
+            return false;
+        }
+        virtual Resource* GetD3D12CompatibilityResource(RhiResourceHandle handle)
+        {
+            (void)handle;
+            return nullptr;
+        }
+        virtual PipelineState* GetD3D12CompatibilityPipelineState(RhiPipelineHandle handle)
+        {
+            (void)handle;
+            return nullptr;
+        }
+        std::unique_ptr<IRhiCommandEncoder> CreateCommandEncoder(RhiQueueType queueType) override
+        {
+            (void)queueType;
+            return std::make_unique<NullRhiCommandEncoder>();
+        }
+        bool SubmitCommandEncoder(IRhiCommandEncoder& encoder, RhiQueueType queueType) override
+        {
+            (void)encoder;
+            (void)queueType;
+            return false;
+        }
+        virtual bool BeginRhiRenderPass(const RhiRenderPassDesc& desc)
+        {
+            (void)desc;
+            return false;
+        }
+        virtual void EndRhiRenderPass()
+        {
+        }
+
+        // Compatibility surface for existing D3D12-backed renderer code. New
+        // cross-backend code should use the neutral Rhi* descriptors above.
         virtual HRESULT CreateDescriptorHeap(const DescriptorHeapDesc& desc, DescriptorHeap& out) = 0;
         virtual HRESULT CreateCommittedResource(const HeapProperties* heapProps, HeapFlags heapFlags, const ResourceDesc* desc,
                                                 ResourceState initialState, const ClearValue* clearValue, Resource& out) = 0;
@@ -310,6 +465,7 @@ namespace SasamiRenderer
         virtual HRESULT CreateCommandList(UINT nodeMask, CommandListType type, CommandAllocator& allocator,
                                           PipelineState* initialPSO, CommandList& out) = 0;
         virtual HRESULT CreateGraphicsPipelineState(const GraphicsPipelineDesc& desc, PipelineState& out) = 0;
+        virtual HRESULT CreateComputePipelineState(const D3D12_COMPUTE_PIPELINE_STATE_DESC& desc, PipelineState& out) = 0;
         virtual HRESULT CreatePipelineStateFromStream(const void* streamData, size_t streamSize, PipelineState& out) = 0;
         virtual HRESULT CreateRootSignature(UINT nodeMask, const void* blobData, size_t blobSize, RootSignature& out) = 0;
         virtual void CreateShaderResourceView(Resource& resource, const ShaderResourceViewDesc* desc, CpuDescriptorHandle dest) = 0;

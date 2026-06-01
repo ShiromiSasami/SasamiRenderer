@@ -125,6 +125,8 @@ namespace SasamiRenderer
         void SetRuntimeAOQualityIndex(int qualityIndex);
         int GetSwrtAoSampleCount() const;
         void SetSwrtAoSampleCount(int count);
+        bool GetVsmBlurEnabled() const;
+        void SetVsmBlurEnabled(bool enabled);
         float GetAoMinOcclusion() const;
         void  SetAoMinOcclusion(float v);
         bool GetSwrtUseReSTIR() const;

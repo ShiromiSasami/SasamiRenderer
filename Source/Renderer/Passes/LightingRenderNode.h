@@ -76,7 +76,7 @@ namespace SasamiRenderer
         // @param reflectionSrv    リフレクションテクスチャ SRV（t7）
         // @param lightCbGpu       LightCB の GPU 仮想アドレス（b3）
         // @param drawCallback     メッシュドローコールを発行するコールバック
-        void Execute(CommandList* cmdList,
+        void Execute(IRhiCommandEncoder* enc,
                      RenderPipelineStateCache& pipelineStateCache,
                      DescriptorHeap& srvHeap,
                      const Viewport& viewport,
@@ -87,11 +87,13 @@ namespace SasamiRenderer
                      bool useMeshletDebugView,
                      GpuDescriptorHandle shadowSrv,
                      GpuDescriptorHandle spotShadowSrv,
+                     GpuDescriptorHandle vsmSrv,
                      GpuDescriptorHandle lightSrvTable,
                      GpuDescriptorHandle iblSrvTable,
                      GpuDescriptorHandle aoSrv,
                      GpuDescriptorHandle reflectionSrv,
                      GpuDescriptorHandle depthSrv,
+                     GpuDescriptorHandle transparentBackfaceDistanceSrv,
                      D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu,
                      const std::function<void()>& drawCallback) const;
     };
