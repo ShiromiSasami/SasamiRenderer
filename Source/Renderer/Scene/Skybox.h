@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Renderer/Core/GraphicsDevice.h"
-#include "Renderer/Core/RenderPipelineStateCache.h"
+#include "Renderer/RHI/GraphicsDevice.h"
+#include "Renderer/Resources/RenderPipelineStateCache.h"
 #include "Renderer/Scene/RenderLightProxy.h"
 #include "Renderer/Structures/RendererEnums.h"
 

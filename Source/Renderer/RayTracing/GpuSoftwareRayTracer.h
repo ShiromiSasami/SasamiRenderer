@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Renderer/Core/GraphicsDevice.h"
+#include "Renderer/RHI/GraphicsDevice.h"
 #include "Renderer/RayTracing/RayTracingScene.h"
 
 #include <cstdint>
@@ -201,7 +201,7 @@ namespace SasamiRenderer
         struct BvhNode
         {
             float   boundsMin[3] = {};
-            int32_t leftChild    = -1;   // <0 → leaf: firstIndex = ~leftChild
+            int32_t leftChild    = -1;   // <0 ↁEleaf: firstIndex = ~leftChild
             float   boundsMax[3] = {};
             int32_t rightOrCount = 0;    // leaf: count; interior: right child index
 
@@ -217,7 +217,7 @@ namespace SasamiRenderer
         struct TlasNode
         {
             float   boundsMin[3] = {};
-            int32_t leftChild    = -1;   // <0 → leaf: firstInstance = ~leftChild
+            int32_t leftChild    = -1;   // <0 ↁEleaf: firstInstance = ~leftChild
             float   boundsMax[3] = {};
             int32_t rightOrCount = 0;    // leaf: instanceCount; interior: right child
 
@@ -527,13 +527,13 @@ namespace SasamiRenderer
         Resource m_hitPositionTexture;     // R16G16B16A16_FLOAT: secondary hit world position.xyz + valid
         Resource m_hitMaterialTexture;     // R16G16B16A16_FLOAT: secondary hit baseColor.rgb + roughness
         // ---- NRD textures ----
-        Resource m_nrdDiffIn;             // RGBA16F – IN_DIFF_RADIANCE_HITDIST
-        Resource m_nrdViewZ;              // R16F    – IN_VIEWZ
-        Resource m_nrdNormalRoughness;    // RGBA8   – IN_NORMAL_ROUGHNESS
-        Resource m_nrdMotionVec;          // RG16F   – IN_MV  (zeroed, no motion vecs yet)
-        Resource m_nrdDiffOut;            // RGBA16F – OUT_DIFF_RADIANCE_HITDIST
+        Resource m_nrdDiffIn;             // RGBA16F  EIN_DIFF_RADIANCE_HITDIST
+        Resource m_nrdViewZ;              // R16F     EIN_VIEWZ
+        Resource m_nrdNormalRoughness;    // RGBA8    EIN_NORMAL_ROUGHNESS
+        Resource m_nrdMotionVec;          // RG16F    EIN_MV  (zeroed, no motion vecs yet)
+        Resource m_nrdDiffOut;            // RGBA16F  EOUT_DIFF_RADIANCE_HITDIST
         // ---- A-Trous denoising ----
-        Resource m_atrousPingPong;        // RGBA16F – ping-pong buffer for A-Trous passes
+        Resource m_atrousPingPong;        // RGBA16F  Eping-pong buffer for A-Trous passes
         bool     m_atrousReady = false;
 
         // ---- Light data upload buffer (persistently mapped, per-frame) ----
@@ -543,7 +543,7 @@ namespace SasamiRenderer
         static constexpr uint32_t kMaxPointLights = 512u;
         static constexpr uint32_t kMaxSpotLights  = 256u;
 
-        // ---- ReSTIR constants buffer (7 × 256 bytes, persistently mapped) ----
+        // ---- ReSTIR constants buffer (7 ÁE256 bytes, persistently mapped) ----
         // Slot 0: base constants (passes 1-5)
         // Slots 1-5: A-Trous variants (stepWidth=1,2,4,8,16)
         // Slot 6: shadow ReSTIR constants

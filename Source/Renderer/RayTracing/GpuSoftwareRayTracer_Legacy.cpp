@@ -225,19 +225,19 @@ namespace SasamiRenderer
         out.maxReflectionDistance = desc.maxReflectionTraceDistance;
         out.minReflectionEnergy   = desc.minReflectionEnergy;
 
-        const auto& dl = desc.frameDesc.directionalLight;
+        const auto& dirLight = desc.frameDesc.directionalLight;
         // Compute direction from yaw/pitch (towards the light, opposite of forward)
         {
             float fwd[3]{};
-            Math::DirectionFromYawPitch(dl.yaw, dl.pitch, fwd);
+            Math::DirectionFromYawPitch(dirLight.yaw, dirLight.pitch, fwd);
             out.dirLightDir[0] = -fwd[0];
             out.dirLightDir[1] = -fwd[1];
             out.dirLightDir[2] = -fwd[2];
         }
-        out.dirLightIntensity = dl.intensity;
-        out.dirLightColor[0]  = dl.color[0];
-        out.dirLightColor[1]  = dl.color[1];
-        out.dirLightColor[2]  = dl.color[2];
+        out.dirLightIntensity = dirLight.intensity;
+        out.dirLightColor[0]  = dirLight.color[0];
+        out.dirLightColor[1]  = dirLight.color[1];
+        out.dirLightColor[2]  = dirLight.color[2];
         out.shadowBias        = 0.002f;
         out.ambientColor[0]   = 0.1f;
         out.ambientColor[1]   = 0.1f;

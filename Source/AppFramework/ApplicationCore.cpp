@@ -1,20 +1,20 @@
 #include "ApplicationCore.h"
+#include "ApplicationResourcePaths.h"
 #include <windows.h>
 #include <windowsx.h>
 #include <array>
-#include <algorithm>
 #include <exception>
-#include <filesystem>
 #include <stdexcept>
-#include <cwctype>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "Foundation/Tools/DebugOutput.h"
 #include "Foundation/Tools/ScopedPerfTimer.h"
 #include "Input/InputSystem.h"
 #include "Loader/AssetLoader.h"
 #include "Object/Camera.h"
-#include "Renderer/Core/Renderer.h"
+#include "Renderer/Runtime/Renderer.h"
 #include "UI/ImGuiCoordinator.h"
 
 namespace SasamiRenderer
@@ -27,63 +27,9 @@ namespace SasamiRenderer
             bool shouldDestroy = false;
         };
 
-        std::filesystem::path GetExecutableDir()
-        {
-            wchar_t exePath[MAX_PATH] = {};
-            const DWORD len = GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-            if (len == 0 || len == MAX_PATH) {
-                return std::filesystem::current_path();
-            }
-            return std::filesystem::path(exePath).parent_path();
-        }
-
-        std::filesystem::path FindProjectRootWithAssets(const std::filesystem::path& startDir)
-        {
-            std::error_code ec;
-            std::filesystem::path dir = std::filesystem::absolute(startDir, ec);
-            if (ec) {
-                dir = startDir;
-            }
-
-            for (;;) {
-                const std::filesystem::path assetsDir = dir / L"Assets";
-                if (std::filesystem::exists(assetsDir, ec) &&
-                    std::filesystem::is_directory(assetsDir, ec)) {
-                    return dir;
-                }
-
-                const std::filesystem::path parent = dir.parent_path();
-                if (parent.empty() || parent == dir) {
-                    break;
-                }
-                dir = parent;
-            }
-
-            return {};
-        }
-
-        std::filesystem::path ResolveWindowIconPath()
-        {
-            std::error_code ec;
-            const std::filesystem::path projectRoot = FindProjectRootWithAssets(GetExecutableDir());
-            if (!projectRoot.empty()) {
-                const std::filesystem::path projectIcon = projectRoot / L"Assets" / L"SasamiIcon.ico";
-                if (std::filesystem::exists(projectIcon, ec)) {
-                    return projectIcon;
-                }
-            }
-
-            const std::filesystem::path cwdIcon = std::filesystem::current_path() / L"Assets" / L"SasamiIcon.ico";
-            if (std::filesystem::exists(cwdIcon, ec)) {
-                return cwdIcon;
-            }
-
-            return {};
-        }
-
         WindowIconHandle LoadWindowIcon()
         {
-            const std::filesystem::path iconPath = ResolveWindowIconPath();
+            const std::wstring iconPath = ApplicationResourcePaths::ResolveWindowIconPath();
             if (!iconPath.empty()) {
                 HICON icon = reinterpret_cast<HICON>(
                     LoadImageW(nullptr, iconPath.c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE));
@@ -94,65 +40,6 @@ namespace SasamiRenderer
 
             return WindowIconHandle{ LoadIcon(nullptr, IDI_APPLICATION), false };
         }
-
-        bool IsHdrExtension(const std::filesystem::path& path)
-        {
-            std::wstring ext = path.extension().wstring();
-            std::transform(ext.begin(), ext.end(), ext.begin(), [](wchar_t c) {
-                return static_cast<wchar_t>(std::towlower(c));
-            });
-            return ext == L".hdr";
-        }
-
-        bool ResolveCubemapFacePaths(const std::filesystem::path& directory,
-                                     std::array<std::wstring, 6>& outPaths)
-        {
-            static const std::array<std::vector<std::wstring>, 6> kFaceNameCandidates = {{
-                { L"px", L"posx", L"positive_x", L"right", L"xpos", L"+x" },
-                { L"nx", L"negx", L"negative_x", L"left",  L"xneg", L"-x" },
-                { L"py", L"posy", L"positive_y", L"up",    L"ypos", L"+y" },
-                { L"ny", L"negy", L"negative_y", L"down",  L"yneg", L"-y" },
-                { L"pz", L"posz", L"positive_z", L"front", L"zpos", L"+z" },
-                { L"nz", L"negz", L"negative_z", L"back",  L"zneg", L"-z" },
-            }};
-            static const std::array<std::wstring, 8> kExtensions = {
-                L".png", L".jpg", L".jpeg", L".bmp", L".tif", L".tiff", L".wdp", L".hdp"
-            };
-
-            std::error_code ec;
-            if (!std::filesystem::is_directory(directory, ec)) {
-                return false;
-            }
-
-            for (size_t face = 0; face < kFaceNameCandidates.size(); ++face) {
-                bool resolved = false;
-                for (const std::wstring& name : kFaceNameCandidates[face]) {
-                    const std::filesystem::path exact = directory / name;
-                    if (std::filesystem::is_regular_file(exact, ec)) {
-                        outPaths[face] = exact.wstring();
-                        resolved = true;
-                        break;
-                    }
-                    for (const std::wstring& ext : kExtensions) {
-                        const std::filesystem::path candidate = directory / (name + ext);
-                        if (std::filesystem::is_regular_file(candidate, ec)) {
-                            outPaths[face] = candidate.wstring();
-                            resolved = true;
-                            break;
-                        }
-                    }
-                    if (resolved) {
-                        break;
-                    }
-                }
-                if (!resolved) {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
     }
 
     ApplicationCore::ApplicationCore(UINT width, UINT height, const wchar_t* title, IApplication* game)
@@ -166,6 +53,19 @@ namespace SasamiRenderer
     bool ApplicationCore::IsRendererReady() const
     {
         return m_renderer != nullptr;
+    }
+
+    void ApplicationCore::SetGraphicsRuntime(GraphicsRuntime runtime)
+    {
+        m_graphicsRuntime = runtime;
+        if (m_renderer) {
+            m_renderer->SetGraphicsRuntime(runtime);
+        }
+    }
+
+    GraphicsRuntime ApplicationCore::GetGraphicsRuntime() const
+    {
+        return m_renderer ? m_renderer->GetGraphicsRuntime() : m_graphicsRuntime;
     }
 
     void ApplicationCore::RenderFrame()
@@ -190,6 +90,7 @@ namespace SasamiRenderer
         }
 
         SyncModelsToRenderer(*m_renderer);
+        SyncSkinnedModelsToRenderer(*m_renderer);
         SyncLightObjectsToRenderer(*m_renderer);
         m_renderer->UpdateCameraCB(&cameraProxy);
         m_renderer->Render([](CommandList& cmdList, CpuDescriptorHandle rtvHandle) {
@@ -237,15 +138,9 @@ namespace SasamiRenderer
             return false;
         }
 
-        const std::filesystem::path configuredPath(resourcePath);
-        std::error_code ec;
-        if (!std::filesystem::exists(configuredPath, ec)) {
-            DebugLog("LoadSkybox failed: resource path does not exist.\n");
-            return false;
-        }
         if (format == SkyboxLoadFormat::CubemapFaces) {
             std::array<std::wstring, 6> facePaths{};
-            if (!ResolveCubemapFacePaths(configuredPath, facePaths)) {
+            if (!ApplicationResourcePaths::ResolveCubemapFacePaths(resourcePath, facePaths)) {
                 DebugLog("LoadSkybox failed: CubemapFaces expects a directory with +X/-X/+Y/-Y/+Z/-Z face images.\n");
                 return false;
             }
@@ -263,8 +158,10 @@ namespace SasamiRenderer
             return true;
         }
 
-        if (!std::filesystem::is_regular_file(configuredPath, ec)) {
-            DebugLog("LoadSkybox failed: equirect skybox path must be a file.\n");
+        std::wstring configuredPath;
+        bool isHdrSource = false;
+        if (!ApplicationResourcePaths::ResolveEquirectSkyboxFile(resourcePath, configuredPath, isHdrSource)) {
+            DebugLog("LoadSkybox failed: equirect skybox path must be an existing file.\n");
             return false;
         }
 
@@ -272,7 +169,7 @@ namespace SasamiRenderer
             UINT width = 0;
             UINT height = 0;
             std::vector<float> pixels;
-            if (!AssetLoader::LoadRadianceHdr(configuredPath.wstring(), pixels, width, height)) {
+            if (!AssetLoader::LoadRadianceHdr(configuredPath, pixels, width, height)) {
                 return false;
             }
             m_renderer->SetSkyboxHdrEquirectData(std::move(pixels), width, height);
@@ -283,7 +180,7 @@ namespace SasamiRenderer
             UINT width = 0;
             UINT height = 0;
             std::vector<uint8_t> pixels;
-            if (!AssetLoader::LoadRgba8ViaWIC(configuredPath.wstring(), pixels, width, height)) {
+            if (!AssetLoader::LoadRgba8ViaWIC(configuredPath, pixels, width, height)) {
                 return false;
             }
             m_renderer->SetSkyboxLdrEquirectData(std::move(pixels), width, height);
@@ -304,7 +201,7 @@ namespace SasamiRenderer
             }
             break;
         case SkyboxLoadFormat::Auto:
-            if (IsHdrExtension(configuredPath)) {
+            if (isHdrSource) {
                 if (!loadHdr()) {
                     DebugLog("LoadSkybox failed: Auto mode expected HDR from extension but load failed.\n");
                     return false;
@@ -332,7 +229,7 @@ namespace SasamiRenderer
         return camera;
     }
 
-    // Object management and ECS sync → ApplicationObjectManagement.cpp
+    // Object management and ECS sync ↁEApplicationObjectManagement.cpp
 
     bool ApplicationCore::InitializeRenderer()
     {
@@ -346,6 +243,8 @@ namespace SasamiRenderer
             if (!m_renderer) {
                 return false;
             }
+
+            m_renderer->SetGraphicsRuntime(m_graphicsRuntime);
 
             if (!m_renderer->Initialize(m_hwnd, m_width, m_height)) {
                 // Renderer::Initialize reports the concrete failure reason.
@@ -384,6 +283,9 @@ namespace SasamiRenderer
 
     void ApplicationCore::ShutdownRenderer()
     {
+        if (m_renderer) {
+            m_renderer->WaitForGPU();
+        }
         ImGuiCoordinator::Instance().Shutdown();
         m_renderer.reset();
     }
@@ -449,6 +351,13 @@ namespace SasamiRenderer
                 float deltaTime = static_cast<float>(currentTime - lastTime) * 0.001f;
                 lastTime = currentTime;
 
+                if (m_renderer && !m_renderer->SupportsD3D12OverlayRendering()) {
+                    m_deltaTime = deltaTime;
+                    m_renderer->SetDeltaTime(deltaTime);
+                    m_renderer->Render();
+                    continue;
+                }
+
                 OnUpdate(deltaTime);
                 OnRender();
             } catch (const std::exception& ex) {
@@ -491,7 +400,9 @@ namespace SasamiRenderer
     {
         m_deltaTime = deltaTime;
         InputSystem::Instance().Update();
-        ImGuiCoordinator::Instance().NewFrame();
+        if (!m_renderer || m_renderer->SupportsD3D12OverlayRendering()) {
+            ImGuiCoordinator::Instance().NewFrame();
+        }
         if (m_renderer) {
             m_renderer->SetDeltaTime(deltaTime);
         }

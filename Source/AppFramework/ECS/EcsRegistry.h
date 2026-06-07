@@ -1,10 +1,12 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <typeindex>
 #include <type_traits>
-#include <limits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -17,7 +19,19 @@ namespace SasamiRenderer
         using EntityId = std::uint32_t;
         static constexpr EntityId INVALID_ENTITY = 0;
 
-        EntityId CreateEntity()
+        enum class EntityPreset : std::uint8_t
+        {
+            Generic = 0,
+            StaticModel,
+            SkinnedModel,
+            PointLight,
+            SpotLight,
+            Camera,
+            Count,
+        };
+        static constexpr size_t kPresetCount = static_cast<size_t>(EntityPreset::Count);
+
+        EntityId CreateEntity(EntityPreset preset = EntityPreset::Generic)
         {
             EntityId entity = INVALID_ENTITY;
             if (!m_freeEntityIds.empty()) {
@@ -35,9 +49,11 @@ namespace SasamiRenderer
                 }
                 if (m_entityAliveFlags.size() <= static_cast<size_t>(entity)) {
                     m_entityAliveFlags.resize(static_cast<size_t>(entity) + 1u, 0u);
+                    m_entityPresets.resize(static_cast<size_t>(entity) + 1u, EntityPreset::Generic);
                 }
             }
             m_entityAliveFlags[entity] = 1u;
+            AssignPreset(entity, preset);
             return entity;
         }
 
@@ -50,6 +66,8 @@ namespace SasamiRenderer
             for (auto& [_, pool] : m_componentPools) {
                 pool->Remove(entity);
             }
+            RemoveFromPresetList(entity, GetPreset(entity));
+            m_entityPresets[entity] = EntityPreset::Generic;
             m_entityAliveFlags[entity] = 0u;
             m_freeEntityIds.push_back(entity);
             return true;
@@ -60,6 +78,11 @@ namespace SasamiRenderer
             m_componentPools.clear();
             m_entityAliveFlags.clear();
             m_entityAliveFlags.resize(1u, 0u);
+            m_entityPresets.clear();
+            m_entityPresets.resize(1u, EntityPreset::Generic);
+            for (auto& presetEntities : m_presetEntityIds) {
+                presetEntities.clear();
+            }
             m_freeEntityIds.clear();
             m_nextEntityId = 1u;
         }
@@ -69,6 +92,37 @@ namespace SasamiRenderer
             return entity != INVALID_ENTITY &&
                 static_cast<size_t>(entity) < m_entityAliveFlags.size() &&
                 m_entityAliveFlags[entity] != 0u;
+        }
+
+        EntityPreset GetPreset(EntityId entity) const
+        {
+            if (entity == INVALID_ENTITY ||
+                static_cast<size_t>(entity) >= m_entityPresets.size()) {
+                return EntityPreset::Generic;
+            }
+            return m_entityPresets[entity];
+        }
+
+        bool SetPreset(EntityId entity, EntityPreset preset)
+        {
+            if (!IsAlive(entity)) {
+                return false;
+            }
+            AssignPreset(entity, preset);
+            return true;
+        }
+
+        std::vector<EntityId> ViewPreset(EntityPreset preset) const
+        {
+            std::vector<EntityId> result;
+            const auto& entities = m_presetEntityIds[PresetIndex(preset)];
+            result.reserve(entities.size());
+            for (const EntityId entity : entities) {
+                if (IsAlive(entity) && GetPreset(entity) == preset) {
+                    result.push_back(entity);
+                }
+            }
+            return result;
         }
 
         template<typename TComponent, typename... TArgs>
@@ -144,6 +198,11 @@ namespace SasamiRenderer
         }
 
     private:
+        static constexpr size_t PresetIndex(EntityPreset preset)
+        {
+            return static_cast<size_t>(preset);
+        }
+
         struct IComponentPool
         {
             virtual ~IComponentPool() = default;
@@ -234,8 +293,41 @@ namespace SasamiRenderer
             return best;
         }
 
+        void AssignPreset(EntityId entity, EntityPreset preset)
+        {
+            if (entity == INVALID_ENTITY) {
+                return;
+            }
+            if (static_cast<size_t>(entity) >= m_entityPresets.size()) {
+                m_entityPresets.resize(static_cast<size_t>(entity) + 1u, EntityPreset::Generic);
+            }
+
+            const EntityPreset oldPreset = m_entityPresets[entity];
+            if (oldPreset == preset) {
+                auto& presetEntities = m_presetEntityIds[PresetIndex(preset)];
+                if (std::find(presetEntities.begin(), presetEntities.end(), entity) == presetEntities.end()) {
+                    presetEntities.push_back(entity);
+                }
+                return;
+            }
+
+            RemoveFromPresetList(entity, oldPreset);
+            m_entityPresets[entity] = preset;
+            m_presetEntityIds[PresetIndex(preset)].push_back(entity);
+        }
+
+        void RemoveFromPresetList(EntityId entity, EntityPreset preset)
+        {
+            auto& presetEntities = m_presetEntityIds[PresetIndex(preset)];
+            presetEntities.erase(
+                std::remove(presetEntities.begin(), presetEntities.end(), entity),
+                presetEntities.end());
+        }
+
         EntityId m_nextEntityId = 1u;
         std::vector<std::uint8_t> m_entityAliveFlags = { 0u };
+        std::vector<EntityPreset> m_entityPresets = { EntityPreset::Generic };
+        std::array<std::vector<EntityId>, kPresetCount> m_presetEntityIds{};
         std::vector<EntityId> m_freeEntityIds;
         std::unordered_map<std::type_index, std::unique_ptr<IComponentPool>> m_componentPools;
     };

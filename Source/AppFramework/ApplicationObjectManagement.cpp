@@ -10,12 +10,36 @@
 #include "Foundation/Tools/DebugOutput.h"
 #include "Object/Camera.h"
 #include "Object/PointLight.h"
+#include "Object/SkinnedModel.h"
 #include "Object/SpotLight.h"
 #include "Object/StaticModel.h"
-#include "Renderer/Core/Renderer.h"
+#include "Renderer/Runtime/Renderer.h"
 
 namespace SasamiRenderer
 {
+    namespace
+    {
+        EcsRegistry::EntityPreset ResolveObjectPreset(SObject* object)
+        {
+            if (dynamic_cast<StaticModel*>(object)) {
+                return EcsRegistry::EntityPreset::StaticModel;
+            }
+            if (dynamic_cast<SkinnedModel*>(object)) {
+                return EcsRegistry::EntityPreset::SkinnedModel;
+            }
+            if (dynamic_cast<PointLight*>(object)) {
+                return EcsRegistry::EntityPreset::PointLight;
+            }
+            if (dynamic_cast<SpotLight*>(object)) {
+                return EcsRegistry::EntityPreset::SpotLight;
+            }
+            if (dynamic_cast<Camera*>(object)) {
+                return EcsRegistry::EntityPreset::Camera;
+            }
+            return EcsRegistry::EntityPreset::Generic;
+        }
+    }
+
     void ApplicationCore::RegisterObjectInEcs(SObject* object)
     {
         if (!object) {
@@ -26,26 +50,13 @@ namespace SasamiRenderer
             return;
         }
 
-        const EntityId entity = m_ecsRegistry.CreateEntity();
+        const EntityId entity = m_ecsRegistry.CreateEntity(ResolveObjectPreset(object));
         if (entity == EcsRegistry::INVALID_ENTITY) {
             DebugLog("ApplicationCore::RegisterObjectInEcs: entity allocation failed.\n");
             return;
         }
         m_objectEntityMap.emplace(object, entity);
         m_ecsRegistry.AddComponent<ObjectRefComponent>(entity, ObjectRefComponent{ object });
-
-        if (dynamic_cast<StaticModel*>(object)) {
-            m_ecsRegistry.AddComponent<StaticModelTag>(entity);
-        }
-        if (dynamic_cast<PointLight*>(object)) {
-            m_ecsRegistry.AddComponent<PointLightTag>(entity);
-        }
-        if (dynamic_cast<SpotLight*>(object)) {
-            m_ecsRegistry.AddComponent<SpotLightTag>(entity);
-        }
-        if (dynamic_cast<Camera*>(object)) {
-            m_ecsRegistry.AddComponent<CameraTag>(entity);
-        }
     }
 
     void ApplicationCore::UnregisterObjectInEcs(SObject* object)
@@ -66,7 +77,7 @@ namespace SasamiRenderer
     std::vector<PointLight*> ApplicationCore::GetPointLightObjects() const
     {
         std::vector<PointLight*> out;
-        const auto pointLightEntities = m_ecsRegistry.View<PointLightTag, ObjectRefComponent>();
+        const auto pointLightEntities = m_ecsRegistry.ViewPreset(EcsRegistry::EntityPreset::PointLight);
         out.reserve(pointLightEntities.size());
         for (const EntityId entity : pointLightEntities) {
             const auto* objectRef = m_ecsRegistry.GetComponent<ObjectRefComponent>(entity);
@@ -81,7 +92,7 @@ namespace SasamiRenderer
     std::vector<SpotLight*> ApplicationCore::GetSpotLightObjects() const
     {
         std::vector<SpotLight*> out;
-        const auto spotLightEntities = m_ecsRegistry.View<SpotLightTag, ObjectRefComponent>();
+        const auto spotLightEntities = m_ecsRegistry.ViewPreset(EcsRegistry::EntityPreset::SpotLight);
         out.reserve(spotLightEntities.size());
         for (const EntityId entity : spotLightEntities) {
             const auto* objectRef = m_ecsRegistry.GetComponent<ObjectRefComponent>(entity);
@@ -104,7 +115,7 @@ namespace SasamiRenderer
         if (found == m_objectEntityMap.end()) {
             return false;
         }
-        if (!m_ecsRegistry.HasComponent<CameraTag>(found->second)) {
+        if (m_ecsRegistry.GetPreset(found->second) != EcsRegistry::EntityPreset::Camera) {
             return false;
         }
 
@@ -157,7 +168,7 @@ namespace SasamiRenderer
         renderer.ClearRenderObjects();
 
         std::vector<Renderer::RenderProxy> proxies;
-        const auto staticModelEntities = m_ecsRegistry.View<StaticModelTag, ObjectRefComponent>();
+        const auto staticModelEntities = m_ecsRegistry.ViewPreset(EcsRegistry::EntityPreset::StaticModel);
         for (const EntityId entity : staticModelEntities) {
             auto* objectRef = m_ecsRegistry.GetComponent<ObjectRefComponent>(entity);
             if (!objectRef || !objectRef->object) {
@@ -178,12 +189,34 @@ namespace SasamiRenderer
         m_objectsDirty = false;
     }
 
+    void ApplicationCore::SyncSkinnedModelsToRenderer(Renderer& renderer)
+    {
+        std::vector<Renderer::SkinnedRenderProxy> proxies;
+        const auto skinnedModelEntities = m_ecsRegistry.ViewPreset(EcsRegistry::EntityPreset::SkinnedModel);
+        for (const EntityId entity : skinnedModelEntities) {
+            auto* objectRef = m_ecsRegistry.GetComponent<ObjectRefComponent>(entity);
+            if (!objectRef || !objectRef->object) {
+                continue;
+            }
+
+            auto* model = static_cast<SkinnedModel*>(objectRef->object);
+            model->UpdateAnimation(m_deltaTime);
+            auto modelProxies = model->BuildRenderProxies();
+            proxies.reserve(proxies.size() + modelProxies.size());
+            for (auto& proxy : modelProxies) {
+                proxies.push_back(std::move(proxy));
+            }
+        }
+
+        renderer.SubmitSkinnedRenderProxies(std::move(proxies));
+    }
+
     void ApplicationCore::SyncLightObjectsToRenderer(Renderer& renderer) const
     {
         std::vector<Renderer::PointLight> pointLights;
         std::vector<Renderer::SpotLight> spotLights;
-        const auto pointLightEntities = m_ecsRegistry.View<PointLightTag, ObjectRefComponent>();
-        const auto spotLightEntities = m_ecsRegistry.View<SpotLightTag, ObjectRefComponent>();
+        const auto pointLightEntities = m_ecsRegistry.ViewPreset(EcsRegistry::EntityPreset::PointLight);
+        const auto spotLightEntities = m_ecsRegistry.ViewPreset(EcsRegistry::EntityPreset::SpotLight);
         pointLights.reserve(pointLightEntities.size());
         spotLights.reserve(spotLightEntities.size());
 

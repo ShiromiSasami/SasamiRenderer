@@ -5,10 +5,11 @@
 #include "Light/DirectionalLight.h"
 #include "Object/SObject.h"
 #include "Object/StaticModel.h"
+#include "Object/SkinnedModel.h"
 #include "Object/PointLight.h"
 #include "Object/SpotLight.h"
 #include "ECS/EcsRegistry.h"
-#include "Renderer/Core/Renderer.h"
+#include "Renderer/Runtime/Renderer.h"
 #include "Renderer/Scene/RenderCameraProxy.h"
 #include "Renderer/Structures/RendererEnums.h"
 
@@ -25,13 +26,14 @@ namespace SasamiRenderer
 {
     class Camera;
     class IRenderNode;
+    class IRenderPass;
     struct RenderCameraProxy;
 
 	class ApplicationCore
 	{
     public:
         using SkyboxLoadFormat = RendererEnums::SkyboxLoadFormat;
-        using RenderNodeType = RendererEnums::RenderNodeType;
+        using RenderPassType = RendererEnums::RenderPassType;
         using RenderPathMode = RendererEnums::RenderPathMode;
 
         ApplicationCore(UINT width, UINT height, const wchar_t* title, IApplication* game = nullptr);
@@ -44,6 +46,8 @@ namespace SasamiRenderer
         UINT GetHeight() const { return m_height; }
         float GetDeltaTime() const { return m_deltaTime; }
         void RequestQuit() { m_running = false; }
+        void SetGraphicsRuntime(GraphicsRuntime runtime);
+        GraphicsRuntime GetGraphicsRuntime() const;
         bool IsRendererReady() const;
         Renderer& GetRenderer() { return *m_renderer; }
         void RenderFrame();
@@ -148,12 +152,15 @@ namespace SasamiRenderer
         void CycleGBufferDebugView(int delta = 1);
 
         bool LoadSkybox(const std::string& resourcePath, SkyboxLoadFormat format = SkyboxLoadFormat::Auto);
-        std::vector<RenderNodeType> GetRenderNodeSequence() const;
-        void SetRenderNodeSequence(const std::vector<RenderNodeType>& sequence);
-        bool AddRenderPass(const std::shared_ptr<IRenderNode>& renderPass);
-        bool AddRenderPassBefore(std::string_view targetTag, const std::shared_ptr<IRenderNode>& renderPass);
-        bool AddRenderPassAfter(std::string_view targetTag, const std::shared_ptr<IRenderNode>& renderPass);
-        bool ReplaceRenderPass(std::string_view targetTag, const std::shared_ptr<IRenderNode>& renderPass);
+        std::vector<RenderPassType> GetRenderPassSequence() const;
+        void SetRenderPassSequence(const std::vector<RenderPassType>& sequence);
+        bool AddRenderNode(const std::shared_ptr<IRenderNode>& renderNode);
+        void SetRenderNodePreset(const std::shared_ptr<IRenderNode>& renderNode);
+        void UseDefaultRenderNodePreset();
+        bool AddRenderPass(const std::shared_ptr<IRenderPass>& renderPass);
+        bool AddRenderPassBefore(std::string_view targetTag, const std::shared_ptr<IRenderPass>& renderPass);
+        bool AddRenderPassAfter(std::string_view targetTag, const std::shared_ptr<IRenderPass>& renderPass);
+        bool ReplaceRenderPass(std::string_view targetTag, const std::shared_ptr<IRenderPass>& renderPass);
         void ClearRenderPasses();
 
         template<typename TObject, typename... TArgs>
@@ -177,6 +184,10 @@ namespace SasamiRenderer
         {
             return CreateObject<StaticModel>();
         }
+        SkinnedModel* CreateSkinnedModel()
+        {
+            return CreateObject<SkinnedModel>();
+        }
         PointLight* CreatePointLightObject() { return CreateObject<PointLight>(); }
         SpotLight* CreateSpotLightObject() { return CreateObject<SpotLight>(); }
         std::vector<PointLight*> GetPointLightObjects() const;
@@ -197,16 +208,13 @@ namespace SasamiRenderer
         {
             SObject* object = nullptr;
         };
-        struct StaticModelTag {};
-        struct PointLightTag {};
-        struct SpotLightTag {};
-        struct CameraTag {};
 
         bool InitializeRenderer();
         void ShutdownRenderer();
         void RenderFrameInternal(const RenderCameraProxy& cameraProxy);
         bool UpdateMainCameraProxy();
         void SyncModelsToRenderer(Renderer& renderer);
+        void SyncSkinnedModelsToRenderer(Renderer& renderer);
         void SyncLightObjectsToRenderer(Renderer& renderer) const;
         void RegisterObjectInEcs(SObject* object);
         void UnregisterObjectInEcs(SObject* object);
@@ -227,6 +235,7 @@ namespace SasamiRenderer
 
         IApplication* m_game;
         std::unique_ptr<Renderer> m_renderer;
+        GraphicsRuntime m_graphicsRuntime = GetBuildDefaultGraphicsRuntime();
         float m_deltaTime = 0.0f;
         std::vector<std::unique_ptr<SObject>> m_objects;
         EcsRegistry m_ecsRegistry;

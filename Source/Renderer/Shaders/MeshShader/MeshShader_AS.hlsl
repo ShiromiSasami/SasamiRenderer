@@ -92,38 +92,31 @@ void AS_Meshlet(uint dtid : SV_DispatchThreadID)
     payload.model         = g_draw.model;
     payload.inverseModel  = g_draw.inverseModel;
 
-    if (dtid >= g_draw.meshletCount)
+    bool visible = false;
+    if (dtid < g_draw.meshletCount)
     {
-        // Out of range - dispatch nothing
-        DispatchMesh(0u, 1u, 1u, payload);
-        return;
+        uint globalMeshletIdx = g_draw.meshletOffset + dtid;
+        MeshletDesc desc = g_meshletDescs[globalMeshletIdx];
+
+        float3 worldCenter = mul(float4(desc.boundsCenter, 1.0f), g_draw.model).xyz;
+
+        float sx = length(g_draw.model[0].xyz);
+        float sy = length(g_draw.model[1].xyz);
+        float sz = length(g_draw.model[2].xyz);
+        float worldRadius = desc.boundsRadius * max(max(sx, sy), sz);
+
+        // Distance-based LOD mirrors Tessellation_HS.hlsl thresholds.
+        float dist = length(worldCenter - g_cameraPos);
+        uint lod = 0u;
+        if      (dist >= 15.0f) lod = 2u;
+        else if (dist >=  5.0f) lod = 1u;
+
+        payload.meshletIndex = globalMeshletIdx;
+        payload.lodLevel     = lod;
+
+        visible = (lod < 2u) && IsSphereVisible(worldCenter, worldRadius, g_viewProj);
     }
 
-    uint globalMeshletIdx = g_draw.meshletOffset + dtid;
-    MeshletDesc desc = g_meshletDescs[globalMeshletIdx];
-
-    // Transform bounding sphere center to world space
-    float3 worldCenter = mul(float4(desc.boundsCenter, 1.0f), g_draw.model).xyz;
-
-    // Conservative radius scaling by max scale component of model matrix
-    float sx = length(g_draw.model[0].xyz);
-    float sy = length(g_draw.model[1].xyz);
-    float sz = length(g_draw.model[2].xyz);
-    float worldRadius = desc.boundsRadius * max(max(sx, sy), sz);
-
-    // --- Distance-based LOD (mirrors Tessellation_HS.hlsl thresholds exactly) ---
-    //   LOD 0 (< 5 m)   : MS subdivides each triangle ×4 (matches TessFactor=8)
-    //   LOD 1 (5–15 m)  : MS outputs triangles as-is    (matches TessFactor=2)
-    //   LOD 2 (≥ 15 m)  : cull the whole meshlet         (matches TessFactor=0)
-    float dist = length(worldCenter - g_cameraPos);
-    uint lod = 0u;
-    if      (dist >= 15.0f) lod = 2u;
-    else if (dist >=  5.0f) lod = 1u;
-
-    payload.meshletIndex = globalMeshletIdx;
-    payload.lodLevel     = lod;
-
-    // LOD 2 → cull regardless of frustum (same as HS returning TessFactor=0)
-    bool visible = (lod < 2u) && IsSphereVisible(worldCenter, worldRadius, g_viewProj);
+    // D3D12 amplification shaders must call DispatchMesh exactly once on all paths.
     DispatchMesh(visible ? 1u : 0u, 1u, 1u, payload);
 }

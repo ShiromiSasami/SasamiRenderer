@@ -68,15 +68,17 @@ struct PSInput
 };
 
 // Meshlet size = 16 triangles (kMaxTrianglesPerMeshlet in MeshletBuffer.h).
-// LOD 0: each triangle → 4 sub-triangles (midpoint subdivision) → 16×4 = 64 tris, 16×12 = 192 verts
-// LOD 1: each triangle → 1 triangle (output as-is)              → 16 tris,  16×3  =  48 verts
+// LOD 0: each triangle becomes 4 sub-triangles (midpoint subdivision):
+//        16 * 4 = 64 tris, 16 * 12 = 192 verts.
+// LOD 1: each triangle is output as-is:
+//        16 tris, 16 * 3 = 48 verts.
 // LOD 2: meshlet is culled entirely by AS (MS never invoked)
-static const uint kMaxVerts = 192u; // 16 tris × 12 verts (LOD-0 subdivided, no vertex sharing)
-static const uint kMaxPrims =  64u; // 16 tris × 4 sub-tris
+static const uint kMaxVerts = 192u; // 16 tris * 12 verts (LOD-0 subdivided, no vertex sharing)
+static const uint kMaxPrims =  64u; // 16 tris * 4 sub-tris
 
 // Per-primitive attribute: carries the exact meshlet index to the PS.
 // This allows the debug PS to color each meshlet independently of LOD level
-// (SV_PrimitiveID / N breaks at LOD 0 because 64 output prims ≠ 16 input tris).
+// (SV_PrimitiveID / N breaks at LOD 0 because 64 output prims != 16 input tris).
 struct MeshletPrimAttr
 {
     uint meshletIdx : MESHLET_INDEX;
@@ -126,12 +128,15 @@ void MS_Meshlet(
     MeshletDesc desc   = g_meshletDescs[inPayload.meshletIndex];
     uint inputTriCount = min(desc.indexCount, 16u);
     uint lod           = inPayload.lodLevel; // 0 or 1 (LOD2 is culled by AS)
+    bool subdivide     = (lod == 0u);
 
-    if (lod == 0u)
+    uint outputVertCount = subdivide ? (inputTriCount * 12u) : (inputTriCount * 3u);
+    uint outputPrimCount = subdivide ? (inputTriCount * 4u)  : inputTriCount;
+    SetMeshOutputCounts(outputVertCount, outputPrimCount);
+
+    if (subdivide)
     {
-        // LOD 0 — midpoint subdivision: 1 input tri → 4 output tris, 12 verts (no sharing)
-        SetMeshOutputCounts(inputTriCount * 12u, inputTriCount * 4u);
-
+        // LOD 0: midpoint subdivision, 1 input tri to 4 output tris, 12 verts (no sharing).
         if (gtid < inputTriCount)
         {
             uint baseIdx = desc.indexOffset + gtid * 3u;
@@ -170,9 +175,7 @@ void MS_Meshlet(
     }
     else
     {
-        // LOD 1 — output triangles as-is (matches HS TessFactor=2 path)
-        SetMeshOutputCounts(inputTriCount * 3u, inputTriCount);
-
+        // LOD 1: output triangles as-is (matches HS TessFactor=2 path).
         if (gtid < inputTriCount)
         {
             uint baseIdx = desc.indexOffset + gtid * 3u;

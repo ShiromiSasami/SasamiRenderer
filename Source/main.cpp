@@ -8,7 +8,7 @@
 
 using namespace SasamiRenderer;
 
-int WINAPI wmain(HINSTANCE hInstance, HINSTANCE, PWSTR, int) {
+int wmain(int, wchar_t**) {
     try {
         ImGui_ImplWin32_EnableDpiAwareness();
         ApplicationCore app(1280, 720, L"SasamiRenderer App");

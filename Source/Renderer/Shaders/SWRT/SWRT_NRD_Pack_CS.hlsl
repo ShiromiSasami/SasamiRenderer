@@ -11,8 +11,8 @@
 //   u2  : g_nrdNormalRoughness (RGBA8 – OUT: NRD packed normal+roughness)
 //
 
-#include "NRDConfig.hlsli"
-#include "NRD.hlsli"
+#include "Denoising/NRD/NRDConfig.hlsli"
+#include "Denoising/NRD/NRD.hlsli"
 
 Texture2D<float4>    g_shadedColor        : register(t6);
 Texture2D<float4>    g_gbuffer            : register(t7);

@@ -9,7 +9,7 @@
 
 #include "Foundation/Tools/DebugOutput.h"
 #include "Foundation/Math/MathUtil.h"
-#include "Renderer/Core/RenderTargetPool.h"
+#include "Renderer/Resources/RenderTargetPool.h"
 #include "Renderer/RayTracing/GpuSoftwareRayTracer.h"
 #include "Renderer/RayTracing/DxrRayTracer.h"
 #include "Renderer/Scene/Skybox.h"
@@ -185,8 +185,8 @@ namespace SasamiRenderer
     uint64_t SWRTExecutor::ComputeReflectionLightingHash(const RenderSettings& settings) const
     {
         uint64_t hash = 0ull;
-        const auto dl = m_lightSystem->GetDirectionalLightSettings();
-        HashBytes(hash, &dl, sizeof(dl));
+        const auto dirLight = m_lightSystem->GetDirectionalLightSettings();
+        HashBytes(hash, &dirLight, sizeof(dirLight));
 
         const auto& pointLights = m_lightSystem->GetPointLights();
         const uint64_t pointCount = static_cast<uint64_t>(pointLights.size());
@@ -599,7 +599,7 @@ namespace SasamiRenderer
 
         // No WaitForGPU needed: descriptor slots 14-133 are double-buffered by frame index
         // (even frames use slots 14-73, odd frames use slots 74-133).
-        // CPU writes frame N's slot while GPU reads frame N-1's slot — no race condition.
+        // CPU writes frame N's slot while GPU reads frame N-1's slot  Eno race condition.
 
         GpuSoftwareRayTracer::ReflectionTextureDesc reflectionDesc{};
         reflectionDesc.width              = reflectionWidth;
@@ -646,17 +646,17 @@ namespace SasamiRenderer
             const auto bvhAddrs = m_gpuSoftwareRayTracer->GetBvhGpuAddresses();
             if (bvhAddrs.valid && m_probeGrid->IsInitialized())
             {
-                const auto dl = m_lightSystem->GetDirectionalLightSettings();
+                const auto dirLight = m_lightSystem->GetDirectionalLightSettings();
                 float fwd[3];
-                Math::DirectionFromYawPitch(dl.yaw, dl.pitch, fwd);
+                Math::DirectionFromYawPitch(dirLight.yaw, dirLight.pitch, fwd);
                 IrradianceProbeGrid::UpdateDesc giDesc{};
                 giDesc.dirLightDir[0]    = -fwd[0];
                 giDesc.dirLightDir[1]    = -fwd[1];
                 giDesc.dirLightDir[2]    = -fwd[2];
-                giDesc.dirLightIntensity = dl.intensity;
-                giDesc.dirLightColor[0]  = dl.color[0];
-                giDesc.dirLightColor[1]  = dl.color[1];
-                giDesc.dirLightColor[2]  = dl.color[2];
+                giDesc.dirLightIntensity = dirLight.intensity;
+                giDesc.dirLightColor[0]  = dirLight.color[0];
+                giDesc.dirLightColor[1]  = dirLight.color[1];
+                giDesc.dirLightColor[2]  = dirLight.color[2];
                 giDesc.ambientColor[0]   = 0.1f;
                 giDesc.ambientColor[1]   = 0.1f;
                 giDesc.ambientColor[2]   = 0.1f;

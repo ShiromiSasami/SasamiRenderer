@@ -1,5 +1,5 @@
 #define PSMain CookTorranceGGX_EvaluateForOIT
-#include "../CookTorranceGGX_PS.hlsl"
+#include "../PBR/CookTorranceGGX_PS.hlsl"
 #undef PSMain
 
 struct OITOutput

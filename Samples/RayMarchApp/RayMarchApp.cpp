@@ -2,7 +2,8 @@
 #include "ApplicationCore.h"
 #include "ApplicationEntryPoint.h"
 #include "Input/InputSystem.h"
-#include "Renderer/Passes/PostProcessRenderNode.h"
+#include "Renderer/Passes/Core/RenderNode.h"
+#include "Renderer/Passes/PostProcess/PostProcessRenderPass.h"
 #include "UI/ImGuiCoordinator.h"
 #include "Foundation/Tools/DebugOutput.h"
 #include "Foundation/Math/MathUtil.h"
@@ -36,16 +37,14 @@ namespace SasamiRenderer
         m_camera->SetClipPlanes(0.0005f, 500.0f);
         m_camera->SetCameraMode(Camera::CameraMode::RayMarch);
 
-        // Replace the default render pass sequence with RayMarch and the final
+        // Replace the default render node preset with RayMarch and the final
         // SceneColor -> BackBuffer post process pass.
-        m_renderNode = std::make_shared<RayMarchRenderNode>();
-        app.ClearRenderPasses();
-        if (!app.AddRenderPass(m_renderNode) ||
-            !app.AddRenderPass(std::make_shared<PostProcessRenderNode>())) {
-            DebugLog("RayMarchApp: render pass setup failed.\n");
-            app.RequestQuit();
-            return;
-        }
+        m_renderPass = std::make_shared<RayMarchRenderPass>();
+        std::vector<std::shared_ptr<IRenderPass>> rayMarchPasses;
+        rayMarchPasses.push_back(m_renderPass);
+        rayMarchPasses.push_back(std::make_shared<PostProcessRenderPass>());
+        app.SetRenderNodePreset(std::make_shared<RenderPassSequenceNode>("RayMarchRenderNode",
+                                                                         std::move(rayMarchPasses)));
         // Set up directional light (sun)
         DirectionalLight sun{};
         sun.yaw       = 45.0f;
@@ -100,23 +99,23 @@ namespace SasamiRenderer
 
             // ── Cloud settings ────────────────────────────────────────────
             ImGui::Separator();
-            if (m_renderNode) {
-                float cloudCover = m_renderNode->GetCloudCover();
+            if (m_renderPass) {
+                float cloudCover = m_renderPass->GetCloudCover();
                 if (ImGui::SliderFloat("Cloud Cover", &cloudCover, 0.0f, 1.0f)) {
-                    m_renderNode->SetCloudCover(cloudCover);
+                    m_renderPass->SetCloudCover(cloudCover);
                 }
-                float cloudDensity = m_renderNode->GetCloudDensity();
+                float cloudDensity = m_renderPass->GetCloudDensity();
                 if (ImGui::SliderFloat("Cloud Density", &cloudDensity, 0.5f, 8.0f)) {
-                    m_renderNode->SetCloudDensity(cloudDensity);
+                    m_renderPass->SetCloudDensity(cloudDensity);
                 }
             }
 
             // ── Distance Heatmap Debug ────────────────────────────────────
             ImGui::Separator();
-            if (m_renderNode) {
-                bool heatmap = (m_renderNode->GetDebugMode() > 0.5f);
+            if (m_renderPass) {
+                bool heatmap = (m_renderPass->GetDebugMode() > 0.5f);
                 if (ImGui::Checkbox("Distance Heatmap", &heatmap))
-                    m_renderNode->SetDebugMode(heatmap ? 1.0f : 0.0f);
+                    m_renderPass->SetDebugMode(heatmap ? 1.0f : 0.0f);
                 if (heatmap)
                     ImGui::TextDisabled("blue=near  green=mid  red=far(300m)  white=sky");
             }
@@ -232,7 +231,7 @@ namespace SasamiRenderer
     {
         app.ClearObjects();
         m_camera     = nullptr;
-        m_renderNode = nullptr;
+        m_renderPass = nullptr;
     }
 
     void RayMarchApp::OnResize(ApplicationCore& app, UINT width, UINT height)

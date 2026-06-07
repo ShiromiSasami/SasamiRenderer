@@ -1,5 +1,5 @@
 #pragma once
-#include "Renderer/Core/RhiDevice.h"
+#include "Renderer/RHI/RhiDevice.h"
 #include "Renderer/Scene/MeshBuffer.h"
 #include "Renderer/Scene/SkinnedMeshBuffer.h"
 #include "Renderer/Structures/Texture.h"

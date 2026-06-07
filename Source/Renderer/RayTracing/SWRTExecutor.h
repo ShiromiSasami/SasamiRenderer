@@ -1,7 +1,7 @@
 #pragma once
-#include "Renderer/Core/GraphicsDevice.h"
-#include "Renderer/Core/RenderSettings.h"
-#include "Renderer/Core/RayTracingStats.h"
+#include "Renderer/RHI/GraphicsDevice.h"
+#include "Renderer/Config/RenderSettings.h"
+#include "Renderer/Config/RayTracingStats.h"
 #include "Renderer/RayTracing/RayTracingScene.h"
 #include "Renderer/Scene/LightSystem.h"
 #include <cstdint>

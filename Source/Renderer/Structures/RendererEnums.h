@@ -44,7 +44,6 @@ namespace SasamiRenderer
         {
             Raster = 0,
             HardwareRayTracing = 1,
-            SdfFluid = 2,
         };
 
         enum class RayTracingPerformancePreset
@@ -87,7 +86,7 @@ namespace SasamiRenderer
             CubemapFaces = 3,
         };
 
-        enum class RenderNodeType
+        enum class RenderPassType
         {
             Shadow = 0,
             Opaque = 1,
@@ -99,9 +98,12 @@ namespace SasamiRenderer
             RuntimeAO = 7,
             SSAO = RuntimeAO, // backward compatibility alias
             ProceduralSky = 8,
-            SdfFluid = 9,
-            TransparentBackfaceDistance = 10,
-            TransparentComposite = 11,
+            TransparentBackfaceDistance = 9,
+            TransparentComposite = 10,
+            RuntimeAOBlur = 11,
+            TransparentSceneColorCopy = 12,
+            SoftwareReflection = 13,
+            SoftwareReflectionComposite = 14,
         };
     }
 }

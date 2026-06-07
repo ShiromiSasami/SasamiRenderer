@@ -28,6 +28,8 @@ namespace SasamiRenderer
             m_localPoses[i].r[3] = 1.0f;
             m_localPoses[i].s[0] = m_localPoses[i].s[1] = m_localPoses[i].s[2] = 1.0f;
         }
+
+        ComputeGlobalMatrices();
     }
 
     void AnimationController::AddAnimation(SkeletonAnimation anim)

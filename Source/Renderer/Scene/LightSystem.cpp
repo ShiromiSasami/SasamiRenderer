@@ -7,7 +7,7 @@
 //     → EnsureLightBuffers() でアップロードバッファを確保・拡張
 //     → UpdateFrameLighting() でライトデータを書き込み
 //     → ExecuteShadowPass() でシャドウマップを描画
-//     → LightingRenderNode が SRV を参照してライティングを実行
+//     → LightingRenderPass が SRV を参照してライティングを実行
 // =============================================================================
 
 #include "Renderer/Scene/LightSystem.h"

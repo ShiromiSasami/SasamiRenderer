@@ -26,10 +26,10 @@ namespace SasamiRenderer
         float nearClip = 0.0005f;
         float farClip = 500.0f;
         RenderCameraMode cameraMode = RenderCameraMode::Pbr;
-        float rayMarchCameraRight[3] = { 1.0f, 0.0f, 0.0f };
-        float rayMarchCameraUp[3] = { 0.0f, 1.0f, 0.0f };
-        float rayMarchCameraForward[3] = { 0.0f, 0.0f, 1.0f };
-        float rayMarchTanHalfFovY = 0.577350269f;
-        float rayMarchAspectRatio = 1.0f;
+        float cameraRight[3] = { 1.0f, 0.0f, 0.0f };
+        float cameraUp[3] = { 0.0f, 1.0f, 0.0f };
+        float cameraForward[3] = { 0.0f, 0.0f, 1.0f };
+        float tanHalfFovY = 0.577350269f;
+        float aspectRatio = 1.0f;
     };
 }

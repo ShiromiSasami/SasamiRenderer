@@ -33,37 +33,41 @@ namespace SasamiRenderer
         struct RenderPassBuilderUiEntry
         {
             const char* label = "";
-            RendererEnums::RenderNodeType type = RendererEnums::RenderNodeType::Opaque;
+            RendererEnums::RenderPassType type = RendererEnums::RenderPassType::Opaque;
         };
 
-        constexpr std::array<RenderPassBuilderUiEntry, 11> kRenderPassBuilderUiEntries = {{
-            { "Shadow", RendererEnums::RenderNodeType::Shadow },
-            { "Opaque", RendererEnums::RenderNodeType::Opaque },
-            { "Runtime AO", RendererEnums::RenderNodeType::RuntimeAO },
-            { "Lighting", RendererEnums::RenderNodeType::Lighting },
-            { "Skybox", RendererEnums::RenderNodeType::Skybox },
-            { "Procedural Sky", RendererEnums::RenderNodeType::ProceduralSky },
-            { "Transparent Backface Distance", RendererEnums::RenderNodeType::TransparentBackfaceDistance },
-            { "Transparent", RendererEnums::RenderNodeType::Transparent },
-            { "Transparent Lighting", RendererEnums::RenderNodeType::TransparentLighting },
-            { "Transparent Composite", RendererEnums::RenderNodeType::TransparentComposite },
-            { "Post Process", RendererEnums::RenderNodeType::PostProcess },
+        constexpr std::array<RenderPassBuilderUiEntry, 15> kRenderPassBuilderUiEntries = {{
+            { "Shadow", RendererEnums::RenderPassType::Shadow },
+            { "Opaque", RendererEnums::RenderPassType::Opaque },
+            { "Runtime AO", RendererEnums::RenderPassType::RuntimeAO },
+            { "Runtime AO Blur", RendererEnums::RenderPassType::RuntimeAOBlur },
+            { "Lighting", RendererEnums::RenderPassType::Lighting },
+            { "Software Reflection", RendererEnums::RenderPassType::SoftwareReflection },
+            { "Software Reflection Composite", RendererEnums::RenderPassType::SoftwareReflectionComposite },
+            { "Skybox", RendererEnums::RenderPassType::Skybox },
+            { "Procedural Sky", RendererEnums::RenderPassType::ProceduralSky },
+            { "Transparent Backface Distance", RendererEnums::RenderPassType::TransparentBackfaceDistance },
+            { "Transparent Scene Color Copy", RendererEnums::RenderPassType::TransparentSceneColorCopy },
+            { "Transparent", RendererEnums::RenderPassType::Transparent },
+            { "Transparent Lighting", RendererEnums::RenderPassType::TransparentLighting },
+            { "Transparent Composite", RendererEnums::RenderPassType::TransparentComposite },
+            { "Post Process", RendererEnums::RenderPassType::PostProcess },
         }};
 
-        bool HasRenderPass(const std::vector<ApplicationCore::RenderNodeType>& sequence,
-                           RendererEnums::RenderNodeType type)
+        bool HasRenderPass(const std::vector<ApplicationCore::RenderPassType>& sequence,
+                           RendererEnums::RenderPassType type)
         {
             return std::find(sequence.begin(), sequence.end(), type) != sequence.end();
         }
 
         void DrawRenderPassBuilderControls(ApplicationCore& app)
         {
-            if (!ImGui::CollapsingHeader("Render Pass Builder", ImGuiTreeNodeFlags_DefaultOpen)) {
+            if (!ImGui::CollapsingHeader("Render Node Preset", ImGuiTreeNodeFlags_DefaultOpen)) {
                 return;
             }
 
-            std::vector<ApplicationCore::RenderNodeType> currentSequence = app.GetRenderNodeSequence();
-            std::vector<ApplicationCore::RenderNodeType> nextSequence;
+            std::vector<ApplicationCore::RenderPassType> currentSequence = app.GetRenderPassSequence();
+            std::vector<ApplicationCore::RenderPassType> nextSequence;
             nextSequence.reserve(kRenderPassBuilderUiEntries.size());
             bool changed = false;
 
@@ -78,23 +82,12 @@ namespace SasamiRenderer
             }
 
             if (ImGui::Button("Reset Passes")) {
-                nextSequence = {
-                    RendererEnums::RenderNodeType::Shadow,
-                    RendererEnums::RenderNodeType::Opaque,
-                    RendererEnums::RenderNodeType::RuntimeAO,
-                    RendererEnums::RenderNodeType::Lighting,
-                    RendererEnums::RenderNodeType::Skybox,
-                    RendererEnums::RenderNodeType::TransparentBackfaceDistance,
-                    RendererEnums::RenderNodeType::Transparent,
-                    RendererEnums::RenderNodeType::TransparentLighting,
-                    RendererEnums::RenderNodeType::TransparentComposite,
-                    RendererEnums::RenderNodeType::PostProcess,
-                };
-                changed = true;
+                app.UseDefaultRenderNodePreset();
+                return;
             }
 
             if (changed && !nextSequence.empty()) {
-                app.SetRenderNodeSequence(nextSequence);
+                app.SetRenderPassSequence(nextSequence);
             }
         }
 
@@ -206,21 +199,15 @@ namespace SasamiRenderer
         m_camera->SetYawPitch(0.0f, 0.12f);
         m_camera->SetMoveSpeed(4.0f);
 
-        app.SetRenderNodeSequence({
-            ApplicationCore::RenderNodeType::Shadow,
-            ApplicationCore::RenderNodeType::Opaque,
-            ApplicationCore::RenderNodeType::RuntimeAO,
-            ApplicationCore::RenderNodeType::Lighting,
-            ApplicationCore::RenderNodeType::Skybox,
-            ApplicationCore::RenderNodeType::TransparentBackfaceDistance,
-            ApplicationCore::RenderNodeType::Transparent,
-            ApplicationCore::RenderNodeType::TransparentLighting,
-            ApplicationCore::RenderNodeType::TransparentComposite,
-            ApplicationCore::RenderNodeType::PostProcess,
-        });
+        const bool useFullDx12RenderGraph = (app.GetGraphicsRuntime() == GraphicsRuntime::DirectX12);
+        if (useFullDx12RenderGraph) {
+            app.UseDefaultRenderNodePreset();
 
-        if (!app.LoadSkybox(kSkyboxPanoramaPath, ApplicationCore::SkyboxLoadFormat::HdrEquirect)) {
-            DebugLog("Skybox load failed: invalid path for selected format.\n");
+            if (!app.LoadSkybox(kSkyboxPanoramaPath, ApplicationCore::SkyboxLoadFormat::HdrEquirect)) {
+                DebugLog("Skybox load failed: invalid path for selected format.\n");
+            }
+        } else {
+            DebugLog("PBRApp: non-DX12 backend uses native mesh frame path; DX12 render graph skybox/shadow/post passes are skipped.\n");
         }
 
         m_sphereMaterial = MakeMaterial(0.98f, 0.84f, 0.32f, 0.05f, 1.0f);
@@ -430,17 +417,17 @@ namespace SasamiRenderer
             ImGui::Text("Yaw:   %.2f deg  (%.4f rad)", yawDeg,   m_camera->Yaw());
             ImGui::Text("Pitch: %.2f deg  (%.4f rad)", pitchDeg, m_camera->Pitch());
             ImGui::Text("Forward: (%.3f, %.3f, %.3f)",
-                        proxy.rayMarchCameraForward[0],
-                        proxy.rayMarchCameraForward[1],
-                        proxy.rayMarchCameraForward[2]);
+                        proxy.cameraForward[0],
+                        proxy.cameraForward[1],
+                        proxy.cameraForward[2]);
             ImGui::Text("Right:   (%.3f, %.3f, %.3f)",
-                        proxy.rayMarchCameraRight[0],
-                        proxy.rayMarchCameraRight[1],
-                        proxy.rayMarchCameraRight[2]);
+                        proxy.cameraRight[0],
+                        proxy.cameraRight[1],
+                        proxy.cameraRight[2]);
             ImGui::Text("Up:      (%.3f, %.3f, %.3f)",
-                        proxy.rayMarchCameraUp[0],
-                        proxy.rayMarchCameraUp[1],
-                        proxy.rayMarchCameraUp[2]);
+                        proxy.cameraUp[0],
+                        proxy.cameraUp[1],
+                        proxy.cameraUp[2]);
             }
             ImGui::EndTabItem();
             }
@@ -544,15 +531,15 @@ namespace SasamiRenderer
                 const bool lightOk = w2s(lx, ly, lz, lightScreen);
                 const bool arrowOk = w2s(ax, ay, az, arrowTip);
 
-                ImDrawList* dl = ImGui::GetForegroundDrawList();
+                ImDrawList* drawList = ImGui::GetForegroundDrawList();
                 constexpr ImU32 kYellow   = IM_COL32(255, 220, 50, 230);
                 constexpr ImU32 kYellowBg = IM_COL32(255, 180, 0,  160);
                 constexpr float kRadius   = 13.f;
 
                 if (lightOk) {
                     // Filled circle (sun body)
-                    dl->AddCircleFilled(lightScreen, kRadius, kYellowBg, 20);
-                    dl->AddCircle(lightScreen, kRadius, kYellow, 20, 2.f);
+                    drawList->AddCircleFilled(lightScreen, kRadius, kYellowBg, 20);
+                    drawList->AddCircle(lightScreen, kRadius, kYellow, 20, 2.f);
 
                     // 8 sun rays
                     for (int r = 0; r < 8; ++r) {
@@ -562,17 +549,17 @@ namespace SasamiRenderer
                                                lightScreen.y + sn * (kRadius + 4.f) };
                         const ImVec2 outer = { lightScreen.x + cs * (kRadius + 10.f),
                                                lightScreen.y + sn * (kRadius + 10.f) };
-                        dl->AddLine(inner, outer, kYellow, 2.f);
+                        drawList->AddLine(inner, outer, kYellow, 2.f);
                     }
 
                     // Label
-                    dl->AddText({ lightScreen.x + kRadius + 4.f, lightScreen.y - 7.f },
-                                kYellow, "Light");
+                    drawList->AddText({ lightScreen.x + kRadius + 4.f, lightScreen.y - 7.f },
+                                      kYellow, "Light");
                 }
 
                 // Arrow from sun toward scene (showing light direction)
                 if (lightOk && arrowOk) {
-                    dl->AddLine(lightScreen, arrowTip, kYellow, 2.5f);
+                    drawList->AddLine(lightScreen, arrowTip, kYellow, 2.5f);
 
                     // Arrowhead triangle
                     float dx = arrowTip.x - lightScreen.x;
@@ -584,7 +571,7 @@ namespace SasamiRenderer
                                                arrowTip.y - dy*10.f - dx*5.f };
                         const ImVec2 right2 = { arrowTip.x - dx*10.f - dy*5.f,
                                                 arrowTip.y - dy*10.f + dx*5.f };
-                        dl->AddTriangleFilled(arrowTip, left, right2, kYellow);
+                        drawList->AddTriangleFilled(arrowTip, left, right2, kYellow);
                     }
                 }
             }
@@ -828,10 +815,6 @@ namespace SasamiRenderer
 
             if (ImGui::BeginTabItem("Rendering")) {
             int renderPathMode = app.GetRenderPathModeIndex();
-            if (renderPathMode == static_cast<int>(RendererEnums::RenderPathMode::SdfFluid)) {
-                renderPathMode = static_cast<int>(RendererEnums::RenderPathMode::Raster);
-                app.SetRenderPathModeIndex(renderPathMode);
-            }
             if (ImGui::Combo("Render Type", &renderPathMode, "Raster\0Hardware RT\0")) {
                 app.SetRenderPathModeIndex(renderPathMode);
             }
@@ -1136,37 +1119,72 @@ namespace SasamiRenderer
                 ImGui::Text("FPS: --");
             }
 
+            ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem("GI")) {
+            auto& renderer = app.GetRenderer();
+            auto& grid     = renderer.GetProbeGrid();
+
+            bool giEnabled = renderer.GetGIEnabled();
+            if (ImGui::Checkbox("Enable GI", &giEnabled))
+                renderer.SetGIEnabled(giEnabled);
+
             ImGui::Separator();
+            ImGui::Text("Bake Status");
+
+            if (!grid.IsInitialized()) {
+                ImGui::TextDisabled("(GI not initialized — load a scene first)");
+            } else if (renderer.IsGIBaking()) {
+                const float p = renderer.GetGIBakeProgress();
+                ImGui::TextColored({1.f, 1.f, 0.f, 1.f}, "Baking GI...  %.0f%%", p * 100.f);
+                ImGui::ProgressBar(p, {-1.f, 0.f});
+                if (ImGui::Button("Cancel Bake"))
+                    renderer.CancelGIBake();
+            } else if (!renderer.IsGIBaked()) {
+                ImGui::TextColored({1.f, 0.5f, 0.f, 1.f}, "No GI data.  Press Bake to generate.");
+                if (ImGui::Button("Bake GI"))
+                    renderer.RequestGIBake();
+            } else {
+                ImGui::TextColored({0.4f, 1.f, 0.4f, 1.f}, "GI data ready");
+                ImGui::ProgressBar(renderer.GetGIBakeProgress(), {-1.f, 0.f});
+                if (ImGui::Button("Rebuild GI"))
+                    renderer.ResetAndRebakeGI();
+                ImGui::SameLine();
+                if (ImGui::Button("Update (continue)"))
+                    renderer.RequestGIBake();
+            }
+
+            ImGui::Separator();
+            ImGui::Text("Settings");
+            float intensity = renderer.GetGIIntensity();
+            if (ImGui::SliderFloat("GI Intensity", &intensity, 0.f, 5.f))
+                renderer.SetGIIntensity(intensity);
+            float ema = renderer.GetGIEmaAlpha();
+            if (ImGui::SliderFloat("EMA Alpha", &ema, 0.01f, 1.f))
+                renderer.SetGIEmaAlpha(ema);
+
+            ImGui::Separator();
+            ImGui::Text("Probe Grid Debug");
             bool probeDebug = app.GetDebugProbeGridEnabled();
-            if (ImGui::Checkbox("Show Probe Grid", &probeDebug)) {
+            if (ImGui::Checkbox("Show Probe Spheres", &probeDebug))
                 app.SetDebugProbeGridEnabled(probeDebug);
-            }
-            ImGui::SameLine();
-            ImGui::TextDisabled("(?)");
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Draw irradiance probe spheres at each grid position.\nSphere color shows the SH-encoded irradiance for that direction.");
-            }
             if (probeDebug) {
                 int probeGridPreset = m_probeGridPreset;
-                if (ImGui::Combo("Probe Grid Preset", &probeGridPreset,
-                                 "Interior\0Wide\0Very Wide\0")) {
+                if (ImGui::Combo("Grid Preset", &probeGridPreset, "Interior\0Wide\0Very Wide\0")) {
                     m_probeGridPreset = probeGridPreset;
                     ApplyProbeGridPreset(app, m_probeGridPreset);
                 }
                 float probeRadius = app.GetDebugProbeRadius();
-                if (ImGui::SliderFloat("Probe Radius", &probeRadius, 0.05f, 2.0f)) {
+                if (ImGui::SliderFloat("Probe Radius", &probeRadius, 0.05f, 2.f))
                     app.SetDebugProbeRadius(probeRadius);
-                }
-                const auto& grid = app.GetRenderer().GetProbeGrid();
-                ImGui::TextDisabled("Grid: %ux%ux%u  Total: %u probes",
-                                    grid.GetCountX(), grid.GetCountY(), grid.GetCountZ(),
-                                    grid.GetTotalProbeCount());
-                ImGui::TextDisabled("Origin: (%.1f, %.1f, %.1f)  Spacing: %.1fm",
-                                    grid.GetOriginX(), grid.GetOriginY(), grid.GetOriginZ(),
-                                    grid.GetSpacingX());
-                ImGui::TextDisabled("Color: SH irradiance  (XYZ pos when SH=0)");
-                ImGui::TextDisabled("Note: SH baked only in SWRT mode.");
             }
+            ImGui::TextDisabled("Grid: %ux%ux%u  Total: %u probes",
+                                grid.GetCountX(), grid.GetCountY(), grid.GetCountZ(),
+                                grid.GetTotalProbeCount());
+            ImGui::TextDisabled("Origin: (%.1f, %.1f, %.1f)  Spacing: %.1fm",
+                                grid.GetOriginX(), grid.GetOriginY(), grid.GetOriginZ(),
+                                grid.GetSpacingX());
             ImGui::EndTabItem();
             }
 

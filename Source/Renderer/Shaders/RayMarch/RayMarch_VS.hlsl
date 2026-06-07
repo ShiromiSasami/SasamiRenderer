@@ -1,6 +1,5 @@
 // RayMarch_VS.hlsl
 // Fullscreen triangle from SV_VertexID — no vertex buffer, no input layout.
-// Identical pattern to SdfFluid_VS.hlsl.
 
 struct VSOut
 {

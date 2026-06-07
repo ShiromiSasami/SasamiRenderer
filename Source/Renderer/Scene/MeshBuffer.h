@@ -1,8 +1,8 @@
 #pragma once
 #include <vector>
 
-#include "Renderer/Core/GraphicsDevice.h"
-#include "Renderer/Core/RhiDevice.h"
+#include "Renderer/RHI/GraphicsDevice.h"
+#include "Renderer/RHI/RhiDevice.h"
 #include "Renderer/Structures/Mesh.h"
 
 namespace SasamiRenderer

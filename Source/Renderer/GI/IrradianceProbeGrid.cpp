@@ -556,9 +556,32 @@ namespace SasamiRenderer
         cl->ResourceBarrier(1, &barToSRV);
 
         // Advance round-robin index
-        m_nextProbeIdx += probesThisFrame;
+        m_nextProbeIdx           += probesThisFrame;
+        m_totalProbesDispatched  += probesThisFrame;
 
         return true;
+    }
+
+    float IrradianceProbeGrid::GetBakeProgress() const
+    {
+        const uint32_t total = GetTotalProbeCount();
+        if (total == 0) return 0.0f;
+        return std::min(1.0f, static_cast<float>(m_totalProbesDispatched) /
+                              static_cast<float>(total));
+    }
+
+    void IrradianceProbeGrid::ResetBakeState()
+    {
+        m_nextProbeIdx          = 0u;
+        m_totalProbesDispatched = 0u;
+    }
+
+    bool IrradianceProbeGrid::ReallocAndClearProbeBuffer(IRHIDevice& device)
+    {
+        // Force a fresh zero-initialized allocation by invalidating the current capacity.
+        m_probeBufferCapacity = 0u;
+        ResetBakeState();
+        return m_initialized ? AllocateProbeBuffer(device) : true;
     }
 
 } // namespace SasamiRenderer

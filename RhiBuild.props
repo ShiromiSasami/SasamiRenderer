@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Label="RHI">
+    <BaseConfiguration>$([System.String]::Copy('$(Configuration)').Replace('_Vulkan','').Replace('_DX11','').Replace('_OpenGL',''))</BaseConfiguration>
+    <EnableVulkanBackend    Condition="'$(EnableVulkanBackend)'==''    and $(Configuration.Contains('_Vulkan'))">true</EnableVulkanBackend>
+    <EnableDirectX11Backend Condition="'$(EnableDirectX11Backend)'=='' and $(Configuration.Contains('_DX11'))">true</EnableDirectX11Backend>
+    <EnableOpenGLBackend    Condition="'$(EnableOpenGLBackend)'==''    and $(Configuration.Contains('_OpenGL'))">true</EnableOpenGLBackend>
     <EnableVulkanBackend Condition="'$(EnableVulkanBackend)'==''">false</EnableVulkanBackend>
     <EnableDirectX11Backend Condition="'$(EnableDirectX11Backend)'==''">false</EnableDirectX11Backend>
     <EnableOpenGLBackend Condition="'$(EnableOpenGLBackend)'==''">false</EnableOpenGLBackend>

@@ -1,22 +1,23 @@
 //
 // SWRT_Reflection_CS.hlsl
-// GPU BVH ソフトウェアレイトレーシングによるリフレクションテクスチャ生成。
-// 1 スレッド = 1 ピクセル で以下を処理する:
-//   1. カメラレイでシーンをトレース（プライマリヒット）
-//   2. ヒット点の法線から反射方向を計算
-//   3. 反射レイをトレースし、ヒットした面を PBR でシェーディング
-//   4. フレネル・粗さで減衰した反射色を出力テクスチャに書き込む
+// GPU BVH 繧ｽ繝輔ヨ繧ｦ繧ｧ繧｢繝ｬ繧､繝医Ξ繝ｼ繧ｷ繝ｳ繧ｰ縺ｫ繧医ｋ繝ｪ繝輔Ξ繧ｯ繧ｷ繝ｧ繝ｳ繝・け繧ｹ繝√Ε逕滓・縲・
+// 1 繧ｹ繝ｬ繝・ラ = 1 繝斐け繧ｻ繝ｫ 縺ｧ莉･荳九ｒ蜃ｦ逅・☆繧・
+//   1. 繧ｫ繝｡繝ｩ繝ｬ繧､縺ｧ繧ｷ繝ｼ繝ｳ繧偵ヨ繝ｬ繝ｼ繧ｹ・医・繝ｩ繧､繝槭Μ繝偵ャ繝茨ｼ・
+//   2. 繝偵ャ繝育せ縺ｮ豕慕ｷ壹°繧牙渚蟆・婿蜷代ｒ險育ｮ・
+//   3. 蜿榊ｰ・Ξ繧､繧偵ヨ繝ｬ繝ｼ繧ｹ縺励√ヲ繝・ヨ縺励◆髱｢繧・PBR 縺ｧ繧ｷ繧ｧ繝ｼ繝・ぅ繝ｳ繧ｰ
+//   4. 繝輔Ξ繝阪Ν繝ｻ邊励＆縺ｧ貂幄｡ｰ縺励◆蜿榊ｰ・牡繧貞・蜉帙ユ繧ｯ繧ｹ繝√Ε縺ｫ譖ｸ縺崎ｾｼ繧
 //
-// 【NEE（Next Event Estimation）】
-//   ShadePBR() 内で各ライト方向にシャドウレイを飛ばし、遮蔽がなければ
-//   ライトの寄与を評価する。遮蔽されたライトは寄与をスキップする。
+// 縲侵EE・・ext Event Estimation・峨・
+//   ShadePBR() 蜀・〒蜷・Λ繧､繝域婿蜷代↓繧ｷ繝｣繝峨え繝ｬ繧､繧帝｣帙・縺励・・阡ｽ縺後↑縺代ｌ縺ｰ
+//   繝ｩ繧､繝医・蟇・ｸ弱ｒ隧穂ｾ｡縺吶ｋ縲る・阡ｽ縺輔ｌ縺溘Λ繧､繝医・蟇・ｸ弱ｒ繧ｹ繧ｭ繝・・縺吶ｋ縲・
 //
-// 【マルチサンプル GGX】
-//   g_samplesPerPixel > 1 のとき、Hammersley 列で GGX NDF を重点サンプリングし
-//   反射方向をジッターさせることで粗いサーフェスのぼけた反射を表現する。
+// 縲舌・繝ｫ繝√し繝ｳ繝励Ν GGX縲・
+//   g_samplesPerPixel > 1 縺ｮ縺ｨ縺阪？ammersley 蛻励〒 GGX NDF 繧帝㍾轤ｹ繧ｵ繝ｳ繝励Μ繝ｳ繧ｰ縺・
+//   蜿榊ｰ・婿蜷代ｒ繧ｸ繝・ち繝ｼ縺輔○繧九％縺ｨ縺ｧ邊励＞繧ｵ繝ｼ繝輔ぉ繧ｹ縺ｮ縺ｼ縺代◆蜿榊ｰ・ｒ陦ｨ迴ｾ縺吶ｋ縲・
 //
 
 #include "SWRT/SWRT_Common.hlsli"
+#include "SWRT/SWRT_LightTypes.hlsli"
 #include "ProceduralSky/ProceduralSky.hlsli"
 
 // --------------------------------------------------------------------------
@@ -89,9 +90,6 @@ TextureCube<float4> g_iblPrefilterTex : register(t9);
 
 RWTexture2D<float4> g_reflOutput : register(u0);
 
-struct GpuPointLightRT { float3 pos; float range; float3 colorIntensity; float pad; };
-struct GpuSpotLightRT  { float3 pos; float range; float3 dir; float cosInner;
-                         float3 colorIntensity; float cosOuter; };
 StructuredBuffer<GpuPointLightRT> g_pointLights : register(t12);
 StructuredBuffer<GpuSpotLightRT>  g_spotLights  : register(t13);
 
@@ -99,276 +97,7 @@ StructuredBuffer<GpuSpotLightRT>  g_spotLights  : register(t13);
 // Helpers
 // --------------------------------------------------------------------------
 
-float3 ComputeCameraRayDir(uint2 pixel, uint2 resolution)
-{
-    float ndcX =  ((float(pixel.x) + 0.5f) / float(resolution.x)) * 2.0f - 1.0f;
-    float ndcY = -((float(pixel.y) + 0.5f) / float(resolution.y)) * 2.0f + 1.0f;
-    float4 dir = mul(float4(ndcX, ndcY, 1.0f, 1.0f), g_invVP);
-    return normalize(dir.xyz / dir.w - g_cameraPos);
-}
-
-// --------------------------------------------------------------------------
-// Hammersley low-discrepancy sequence (deterministic, no temporal noise)
-// --------------------------------------------------------------------------
-float2 Hammersley(uint i, uint N)
-{
-    uint bits = (i << 16u) | (i >> 16u);
-    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
-    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
-    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
-    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
-    return float2(float(i) / float(N), float(bits) * 2.3283064365386963e-10f);
-}
-
-// GGX NDF importance sampling: returns half-vector in tangent space
-float3 SampleGGX_H(float2 Xi, float roughness)
-{
-    float a   = roughness * roughness;
-    float phi = 6.28318530718f * Xi.x;
-    float cosT = sqrt((1.0f - Xi.y) / max(1.0f + (a*a - 1.0f) * Xi.y, 1e-7f));
-    float sinT = sqrt(max(0.0f, 1.0f - cosT * cosT));
-    return float3(sinT * cos(phi), sinT * sin(phi), cosT);
-}
-
-// Transform tangent-space vector to world space aligned with N
-float3 TangentToWorld(float3 v, float3 N)
-{
-    float3 up = abs(N.z) < 0.999f ? float3(0.0f, 0.0f, 1.0f) : float3(1.0f, 0.0f, 0.0f);
-    float3 T  = normalize(cross(up, N));
-    float3 B  = cross(N, T);
-    return normalize(T * v.x + B * v.y + N * v.z);
-}
-
-// --------------------------------------------------------------------------
-// Schlick fresnel
-float3 FresnelSchlick(float cosTheta, float3 F0)
-{
-    float f = pow(saturate(1.0f - cosTheta), 5.0f);
-    return F0 + (1.0f - F0) * f;
-}
-
-// GGX NDF
-float GGX_D(float NdotH, float roughness)
-{
-    float a  = roughness * roughness;
-    float a2 = a * a;
-    float d  = (NdotH * NdotH) * (a2 - 1.0f) + 1.0f;
-    return a2 / (3.14159265f * d * d);
-}
-
-// Smith GGX visibility (approximation)
-float GGX_V(float NdotL, float NdotV, float roughness)
-{
-    float r = roughness + 1.0f;
-    float k = (r * r) / 8.0f;
-    float gL = NdotL / (NdotL * (1.0f - k) + k);
-    float gV = NdotV / (NdotV * (1.0f - k) + k);
-    return gL * gV;
-}
-
-// Evaluate PBR (directional light only for reflection shading)
-float3 ShadeDirectPBR(float3 pos, float3 N, float3 V, GpuMaterial mat)
-{
-    float roughness = saturate(mat.roughness);
-    float3 F0 = SWRT_MaterialF0(mat);
-    float3 diffuseReflectance = SWRT_MaterialDiffuseReflectance(mat);
-
-    float3 outColor = max(mat.emissive, 0.0f);
-
-    // ---- 直接光 (NEE / MIS) ----------------------------------------
-    // IS Only モードのときはスキップ。NEE Only / MIS では全ライトへ shadow ray。
-    if (g_samplingMode != SWRT_SAMPLE_IS)
-    {
-        // Directional light
-        {
-            float3 L     = normalize(g_dirLightDir);
-            float  NdotL = max(dot(N, L), 0.0f);
-            if (NdotL > 0.0f)
-            {
-                bool inShadow = TraceAnyHit(OffsetRay(pos, N), L, g_tMin, 200.0f);
-                if (!inShadow)
-                {
-                    float3 H     = normalize(L + V);
-                    float  NdotV = max(dot(N, V), 0.001f);
-                    float  NdotH = saturate(dot(N, H));
-                    float  VdotH = saturate(dot(V, H));
-
-                    float3 F   = FresnelSchlick(VdotH, F0);
-                    float  D   = GGX_D(NdotH, max(roughness, 0.05f));
-                    float  Vis = GGX_V(NdotL, NdotV, max(roughness, 0.05f));
-
-                    float3 specular = (F * D * Vis) / max(4.0f * NdotL * NdotV, 0.001f);
-                    float3 diffuse  = diffuseReflectance / 3.14159265f;
-                    float3 kd = (1.0f - F);
-
-                    outColor += (kd * diffuse + specular) * NdotL * g_dirLightColor * g_dirLightIntensity;
-                }
-            }
-        }
-
-        // Note: point/spot light NEE removed — G-Buffer path uses directional light only.
-        // The reflection hit point's local lights are evaluated via ShadePBR at the
-        // secondary hit, which can be extended in future iterations.
-        [loop]
-        for (uint i = 0; i < g_pointLightCount; ++i)
-        {
-            GpuPointLightRT pl = g_pointLights[i];
-            float3 toLight = pl.pos - pos;
-            float dist = length(toLight);
-            if (dist <= 1e-4f || dist >= pl.range) continue;
-
-            float3 L = toLight / dist;
-            float NdotL = max(dot(N, L), 0.0f);
-            if (NdotL <= 0.0f) continue;
-
-            bool inShadow = TraceAnyHit(OffsetRay(pos, N), L, g_tMin, dist - 0.001f);
-            if (inShadow) continue;
-
-            float t = dist / max(pl.range, 1e-4f);
-            float atten = saturate(1.0f - t * t);
-            atten *= atten;
-
-            float3 H = normalize(L + V);
-            float NdotV = max(dot(N, V), 0.001f);
-            float NdotH = saturate(dot(N, H));
-            float VdotH = saturate(dot(V, H));
-            float3 F = FresnelSchlick(VdotH, F0);
-            float D = GGX_D(NdotH, max(roughness, 0.05f));
-            float Vis = GGX_V(NdotL, NdotV, max(roughness, 0.05f));
-            float3 specular = (F * D * Vis) / max(4.0f * NdotL * NdotV, 0.001f);
-            float3 diffuse = diffuseReflectance / 3.14159265f;
-            float3 kd = (1.0f - F);
-
-            outColor += (kd * diffuse + specular) * NdotL * pl.colorIntensity * atten;
-        }
-
-        [loop]
-        for (uint i = 0; i < g_spotLightCount; ++i)
-        {
-            GpuSpotLightRT sl = g_spotLights[i];
-            float3 toLight = sl.pos - pos;
-            float dist = length(toLight);
-            if (dist <= 1e-4f || dist >= sl.range) continue;
-
-            float3 L = toLight / dist;
-            float cosA = dot(-L, normalize(sl.dir));
-            if (cosA < sl.cosOuter) continue;
-
-            float NdotL = max(dot(N, L), 0.0f);
-            if (NdotL <= 0.0f) continue;
-
-            bool inShadow = TraceAnyHit(OffsetRay(pos, N), L, g_tMin, dist - 0.001f);
-            if (inShadow) continue;
-
-            float spotAtten = smoothstep(sl.cosOuter, sl.cosInner, cosA);
-            float t = dist / max(sl.range, 1e-4f);
-            float atten = saturate(1.0f - t * t);
-            atten = atten * atten * spotAtten;
-
-            float3 H = normalize(L + V);
-            float NdotV = max(dot(N, V), 0.001f);
-            float NdotH = saturate(dot(N, H));
-            float VdotH = saturate(dot(V, H));
-            float3 F = FresnelSchlick(VdotH, F0);
-            float D = GGX_D(NdotH, max(roughness, 0.05f));
-            float Vis = GGX_V(NdotL, NdotV, max(roughness, 0.05f));
-            float3 specular = (F * D * Vis) / max(4.0f * NdotL * NdotV, 0.001f);
-            float3 diffuse = diffuseReflectance / 3.14159265f;
-            float3 kd = (1.0f - F);
-
-            outColor += (kd * diffuse + specular) * NdotL * sl.colorIntensity * atten;
-        }
-    } // end NEE block
-
-    return outColor;
-}
-
-float3 EvaluateReflectionHitAmbientFloor(GpuMaterial mat)
-{
-    // Small floor to avoid fully black traced hits indoors without injecting
-    // sky color. Use the visible material color rather than diffuse-only color
-    // so metallic reflection hits do not collapse to black.
-    static const float kHitAmbientFloor = 0.06f;
-    float3 diffuseColor = SWRT_MaterialDiffuseReflectance(mat);
-    float3 visibleColor = lerp(diffuseColor, mat.baseColor.rgb, saturate(mat.metallic));
-    return visibleColor * kHitAmbientFloor;
-}
-
-float3 SampleReflectionEnvironment(float3 rayDir, float roughness)
-{
-    if (g_iblEnabled > 0.5f)
-    {
-        float mip = saturate(roughness) * g_iblPrefilterMaxMip;
-        return g_iblPrefilterTex.SampleLevel(LinearClamp, rayDir, mip).rgb * g_iblIntensity;
-    }
-    if (g_proceduralSkyEnabled > 0.5f)
-    {
-        return ComputeSkyColor(rayDir,
-                               g_dirLightDir,
-                               g_dirLightColor,
-                               g_dirLightIntensity);
-    }
-    return float3(0.0f, 0.0f, 0.0f);
-}
-
-float3 ResolveReflectionRayThroughTransparent(float3 rayOrigin,
-                                              float3 rayDir,
-                                              float maxDistance,
-                                              float3 initialThroughput,
-                                              out bool resolvedRadiance)
-{
-    static const uint kMaxTransparentLayers = 4u;
-    float3 color = float3(0.0f, 0.0f, 0.0f);
-    float3 throughput = initialThroughput;
-    float traveled = 0.0f;
-    resolvedRadiance = false;
-
-    [loop]
-    for (uint layer = 0u; layer < kMaxTransparentLayers; ++layer)
-    {
-        HitResult hit = TraceClosestHit(rayOrigin, rayDir, g_tMin, max(maxDistance - traveled, 0.0f));
-        if (!hit.hit)
-        {
-            color += throughput * SampleReflectionEnvironment(rayDir, 0.0f);
-            resolvedRadiance = true;
-            break;
-        }
-
-        GpuInstanceInfo inst = g_instances[hit.instanceIndex];
-        GpuMaterial mat = g_materials[inst.materialIndex];
-        float3 hitPos = rayOrigin + rayDir * hit.t;
-        float3 hitNorm = GetWorldNormal(hit);
-        if (dot(hitNorm, -rayDir) < 0.0f)
-            hitNorm = -hitNorm;
-
-        float3 V = normalize(-rayDir);
-        float surfaceOpacity = SWRT_MaterialSurfaceOpacity(mat);
-        float3 direct = ShadeDirectPBR(hitPos, hitNorm, V, mat) + EvaluateReflectionHitAmbientFloor(mat);
-        color += throughput * direct * surfaceOpacity;
-        resolvedRadiance = true;
-
-        if (!SWRT_IsTransparentMaterial(mat) || surfaceOpacity > 0.995f)
-            break;
-
-        float3 transmittedDir = refract(rayDir, hitNorm, 1.0f / max(mat.ior, 1.0f));
-        if (dot(transmittedDir, transmittedDir) <= 1e-6f)
-            transmittedDir = rayDir;
-        transmittedDir = normalize(transmittedDir);
-
-        float3 transmittance = SWRT_MaterialTransmittanceTint(mat) * (1.0f - surfaceOpacity);
-        throughput *= transmittance;
-        if (dot(throughput, float3(0.2126f, 0.7152f, 0.0722f)) < 0.01f)
-            break;
-
-        traveled += hit.t;
-        rayOrigin = hitPos + transmittedDir * max(g_tMin, 0.01f);
-        rayDir = transmittedDir;
-    }
-
-    return color;
-}
-
-// --------------------------------------------------------------------------
+#include "SWRT_Reflection_Shading.hlsli"
 // Main
 // --------------------------------------------------------------------------
 [numthreads(16, 16, 1)]
@@ -389,8 +118,8 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
     // GBufferNormal.w stores camera distance written by CookTorranceGGX_PS.hlsl.
     // depth == 0 means sky / no geometry was rasterised for this pixel.
     //
-    // The G-Buffer is at native render resolution (g_gbufferWidth × g_gbufferHeight),
-    // but this CS may dispatch at a reduced reflection resolution (g_renderWidth × g_renderHeight).
+    // The G-Buffer is at native render resolution (g_gbufferWidth ﾃ・g_gbufferHeight),
+    // but this CS may dispatch at a reduced reflection resolution (g_renderWidth ﾃ・g_renderHeight).
     // Scale id.xy from reflection-space to G-Buffer-space so each reflection pixel reads
     // the correct texel instead of a biased top-left region of the screen.
     // Use float arithmetic to avoid integer truncation when gbuffer resolution
@@ -428,7 +157,7 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
     float3 hitNorm = normalize(gbufNormal.xyz * 2.0f - 1.0f);
 
     // Reconstruct world position from linearDepth (camera-to-surface distance) + camera ray.
-    // This avoids the NDC→world inversion precision error that caused reflection offset.
+    // This avoids the NDC竊蜘orld inversion precision error that caused reflection offset.
     // GBuffer.w now stores length(worldPos - cameraPos) written by CookTorranceGGX_PS.hlsl.
     float ndcX =  ((float(gbufPx.x) + 0.5f) / float(g_gbufferWidth))  * 2.0f - 1.0f;
     float ndcY = -((float(gbufPx.y) + 0.5f) / float(g_gbufferHeight)) * 2.0f + 1.0f;
@@ -492,9 +221,9 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
     // Inner loop: up to g_maxBounces bounces per sample ray.
     //
     // Throughput convention:
-    //   bounce 0 → throughput = 1.0  (Fresnel applied by PBR_PS via alpha)
-    //   bounce 1 → throughput *= F0 * roughFade0
-    //   bounce N → throughput *= F(N-1) * roughFade(N-1)
+    //   bounce 0 竊・throughput = 1.0  (Fresnel applied by PBR_PS via alpha)
+    //   bounce 1 竊・throughput *= F0 * roughFade0
+    //   bounce N 竊・throughput *= F(N-1) * roughFade(N-1)
     // --------------------------------------------------------------------------
     float3 reflColorAccum = (float3)0;
     float  weightAccum    = 0.0f;
@@ -628,7 +357,7 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
 
     float3 reflColor = (weightAccum > 0.0f) ? (reflColorAccum / weightAccum) : (float3)0;
 
-    // Roughness attenuation only — Fresnel is applied per-channel in PBR_PS.hlsl
+    // Roughness attenuation only 窶・Fresnel is applied per-channel in PBR_PS.hlsl
     // using the surface's F0 so that colored metals get correct per-channel tint.
     // Storing scalar fresnelWeight here (the old approach) collapsed the float3 Fresnel
     // to a luminance value, which caused green/blue bleed on red/gold metals.

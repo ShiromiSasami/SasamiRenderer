@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Renderer/Core/GraphicsDevice.h"
+#include "Renderer/RHI/GraphicsDevice.h"
 #include "Renderer/RayTracing/GpuSoftwareRayTracer.h"
 
 #include <cstdint>
@@ -24,8 +24,8 @@ namespace SasamiRenderer
     //     controlled by m_emaAlpha, giving smooth temporal convergence.
     //
     // Integration:
-    //   - GetProbeDataSrv() → bind to t10 in PBR_PS (read-only)
-    //   - GetProbeGridCbGpuAddress() → bind to b2 in PBR_PS (GIProbeGridCB)
+    //   - GetProbeDataSrv() ↁEbind to t10 in PBR_PS (read-only)
+    //   - GetProbeGridCbGpuAddress() ↁEbind to b2 in PBR_PS (GIProbeGridCB)
     // =========================================================================
     class IrradianceProbeGrid
     {
@@ -123,6 +123,11 @@ namespace SasamiRenderer
         D3D12_GPU_VIRTUAL_ADDRESS GetProbeGridCbGpuAddress() const;
 
         bool IsInitialized() const { return m_initialized; }
+        bool IsBaked()        const { return m_initialized && m_totalProbesDispatched >= GetTotalProbeCount(); }
+        float GetBakeProgress() const;
+        void  ResetBakeState();
+        bool  ReallocAndClearProbeBuffer(IRHIDevice& device);
+
         uint32_t GetTotalProbeCount() const { return m_countX * m_countY * m_countZ; }
         uint32_t GetCountX() const { return m_countX; }
         uint32_t GetCountY() const { return m_countY; }
@@ -139,7 +144,7 @@ namespace SasamiRenderer
         // Writes current grid parameters (origin, spacing, counts) to the persistently-mapped
         // GPU constant buffer immediately.  Call after any parameter change to ensure the
         // debug visualization reflects the new layout without waiting for UpdateProbes().
-        // Declared const so it can be called from DebugProbeGridRenderNode::Execute (which is const).
+        // Declared const so it can be called from DebugProbeGridRenderPass::Execute (which is const).
         void FlushGridCB() const;
 
     private:
@@ -183,7 +188,8 @@ namespace SasamiRenderer
         uint32_t m_nextProbeIdx = 0u;
         static constexpr uint32_t kProbesPerFrame = 32u;
 
-        bool m_initialized = false;
+        bool     m_initialized           = false;
+        uint32_t m_totalProbesDispatched = 0u;
     };
 
 } // namespace SasamiRenderer

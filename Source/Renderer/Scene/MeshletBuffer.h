@@ -1,5 +1,5 @@
 #pragma once
-#include "Renderer/Core/GraphicsDevice.h"
+#include "Renderer/RHI/GraphicsDevice.h"
 #include "Renderer/Structures/Mesh.h"
 #include <cstdint>
 #include <vector>
@@ -22,7 +22,7 @@ namespace SasamiRenderer
     class MeshletBuffer
     {
     public:
-        // 16 triangles per meshlet: allows LOD-0 subdivision (×4) → 64 output tris,
+        // 16 triangles per meshlet: allows LOD-0 subdivision (ÁE) ↁE64 output tris,
         // fitting within the MS 256-primitive / 256-vertex hard limits.
         static constexpr uint32_t kMaxTrianglesPerMeshlet = 16u;
 

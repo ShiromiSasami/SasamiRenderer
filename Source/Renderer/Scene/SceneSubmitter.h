@@ -1,6 +1,6 @@
 #pragma once
-#include "Renderer/Core/GraphicsDevice.h"
-#include "Renderer/Core/RendererFrameCoordinator.h"
+#include "Renderer/RHI/GraphicsDevice.h"
+#include "Renderer/Frame/RendererFrameCoordinator.h"
 #include "Renderer/Scene/RenderProxy.h"
 #include "Renderer/Scene/SurfaceMaterial.h"
 #include "Renderer/Structures/Texture.h"

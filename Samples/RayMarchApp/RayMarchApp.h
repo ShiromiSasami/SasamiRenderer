@@ -2,7 +2,7 @@
 
 #include "IApplication.h"
 #include "Object/Camera.h"
-#include "Renderer/Passes/RayMarchRenderNode.h"
+#include "Renderer/Passes/RayMarch/RayMarchRenderPass.h"
 #include <memory>
 
 namespace SasamiRenderer
@@ -18,7 +18,7 @@ namespace SasamiRenderer
 
     private:
         Camera* m_camera = nullptr;
-        std::shared_ptr<RayMarchRenderNode> m_renderNode;
+        std::shared_ptr<RayMarchRenderPass> m_renderPass;
 
         float m_yaw   = 0.0f;
         float m_pitch = -0.15f;

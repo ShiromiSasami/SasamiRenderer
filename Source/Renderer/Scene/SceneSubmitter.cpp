@@ -134,7 +134,50 @@ namespace SasamiRenderer
                                                         CommandList* cmdList,
                                                         std::vector<Resource>& uploads)
     {
-        if (src.pixels.empty() || src.width == 0 || src.height == 0 || !cmdList) {
+        if (src.pixels.empty() || src.width == 0 || src.height == 0) {
+            return nullptr;
+        }
+
+        if (m_device &&
+            !m_device->GetCapabilities().supportsD3D12CompatibilitySurface &&
+            m_device->GetCapabilities().supportsRhiResourceCreation &&
+            m_device->GetCapabilities().supportsRhiDescriptorCreation) {
+            RhiTextureHandle rhiTexture = m_device->CreateRhiTexture2DFromRgba8(src.width,
+                                                                                src.height,
+                                                                                src.pixels.data(),
+                                                                                src.width * 4u);
+            if (!rhiTexture.IsValid()) {
+                return nullptr;
+            }
+
+            RhiDescriptorAllocation allocation =
+                m_device->AllocateRhiDescriptors(RhiDescriptorHeapType::CbvSrvUav, 1, true);
+            if (!allocation.cpu.IsValid() || !allocation.gpu.IsValid()) {
+                return nullptr;
+            }
+
+            RhiTextureViewDesc srvDesc{};
+            srvDesc.format = RhiFormat::R8G8B8A8UNorm;
+            srvDesc.dimension = RhiTextureViewDimension::Texture2D;
+            srvDesc.mipLevelCount = 1;
+            srvDesc.arrayLayerCount = 1;
+            if (!m_device->CreateRhiShaderResourceView(rhiTexture, srvDesc, allocation.cpu)) {
+                return nullptr;
+            }
+
+            auto texObj = std::make_unique<Texture>();
+            texObj->rhiTexture   = rhiTexture;
+            texObj->srv          = { allocation.gpu.ptr };
+            texObj->desc.width   = src.width;
+            texObj->desc.height  = src.height;
+            texObj->desc.mips    = 1;
+            texObj->desc.format  = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+            m_sceneTextures.push_back(std::move(texObj));
+            return m_sceneTextures.back().get();
+        }
+
+        if (!cmdList) {
             return nullptr;
         }
 
@@ -191,27 +234,34 @@ namespace SasamiRenderer
             return cached->second;
         }
 
+        std::vector<Resource> uploads;
+        Texture* texture = nullptr;
         CommandAllocator uploadAlloc;
         CommandList      uploadList;
-        HRESULT hr = m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, uploadAlloc);
-        if (SUCCEEDED(hr)) {
-            hr = m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, uploadAlloc, nullptr, uploadList);
+        HRESULT hr = S_OK;
+        if (m_device->GetCapabilities().supportsD3D12CompatibilitySurface) {
+            hr = m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, uploadAlloc);
+            if (SUCCEEDED(hr)) {
+                hr = m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, uploadAlloc, nullptr, uploadList);
+            }
+            if (FAILED(hr)) {
+                return nullptr;
+            }
+            texture = CreateTextureFromRgba8Data(*textureData, &uploadList, uploads);
+        } else {
+            texture = CreateTextureFromRgba8Data(*textureData, nullptr, uploads);
         }
-        if (FAILED(hr)) {
-            return nullptr;
-        }
-
-        std::vector<Resource> uploads;
-        Texture* texture = CreateTextureFromRgba8Data(*textureData, &uploadList, uploads);
         if (!texture) {
             return nullptr;
         }
 
-        uploadList->Close();
-        ID3D12CommandList* lists[] = { uploadList.Get() };
-        m_device->GetCommandQueue()->ExecuteCommandLists(1, lists);
-        m_device->WaitForGPU();
-        uploads.clear();
+        if (m_device->GetCapabilities().supportsD3D12CompatibilitySurface) {
+            uploadList->Close();
+            ID3D12CommandList* lists[] = { uploadList.Get() };
+            m_device->GetCommandQueue()->ExecuteCommandLists(1, lists);
+            m_device->WaitForGPU();
+            uploads.clear();
+        }
 
         m_textureCache[textureId] = texture;
         return texture;
@@ -330,7 +380,11 @@ namespace SasamiRenderer
                                                     RendererFrameCoordinator& frameCoord,
                                                     RendererFrameCoordinator::FrameContext& frame)
     {
-        if (!m_device || !m_skinnedMeshBuffer || proxies.empty()) return;
+        if (!m_device || !m_skinnedMeshBuffer) return;
+        if (proxies.empty()) {
+            ClearSkinnedRenderProxies();
+            return;
+        }
 
         // Ensure enough bone CB slots for this frame's skinned objects
         frameCoord.EnsureBoneBuffers(frame, static_cast<UINT>(proxies.size()));

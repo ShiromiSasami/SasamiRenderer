@@ -489,18 +489,18 @@ namespace SasamiRenderer
         out.cbPad0 = desc.gbufferWidth ? desc.gbufferWidth : desc.width;
         out.cbPad1 = desc.gbufferHeight ? desc.gbufferHeight : desc.height;
 
-        const auto& dl = desc.frameDesc.directionalLight;
+        const auto& dirLight = desc.frameDesc.directionalLight;
         {
             float fwd[3]{};
-            Math::DirectionFromYawPitch(dl.yaw, dl.pitch, fwd);
+            Math::DirectionFromYawPitch(dirLight.yaw, dirLight.pitch, fwd);
             out.dirLightDir[0] = -fwd[0];
             out.dirLightDir[1] = -fwd[1];
             out.dirLightDir[2] = -fwd[2];
         }
-        out.dirLightIntensity = dl.intensity;
-        out.dirLightColor[0]  = dl.color[0];
-        out.dirLightColor[1]  = dl.color[1];
-        out.dirLightColor[2]  = dl.color[2];
+        out.dirLightIntensity = dirLight.intensity;
+        out.dirLightColor[0]  = dirLight.color[0];
+        out.dirLightColor[1]  = dirLight.color[1];
+        out.dirLightColor[2]  = dirLight.color[2];
 
         uint32_t nPt = 0, nSp = 0;
         if (desc.frameDesc.pointLights)

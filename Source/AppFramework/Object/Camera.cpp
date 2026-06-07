@@ -127,17 +127,17 @@ namespace SasamiRenderer
         for (int i = 0; i < 16; ++i) {
             proxy.projection[i] = proj[i];
         }
-        proxy.rayMarchCameraRight[0] = right.x;
-        proxy.rayMarchCameraRight[1] = right.y;
-        proxy.rayMarchCameraRight[2] = right.z;
-        proxy.rayMarchCameraUp[0] = up.x;
-        proxy.rayMarchCameraUp[1] = up.y;
-        proxy.rayMarchCameraUp[2] = up.z;
-        proxy.rayMarchCameraForward[0] = forward.x;
-        proxy.rayMarchCameraForward[1] = forward.y;
-        proxy.rayMarchCameraForward[2] = forward.z;
-        proxy.rayMarchTanHalfFovY = std::tan(fov * 0.5f);
-        proxy.rayMarchAspectRatio = aspect;
+        proxy.cameraRight[0] = right.x;
+        proxy.cameraRight[1] = right.y;
+        proxy.cameraRight[2] = right.z;
+        proxy.cameraUp[0] = up.x;
+        proxy.cameraUp[1] = up.y;
+        proxy.cameraUp[2] = up.z;
+        proxy.cameraForward[0] = forward.x;
+        proxy.cameraForward[1] = forward.y;
+        proxy.cameraForward[2] = forward.z;
+        proxy.tanHalfFovY = std::tan(fov * 0.5f);
+        proxy.aspectRatio = aspect;
 
         return proxy;
     }

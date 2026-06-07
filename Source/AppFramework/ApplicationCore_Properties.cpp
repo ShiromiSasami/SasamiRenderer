@@ -6,9 +6,7 @@
 #include <array>
 #include <algorithm>
 #include <exception>
-#include <filesystem>
 #include <stdexcept>
-#include <cwctype>
 #include <utility>
 
 #include "Foundation/Tools/DebugOutput.h"
@@ -16,7 +14,7 @@
 #include "Input/InputSystem.h"
 #include "Loader/AssetLoader.h"
 #include "Object/Camera.h"
-#include "Renderer/Core/Renderer.h"
+#include "Renderer/Runtime/Renderer.h"
 #include "UI/ImGuiCoordinator.h"
 
 
@@ -636,23 +634,47 @@ namespace SasamiRenderer
         m_renderer->CycleGBufferDebugView(delta);
     }
 
-    std::vector<ApplicationCore::RenderNodeType> ApplicationCore::GetRenderNodeSequence() const
+    std::vector<ApplicationCore::RenderPassType> ApplicationCore::GetRenderPassSequence() const
     {
         if (!m_renderer) {
             return {};
         }
-        return m_renderer->GetRenderNodeSequence();
+        return m_renderer->GetRenderPassSequence();
     }
 
-    void ApplicationCore::SetRenderNodeSequence(const std::vector<RenderNodeType>& sequence)
+    void ApplicationCore::SetRenderPassSequence(const std::vector<RenderPassType>& sequence)
     {
         if (!m_renderer) {
             return;
         }
-        m_renderer->SetRenderNodeSequence(sequence);
+        m_renderer->SetRenderPassSequence(sequence);
     }
 
-    bool ApplicationCore::AddRenderPass(const std::shared_ptr<IRenderNode>& renderPass)
+    bool ApplicationCore::AddRenderNode(const std::shared_ptr<IRenderNode>& renderNode)
+    {
+        if (!m_renderer) {
+            return false;
+        }
+        return m_renderer->AddNode(renderNode).IsValid();
+    }
+
+    void ApplicationCore::SetRenderNodePreset(const std::shared_ptr<IRenderNode>& renderNode)
+    {
+        if (!m_renderer) {
+            return;
+        }
+        m_renderer->SetRenderNodePreset(renderNode);
+    }
+
+    void ApplicationCore::UseDefaultRenderNodePreset()
+    {
+        if (!m_renderer) {
+            return;
+        }
+        m_renderer->UseDefaultRenderNodePreset();
+    }
+
+    bool ApplicationCore::AddRenderPass(const std::shared_ptr<IRenderPass>& renderPass)
     {
         if (!m_renderer) {
             return false;
@@ -660,7 +682,7 @@ namespace SasamiRenderer
         return m_renderer->AddPass(renderPass).IsValid();
     }
 
-    bool ApplicationCore::AddRenderPassBefore(std::string_view targetTag, const std::shared_ptr<IRenderNode>& renderPass)
+    bool ApplicationCore::AddRenderPassBefore(std::string_view targetTag, const std::shared_ptr<IRenderPass>& renderPass)
     {
         if (!m_renderer) {
             return false;
@@ -668,7 +690,7 @@ namespace SasamiRenderer
         return m_renderer->AddPassBefore(targetTag, renderPass).IsValid();
     }
 
-    bool ApplicationCore::AddRenderPassAfter(std::string_view targetTag, const std::shared_ptr<IRenderNode>& renderPass)
+    bool ApplicationCore::AddRenderPassAfter(std::string_view targetTag, const std::shared_ptr<IRenderPass>& renderPass)
     {
         if (!m_renderer) {
             return false;
@@ -676,7 +698,7 @@ namespace SasamiRenderer
         return m_renderer->AddPassAfter(targetTag, renderPass).IsValid();
     }
 
-    bool ApplicationCore::ReplaceRenderPass(std::string_view targetTag, const std::shared_ptr<IRenderNode>& renderPass)
+    bool ApplicationCore::ReplaceRenderPass(std::string_view targetTag, const std::shared_ptr<IRenderPass>& renderPass)
     {
         if (!m_renderer) {
             return false;

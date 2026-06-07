@@ -1,8 +1,8 @@
 #pragma once
 #include <vector>
 
-#include "Renderer/Core/GraphicsDevice.h"
-#include "Renderer/Core/RhiDevice.h"
+#include "Renderer/RHI/GraphicsDevice.h"
+#include "Renderer/RHI/RhiDevice.h"
 #include "Renderer/Structures/Mesh.h"
 
 namespace SasamiRenderer
@@ -11,7 +11,7 @@ namespace SasamiRenderer
     class SkinnedMeshBuffer
     {
     public:
-        // Reuses MeshBuffer::GPUItem format — VBV stride is sizeof(SkinnedVertex)
+        // Reuses MeshBuffer::GPUItem format  EVBV stride is sizeof(SkinnedVertex)
         struct GPUItem {
             Resource vb;
             Resource ib;

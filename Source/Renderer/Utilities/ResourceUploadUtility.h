@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Renderer/Core/GraphicsDevice.h"
+#include "Renderer/RHI/GraphicsDevice.h"
 
 #include <cstdint>
 

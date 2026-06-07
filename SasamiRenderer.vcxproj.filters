@@ -22,14 +22,38 @@
     <Filter Include="Header Files\Tool">
       <UniqueIdentifier>{c8aff3b3-f7c9-45e2-9d0b-1c79d6271b58}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\RenderNode">
+    <Filter Include="Source Files\RenderPass">
       <UniqueIdentifier>{c9fa0440-879d-43ab-a838-02979f67a3f3}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\RenderNode">
+    <Filter Include="Header Files\RenderPass">
       <UniqueIdentifier>{92d28e41-5700-42f3-b79c-3aac016f4e41}</UniqueIdentifier>
     </Filter>
     <Filter Include="Shader Files">
       <UniqueIdentifier>{17e92507-9455-49a5-990c-1c4d5d9f3c4d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Basic">
+      <UniqueIdentifier>{9427fafa-7f99-4eb0-a3fa-593c9f3f26bc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\PBR">
+      <UniqueIdentifier>{7a03e0a8-b451-403e-b0a1-8db53e27a13f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Opaque">
+      <UniqueIdentifier>{538f8593-c97f-4848-b4c8-2cba0baf2d04}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Tessellation">
+      <UniqueIdentifier>{79ba20ac-c4c8-407c-a71e-168086ea8481}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Transparent">
+      <UniqueIdentifier>{ebebad9f-1330-4236-af64-e7d926318d80}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\SkinnedMesh">
+      <UniqueIdentifier>{74816725-2739-4fca-9356-3774e58cd746}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Denoising">
+      <UniqueIdentifier>{6d20108a-0fdc-47b8-9fb5-c2f4ca12ae66}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Denoising\NRD">
+      <UniqueIdentifier>{bb65cd1c-cc0d-46bd-a42d-589f4d2ba909}</UniqueIdentifier>
     </Filter>
     <Filter Include="Shader Files\Skybox">
       <UniqueIdentifier>{0fe97ee0-0f8c-4ff0-8f5f-d6284a96e4ea}</UniqueIdentifier>
@@ -61,75 +85,111 @@
     <Filter Include="Shader Files\Shadow">
       <UniqueIdentifier>{f6a7b8c9-d0e1-2345-f056-781ab9cd2345}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\Backends">
+      <UniqueIdentifier>{2f6410aa-64b9-4a50-9b6f-79864cc25d15}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Backends\DirectX12">
+      <UniqueIdentifier>{96f78ed3-d89f-47f1-a3df-62be7cb04536}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Backends\DirectX11">
+      <UniqueIdentifier>{26dedf62-b7ec-4ee2-a937-65dd6911bfda}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Backends\Vulkan">
+      <UniqueIdentifier>{8b61684f-6a7c-44a2-8817-9b433fd45dc9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Backends\OpenGL">
+      <UniqueIdentifier>{a19ff189-9f37-41db-a0bb-40afba0c3585}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Backends">
+      <UniqueIdentifier>{b9935136-bb69-46db-98fc-bc17b7923cd1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Backends\DirectX12">
+      <UniqueIdentifier>{3062f78f-a771-4ddd-88c4-1cc7e84f7d05}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Backends\DirectX11">
+      <UniqueIdentifier>{ec469de6-bfaf-42bb-a945-6a2fd5152d28}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Backends\Vulkan">
+      <UniqueIdentifier>{dc973c20-f4a9-486e-8fb0-92ef084c1e38}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Backends\OpenGL">
+      <UniqueIdentifier>{078b2b69-9e8f-41a9-8ed8-8e83266fe1a5}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="Libraries\packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Source\Renderer\Core\Dx11GraphicsDevice.h">
+    <ClInclude Include="Source\Renderer\Backends\DirectX11\Dx11GraphicsDevice.h">
+      <Filter>Header Files\Backends\DirectX11</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Backends\DirectX12\Dx12GraphicsDevice.h">
+      <Filter>Header Files\Backends\DirectX12</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\RHI\GraphicsDevice.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\Dx12GraphicsDevice.h">
+    <ClInclude Include="Source\Renderer\Backends\OpenGL\OpenGLGraphicsDevice.h">
+      <Filter>Header Files\Backends\OpenGL</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\RHI\RhiDevice.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\GraphicsDevice.h">
+    <ClInclude Include="Source\Renderer\RHI\RhiTypes.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\OpenGLGraphicsDevice.h">
+    <ClInclude Include="Source\Renderer\Config\RenderFeatureSettings.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\RhiDevice.h">
+    <ClInclude Include="Source\Renderer\Frame\RenderFrameOrchestrator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\RhiTypes.h">
+    <ClInclude Include="Source\Renderer\RenderGraph\RenderGraph.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\RenderFeatureSettings.h">
+    <ClInclude Include="Source\Renderer\Passes\Core\RenderNode.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\RenderFrameOrchestrator.h">
+    <ClInclude Include="Source\Renderer\Passes\Core\RenderPassBuilder.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\RenderGraph.h">
+    <ClInclude Include="Source\Renderer\Resources\RenderPipelineStateCache.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\RenderNodeBuilder.h">
+    <ClInclude Include="Source\Renderer\Resources\ShaderCompilationService.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\RenderPipelineStateCache.h">
+    <ClInclude Include="Source\Renderer\Config\RenderSettings.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\ShaderCompilationService.h">
+    <ClInclude Include="Source\Renderer\Resources\RenderTargetPool.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\RenderSettings.h">
+    <ClInclude Include="Source\Renderer\Frame\RendererFrameCoordinator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\RenderTargetPool.h">
+    <ClInclude Include="Source\Renderer\Runtime\Renderer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\RendererFrameCoordinator.h">
+    <ClInclude Include="Source\Renderer\Scene\SceneSynchronizer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\Renderer.h">
+    <ClInclude Include="Source\Renderer\Scene\EnvironmentManager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\SceneSynchronizer.h">
+    <ClInclude Include="Source\Renderer\Resources\SrvDescriptorAllocator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\EnvironmentManager.h">
+    <ClInclude Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDevice.h">
+      <Filter>Header Files\Backends\Vulkan</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDevice_Utils.h">
+      <Filter>Header Files\Backends\Vulkan</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\CameraState.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\SrvDescriptorAllocator.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\VulkanGraphicsDevice.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\CameraState.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\RenderPassRegistry.h">
+    <ClInclude Include="Source\Renderer\Passes\Core\RenderPassRegistry.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Scene\DrawCommandBuilder.h">
@@ -198,44 +258,53 @@
     <ClInclude Include="Source\Foundation\Math\MathUtil.h">
       <Filter>Header Files\Tool</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\OpaqueRenderNode.h">
-      <Filter>Header Files\RenderNode</Filter>
+    <ClInclude Include="Source\Renderer\Passes\Geometry\OpaqueRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\LightingRenderNode.h">
-      <Filter>Header Files\RenderNode</Filter>
+    <ClInclude Include="Source\Renderer\Passes\Lighting\LightingRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\TransparentRenderNode.h">
-      <Filter>Header Files\RenderNode</Filter>
+    <ClInclude Include="Source\Renderer\Passes\Transparency\TransparentRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\TransparentLightingRenderNode.h">
-      <Filter>Header Files\RenderNode</Filter>
+    <ClInclude Include="Source\Renderer\Passes\Transparency\TransparentLightingRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\TransparentBackfaceDistanceRenderNode.h">
-      <Filter>Header Files\RenderNode</Filter>
+    <ClInclude Include="Source\Renderer\Passes\Transparency\TransparentBackfaceDistanceRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\TransparentCompositeRenderNode.h">
-      <Filter>Header Files\RenderNode</Filter>
+    <ClInclude Include="Source\Renderer\Passes\Transparency\TransparentCompositeRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\IRenderNode.h">
-      <Filter>Header Files\RenderNode</Filter>
+    <ClInclude Include="Source\Renderer\Passes\Transparency\TransparentSceneColorCopyRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\RenderNodeSetupContext.h">
-      <Filter>Header Files\RenderNode</Filter>
+    <ClInclude Include="Source\Renderer\Passes\Core\IRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\PostProcessRenderNode.h">
-      <Filter>Header Files\RenderNode</Filter>
+    <ClInclude Include="Source\Renderer\Passes\Core\RenderPassSetupContext.h">
+      <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\ShadowRenderNode.h">
-      <Filter>Header Files\RenderNode</Filter>
+    <ClInclude Include="Source\Renderer\Passes\PostProcess\PostProcessRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\SkyboxRenderNode.h">
-      <Filter>Header Files\RenderNode</Filter>
+    <ClInclude Include="Source\Renderer\Passes\Geometry\ShadowRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\SSAORenderNode.h">
-      <Filter>Header Files\RenderNode</Filter>
+    <ClInclude Include="Source\Renderer\Passes\Sky\SkyboxRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\DebugProbeGridRenderNode.h">
-      <Filter>Header Files\RenderNode</Filter>
+    <ClInclude Include="Source\Renderer\Passes\Lighting\SSAORenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\Reflections\SoftwareReflectionRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\Reflections\SoftwareReflectionCompositeRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\Debug\DebugProbeGridRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\RayTracing\RayTracingScene.h">
       <Filter>Source Files\RayTrace</Filter>
@@ -255,26 +324,23 @@
     <ClInclude Include="Source\Renderer\RayTracing\SWRTExecutor.h">
       <Filter>Source Files\RayTrace</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\RayTracingRenderNode.h">
-      <Filter>Source Files\RenderNode</Filter>
+    <ClInclude Include="Source\Renderer\Passes\RayTracing\RayTracingRenderPass.h">
+      <Filter>Source Files\RenderPass</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Core\RayTracingStats.h">
+    <ClInclude Include="Source\Renderer\Config\RayTracingStats.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Scene\SceneSubmitter.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\VolumetricCloudRenderNode.h">
-      <Filter>Header Files\RenderNode</Filter>
+    <ClInclude Include="Source\Renderer\Passes\Sky\VolumetricCloudRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\ProceduralSkyRenderNode.h">
-      <Filter>Header Files\RenderNode</Filter>
+    <ClInclude Include="Source\Renderer\Passes\Sky\ProceduralSkyRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\SdfFluidRenderNode.h">
-      <Filter>Header Files\RenderNode</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\RayMarchRenderNode.h">
-      <Filter>Header Files\RenderNode</Filter>
+    <ClInclude Include="Source\Renderer\Passes\RayMarch\RayMarchRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -290,53 +356,71 @@
     <ClCompile Include="Source\Renderer\Scene\DrawCommandBuilder.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Core\RenderGraph.cpp">
+    <ClCompile Include="Source\Renderer\RenderGraph\RenderGraph.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Core\RenderNodeBuilder.cpp">
+    <ClCompile Include="Source\Renderer\Passes\Core\RenderPassBuilder.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Core\RenderFrameOrchestrator.cpp">
+    <ClCompile Include="Source\Renderer\Frame\RenderFrameOrchestrator.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Core\RenderTargetPool.cpp">
+    <ClCompile Include="Source\Renderer\Resources\RenderTargetPool.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Core\Renderer.cpp">
+    <ClCompile Include="Source\Renderer\Runtime\Renderer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Core\SceneSynchronizer.cpp">
+    <ClCompile Include="Source\Renderer\Scene\SceneSynchronizer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Core\EnvironmentManager.cpp">
+    <ClCompile Include="Source\Renderer\Scene\EnvironmentManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Core\SrvDescriptorAllocator.cpp">
+    <ClCompile Include="Source\Renderer\Resources\SrvDescriptorAllocator.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Core\RenderPassRegistry.cpp">
+    <ClCompile Include="Source\Renderer\Passes\Core\RenderPassRegistry.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Core\RendererFrameCoordinator.cpp">
+    <ClCompile Include="Source\Renderer\Frame\RendererFrameCoordinator.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Core\RenderPipelineStateCache.cpp">
+    <ClCompile Include="Source\Renderer\Resources\RenderPipelineStateCache.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Core\ShaderCompilationService.cpp">
+    <ClCompile Include="Source\Renderer\Resources\ShaderCompilationService.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Core\Dx11GraphicsDevice.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Source\Renderer\Backends\DirectX11\Dx11GraphicsDevice.cpp">
+      <Filter>Source Files\Backends\DirectX11</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Core\Dx12GraphicsDevice.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Source\Renderer\Backends\DirectX11\Dx11GraphicsDevice_Resource.cpp">
+      <Filter>Source Files\Backends\DirectX11</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Core\OpenGLGraphicsDevice.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Source\Renderer\Backends\DirectX12\Dx12GraphicsDevice.cpp">
+      <Filter>Source Files\Backends\DirectX12</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Core\VulkanGraphicsDevice.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Source\Renderer\Backends\DirectX12\Dx12GraphicsDevice_Init.cpp">
+      <Filter>Source Files\Backends\DirectX12</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\DirectX12\Dx12GraphicsDevice_Resource.cpp">
+      <Filter>Source Files\Backends\DirectX12</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\OpenGL\OpenGLGraphicsDevice.cpp">
+      <Filter>Source Files\Backends\OpenGL</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\OpenGL\OpenGLGraphicsDevice_Resource.cpp">
+      <Filter>Source Files\Backends\OpenGL</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDevice.cpp">
+      <Filter>Source Files\Backends\Vulkan</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDevice_Backend.cpp">
+      <Filter>Source Files\Backends\Vulkan</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDevice_Pipeline.cpp">
+      <Filter>Source Files\Backends\Vulkan</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Scene\LightSystem.cpp">
       <Filter>Source Files</Filter>
@@ -347,32 +431,35 @@
     <ClCompile Include="Source\Renderer\Scene\Skybox.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\SkyboxRenderNode.cpp">
-      <Filter>Source Files\RenderNode</Filter>
+    <ClCompile Include="Source\Renderer\Passes\Sky\SkyboxRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\ShadowRenderNode.cpp">
-      <Filter>Source Files\RenderNode</Filter>
+    <ClCompile Include="Source\Renderer\Passes\Geometry\ShadowRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\OpaqueRenderNode.cpp">
-      <Filter>Source Files\RenderNode</Filter>
+    <ClCompile Include="Source\Renderer\Passes\Geometry\OpaqueRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\LightingRenderNode.cpp">
-      <Filter>Source Files\RenderNode</Filter>
+    <ClCompile Include="Source\Renderer\Passes\Lighting\LightingRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\TransparentRenderNode.cpp">
-      <Filter>Source Files\RenderNode</Filter>
+    <ClCompile Include="Source\Renderer\Passes\Transparency\TransparentRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\TransparentLightingRenderNode.cpp">
-      <Filter>Source Files\RenderNode</Filter>
+    <ClCompile Include="Source\Renderer\Passes\Transparency\TransparentLightingRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\TransparentBackfaceDistanceRenderNode.cpp">
-      <Filter>Source Files\RenderNode</Filter>
+    <ClCompile Include="Source\Renderer\Passes\Transparency\TransparentBackfaceDistanceRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\TransparentCompositeRenderNode.cpp">
-      <Filter>Source Files\RenderNode</Filter>
+    <ClCompile Include="Source\Renderer\Passes\Transparency\TransparentCompositeRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\PostProcessRenderNode.cpp">
-      <Filter>Source Files\RenderNode</Filter>
+    <ClCompile Include="Source\Renderer\Passes\Transparency\TransparentSceneColorCopyRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\PostProcess\PostProcessRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Utilities\ResourceUploadUtility.cpp">
       <Filter>Source Files\Tools</Filter>
@@ -395,52 +482,55 @@
     <ClCompile Include="Source\Renderer\Scene\SceneSubmitter.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\RayTracingRenderNode.cpp">
-      <Filter>Source Files\RenderNode</Filter>
+    <ClCompile Include="Source\Renderer\Passes\RayTracing\RayTracingRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\SSAORenderNode.cpp">
-      <Filter>Source Files\RenderNode</Filter>
+    <ClCompile Include="Source\Renderer\Passes\Lighting\SSAORenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\DebugProbeGridRenderNode.cpp">
-      <Filter>Source Files\RenderNode</Filter>
+    <ClCompile Include="Source\Renderer\Passes\Reflections\SoftwareReflectionRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\Reflections\SoftwareReflectionCompositeRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\Debug\DebugProbeGridRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\GI\IrradianceProbeGrid.cpp">
       <Filter>Source Files\GI</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\ProceduralSkyRenderNode.cpp">
-      <Filter>Source Files\RenderNode</Filter>
+    <ClCompile Include="Source\Renderer\Passes\Sky\ProceduralSkyRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\SdfFluidRenderNode.cpp">
-      <Filter>Source Files\RenderNode</Filter>
+    <ClCompile Include="Source\Renderer\Passes\RayMarch\RayMarchRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\RayMarchRenderNode.cpp">
-      <Filter>Source Files\RenderNode</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\VolumetricCloudRenderNode.cpp">
-      <Filter>Source Files\RenderNode</Filter>
+    <ClCompile Include="Source\Renderer\Passes\Sky\VolumetricCloudRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="Source\Renderer\Shaders\CookTorranceGGX_VS.hlsl">
-      <Filter>Shader Files</Filter>
+    <CustomBuild Include="Source\Renderer\Shaders\PBR\CookTorranceGGX_VS.hlsl">
+      <Filter>Shader Files\PBR</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\CookTorranceGGX_PS.hlsl">
-      <Filter>Shader Files</Filter>
+    <CustomBuild Include="Source\Renderer\Shaders\PBR\CookTorranceGGX_PS.hlsl">
+      <Filter>Shader Files\PBR</Filter>
     </CustomBuild>
     <CustomBuild Include="Source\Renderer\Shaders\Transparent\TransparentBackfaceDistance_PS.hlsl">
-      <Filter>Shader Files</Filter>
+      <Filter>Shader Files\Transparent</Filter>
     </CustomBuild>
     <CustomBuild Include="Source\Renderer\Shaders\Transparent\TransparentOIT_PS.hlsl">
-      <Filter>Shader Files</Filter>
+      <Filter>Shader Files\Transparent</Filter>
     </CustomBuild>
     <CustomBuild Include="Source\Renderer\Shaders\Transparent\TransparentOITComposite_PS.hlsl">
-      <Filter>Shader Files</Filter>
+      <Filter>Shader Files\Transparent</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\Opaque_VS.hlsl">
-      <Filter>Shader Files</Filter>
+    <CustomBuild Include="Source\Renderer\Shaders\Opaque\Opaque_VS.hlsl">
+      <Filter>Shader Files\Opaque</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\Opaque_PS.hlsl">
-      <Filter>Shader Files</Filter>
+    <CustomBuild Include="Source\Renderer\Shaders\Opaque\Opaque_PS.hlsl">
+      <Filter>Shader Files\Opaque</Filter>
     </CustomBuild>
     <CustomBuild Include="Source\Renderer\Shaders\Skybox\Skybox_VS.hlsl">
       <Filter>Shader Files\Skybox</Filter>
@@ -451,17 +541,17 @@
     <CustomBuild Include="Source\Renderer\Shaders\Skybox\Skybox_PS.hlsl">
       <Filter>Shader Files\Skybox</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\Tessellation_VS.hlsl">
-      <Filter>Shader Files</Filter>
+    <CustomBuild Include="Source\Renderer\Shaders\Tessellation\Tessellation_VS.hlsl">
+      <Filter>Shader Files\Tessellation</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\Tessellation_HS.hlsl">
-      <Filter>Shader Files</Filter>
+    <CustomBuild Include="Source\Renderer\Shaders\Tessellation\Tessellation_HS.hlsl">
+      <Filter>Shader Files\Tessellation</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\Tessellation_DS.hlsl">
-      <Filter>Shader Files</Filter>
+    <CustomBuild Include="Source\Renderer\Shaders\Tessellation\Tessellation_DS.hlsl">
+      <Filter>Shader Files\Tessellation</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\Tessellation_GS.hlsl">
-      <Filter>Shader Files</Filter>
+    <CustomBuild Include="Source\Renderer\Shaders\Tessellation\Tessellation_GS.hlsl">
+      <Filter>Shader Files\Tessellation</Filter>
     </CustomBuild>
     <CustomBuild Include="Source\Renderer\Shaders\SSAO\SSAO_VS.hlsl">
       <Filter>Shader Files\SSAO</Filter>
@@ -501,8 +591,14 @@
     <None Include="Source\Renderer\Shaders\Debug\DebugProbeGrid_PS.hlsl">
       <Filter>Shader Files\Debug</Filter>
     </None>
-    <None Include="Source\Renderer\Shaders\Debug\Tessellation_Debug_PS.hlsl">
-      <Filter>Shader Files\Debug</Filter>
+    <None Include="Source\Renderer\Shaders\Basic\BasicShader.hlsl">
+      <Filter>Shader Files\Basic</Filter>
+    </None>
+    <None Include="Source\Renderer\Shaders\Tessellation\Tessellation_Debug_DS.hlsl">
+      <Filter>Shader Files\Tessellation</Filter>
+    </None>
+    <None Include="Source\Renderer\Shaders\Tessellation\Tessellation_Debug_PS.hlsl">
+      <Filter>Shader Files\Tessellation</Filter>
     </None>
     <None Include="Source\Renderer\Shaders\Shadow\ShadowVSM_PS.hlsl">
       <Filter>Shader Files\Shadow</Filter>
@@ -510,8 +606,14 @@
     <None Include="Source\Renderer\Shaders\Shadow\ShadowVSM_GaussBlur_CS.hlsl">
       <Filter>Shader Files\Shadow</Filter>
     </None>
-    <None Include="Source\Renderer\Shaders\SkinnedMesh_VS.hlsl">
-      <Filter>Shader Files</Filter>
+    <None Include="Source\Renderer\Shaders\SkinnedMesh\SkinnedMesh_VS.hlsl">
+      <Filter>Shader Files\SkinnedMesh</Filter>
+    </None>
+    <None Include="Source\Renderer\Shaders\Denoising\NRD\NRD.hlsli">
+      <Filter>Shader Files\Denoising\NRD</Filter>
+    </None>
+    <None Include="Source\Renderer\Shaders\Denoising\NRD\NRDConfig.hlsli">
+      <Filter>Shader Files\Denoising\NRD</Filter>
     </None>
   </ItemGroup>
 </Project>

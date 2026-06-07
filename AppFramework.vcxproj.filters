@@ -57,6 +57,9 @@
     <ClInclude Include="Source\AppFramework\ApplicationCore.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Source\AppFramework\ApplicationResourcePaths.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Source\AppFramework\IApplication.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -81,7 +84,13 @@
     <ClInclude Include="Source\AppFramework\Object\StaticModel.h">
       <Filter>Header Files\Object</Filter>
     </ClInclude>
-    <ClInclude Include="Source\AppFramework\Object\MeshComponent.h">
+    <ClInclude Include="Source\AppFramework\Object\SkinnedModel.h">
+      <Filter>Header Files\Object</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Component\MeshComponent.h">
+      <Filter>Header Files\Component</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Component\SkinnedMeshComponent.h">
       <Filter>Header Files\Component</Filter>
     </ClInclude>
     <ClInclude Include="Source\AppFramework\Component\IComponent.h">
@@ -119,6 +128,9 @@
     <ClCompile Include="Source\AppFramework\ApplicationCore.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Source\AppFramework\ApplicationResourcePaths.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Source\AppFramework\Object\StaticModel.cpp">
       <Filter>Source Files\Object</Filter>
     </ClCompile>
@@ -149,7 +161,10 @@
     <ClCompile Include="Source\AppFramework\UI\ImGuiCoordinator.cpp">
       <Filter>Source Files\Input\Imgui</Filter>
     </ClCompile>
-    <ClCompile Include="Source\AppFramework\Object\MeshComponent.cpp">
+    <ClCompile Include="Source\AppFramework\Component\MeshComponent.cpp">
+      <Filter>Source Files\Component</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Component\SkinnedMeshComponent.cpp">
       <Filter>Source Files\Component</Filter>
     </ClCompile>
     <ClCompile Include="Source\AppFramework\Input\InputSystem.cpp">
@@ -160,6 +175,9 @@
     </ClCompile>
     <ClCompile Include="Source\AppFramework\Loader\AssetLoader.cpp">
       <Filter>Source Files\Tool</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Object\SkinnedModel.cpp">
+      <Filter>Source Files\Object</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

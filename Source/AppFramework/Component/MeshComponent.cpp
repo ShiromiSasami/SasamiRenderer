@@ -1,0 +1,178 @@
+#include "Component/MeshComponent.h"
+
+#include <atomic>
+#include <cstdint>
+
+#include "ApplicationResourcePaths.h"
+#include "Foundation/Math/MathUtil.h"
+#include "Loader/AssetLoader.h"
+#include "Loader/ModelLoader.h"
+
+namespace SasamiRenderer
+{
+    using Math::Mul4x4;
+
+    namespace
+    {
+        static std::atomic<uint64_t> g_cpuTextureIdCounter{ 1 };
+
+        static std::shared_ptr<const CpuTextureRgba8> LoadCpuTextureFromPath(const std::string& path)
+        {
+            if (path.empty()) {
+                return nullptr;
+            }
+
+            UINT textureWidth = 0;
+            UINT textureHeight = 0;
+            std::vector<uint8_t> pixels;
+            const std::wstring resolvedPath = ApplicationResourcePaths::ResolveAssetPathWide(path);
+            if (!AssetLoader::LoadRgba8ViaWIC(resolvedPath, pixels, textureWidth, textureHeight)) {
+                return nullptr;
+            }
+
+            auto textureData = std::make_shared<CpuTextureRgba8>();
+            textureData->id = g_cpuTextureIdCounter.fetch_add(1, std::memory_order_relaxed);
+            textureData->pixels = std::move(pixels);
+            textureData->width = textureWidth;
+            textureData->height = textureHeight;
+            return textureData;
+        }
+
+    }
+
+    bool MeshComponent::LoadModel(const std::string& assetPath, ModelFormat format, float uniformScale)
+    {
+        Clear();
+        m_debugAssetPath.clear();
+        const std::string fullPath = ApplicationResourcePaths::ResolveAssetPathString(assetPath);
+
+        StaticModelFormat loaderFormat = StaticModelFormat::Obj;
+        switch (format) {
+        case ModelFormat::Obj:
+            loaderFormat = StaticModelFormat::Obj;
+            break;
+        case ModelFormat::Gltf:
+            loaderFormat = StaticModelFormat::Gltf;
+            break;
+        default:
+            return false;
+        }
+
+        std::vector<LoadedStaticMesh> loadedMeshes;
+        if (!LoadStaticModel(fullPath, loaderFormat, uniformScale, loadedMeshes)) {
+            return false;
+        }
+
+        m_staticMeshes.reserve(loadedMeshes.size());
+        for (auto& loaded : loadedMeshes) {
+            StaticMeshSource src;
+            src.mesh = std::move(loaded.mesh);
+            src.albedoTexture = LoadCpuTextureFromPath(loaded.texturePath);
+            src.occlusionTexture = LoadCpuTextureFromPath(loaded.occlusionTexturePath);
+            src.material = loaded.material;
+            if (!loaded.metallicRoughnessTexturePath.empty()) {
+                src.usesMetallicRoughnessTexture = true;
+                if (loaded.metallicRoughnessTexturePath == loaded.occlusionTexturePath && src.occlusionTexture) {
+                    // glTF commonly packs occlusion(R), roughness(G), metallic(B) in one texture.
+                } else {
+                    src.occlusionTexture = LoadCpuTextureFromPath(loaded.metallicRoughnessTexturePath);
+                    // The current raster material root layout has one material texture slot.
+                    // Prefer roughness/metallic and disable AO if glTF uses separate images.
+                    src.material.occlusionStrength = 0.0f;
+                }
+            }
+            for (int i = 0; i < 16; ++i) {
+                src.localTransform[i] = loaded.localTransform[i];
+            }
+            m_staticMeshes.push_back(std::move(src));
+        }
+
+        if (!m_staticMeshes.empty()) {
+            m_debugAssetPath = assetPath;
+        }
+        return !m_staticMeshes.empty();
+    }
+
+    void MeshComponent::AddStaticMesh(Mesh mesh,
+                                      const std::string& albedoTexturePath,
+                                      const std::string& occlusionTexturePath)
+    {
+        AddStaticMesh(std::move(mesh), SurfaceMaterial{}, albedoTexturePath, occlusionTexturePath);
+    }
+
+    void MeshComponent::AddStaticMesh(Mesh mesh,
+                                      const SurfaceMaterial& material,
+                                      const std::string& albedoTexturePath,
+                                      const std::string& occlusionTexturePath)
+    {
+        StaticMeshSource src;
+        src.mesh = std::move(mesh);
+        src.albedoTexture = LoadCpuTextureFromPath(albedoTexturePath);
+        src.occlusionTexture = LoadCpuTextureFromPath(occlusionTexturePath);
+        src.material = material;
+        m_staticMeshes.push_back(std::move(src));
+    }
+
+    std::vector<RenderProxy> MeshComponent::BuildRenderProxies() const
+    {
+        static constexpr float kOpaqueAlphaThreshold = 0.999f;
+        static constexpr float kTransparentTransmissionThreshold = 0.01f;
+
+        std::vector<RenderProxy> proxies;
+        proxies.reserve(m_staticMeshes.size());
+
+        for (const auto& src : m_staticMeshes) {
+            RenderProxy proxy;
+            proxy.mesh = src.mesh;
+            proxy.albedoTexture = src.albedoTexture;
+            proxy.occlusionTexture = src.occlusionTexture;
+            proxy.usesMetallicRoughnessTexture = src.usesMetallicRoughnessTexture;
+            proxy.material = src.material;
+            proxy.transparent =
+                (src.material.baseColor[3] < kOpaqueAlphaThreshold) ||
+                (src.material.transmission > kTransparentTransmissionThreshold);
+            proxy.debugLabel = m_debugAssetPath;
+            // Final model matrix for draw = local mesh transform * component transform.
+            Mul4x4(src.localTransform, m_model, proxy.model);
+            proxies.push_back(std::move(proxy));
+        }
+
+        return proxies;
+    }
+
+    bool MeshComponent::SetMaterial(size_t meshIndex, const SurfaceMaterial& material)
+    {
+        if (meshIndex >= m_staticMeshes.size()) {
+            return false;
+        }
+
+        m_staticMeshes[meshIndex].material = material;
+        return true;
+    }
+
+    const SurfaceMaterial* MeshComponent::GetMaterial(size_t meshIndex) const
+    {
+        if (meshIndex >= m_staticMeshes.size()) {
+            return nullptr;
+        }
+
+        return &m_staticMeshes[meshIndex].material;
+    }
+
+    void MeshComponent::Clear()
+    {
+        m_staticMeshes.clear();
+        m_debugAssetPath.clear();
+        for (int i = 0; i < 16; ++i) {
+            m_model[i] = (i % 5 == 0) ? 1.0f : 0.0f;
+        }
+    }
+
+    void MeshComponent::SetTranslation(float x, float y, float z)
+    {
+        // Row-major affine translation slots (row-vector convention).
+        m_model[12] = x;
+        m_model[13] = y;
+        m_model[14] = z;
+    }
+}

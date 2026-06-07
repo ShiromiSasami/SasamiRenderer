@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Renderer/Core/GraphicsDevice.h"
+#include "Renderer/RHI/GraphicsDevice.h"
 
 #include <cstdint>
 #include <functional>
@@ -14,7 +14,7 @@ namespace SasamiRenderer
     // BRDF LUT, and diffuse SH coefficients.
     //
     // Owned by Skybox, which feeds it equirect environment data.
-    // Consumers (LightSystem, LightingRenderNode, SWRT) access IBL via Skybox getter shims.
+    // Consumers (LightSystem, LightingRenderPass, SWRT) access IBL via Skybox getter shims.
     //
     class IblSystem
     {

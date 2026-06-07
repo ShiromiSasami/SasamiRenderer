@@ -1,5 +1,5 @@
 #pragma once
-#include "Renderer/Core/GraphicsDevice.h"
+#include "Renderer/RHI/GraphicsDevice.h"
 
 namespace SasamiRenderer
 {
@@ -13,6 +13,7 @@ namespace SasamiRenderer
     class Texture {
     public:
         Resource resource;
+        RhiTextureHandle rhiTexture{};
         GpuDescriptorHandle srv = {};
         TextureDesc desc;
     };

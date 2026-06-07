@@ -4,7 +4,7 @@
 #include <cstdint>
 
 #include "Object/SObject.h"
-#include "Object/MeshComponent.h"
+#include "Component/MeshComponent.h"
 
 namespace SasamiRenderer
 {
