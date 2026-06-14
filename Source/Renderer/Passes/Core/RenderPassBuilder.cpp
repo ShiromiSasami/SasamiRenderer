@@ -8,6 +8,7 @@
 #include "Renderer/Passes/RayTracing/RayTracingRenderPass.h"
 #include "Renderer/Passes/Geometry/ShadowRenderPass.h"
 #include "Renderer/Passes/Sky/SkyboxRenderPass.h"
+#include "Renderer/Passes/Reflections/ScreenSpaceReflectionRenderPass.h"
 #include "Renderer/Passes/Reflections/SoftwareReflectionCompositeRenderPass.h"
 #include "Renderer/Passes/Reflections/SoftwareReflectionRenderPass.h"
 #include "Renderer/Passes/Lighting/SSAORenderPass.h"
@@ -99,6 +100,8 @@ namespace SasamiRenderer
             RenderPassBuilderId::TransparentSceneColorCopy, "Transparent Scene Color Copy"));
         catalog.Register(std::make_unique<StatelessRenderPassBuilder<TransparentCompositeRenderPass>>(
             RenderPassBuilderId::TransparentComposite, "Transparent Composite"));
+        catalog.Register(std::make_unique<StatelessRenderPassBuilder<ScreenSpaceReflectionRenderPass>>(
+            RenderPassBuilderId::ScreenSpaceReflection, "Screen Space Reflection"));
         catalog.Register(std::make_unique<StatelessRenderPassBuilder<SoftwareReflectionRenderPass>>(
             RenderPassBuilderId::SoftwareReflection, "Software Reflection"));
         catalog.Register(std::make_unique<StatelessRenderPassBuilder<SoftwareReflectionCompositeRenderPass>>(
@@ -162,6 +165,7 @@ namespace SasamiRenderer
         case RenderPassType::TransparentBackfaceDistance: return RenderPassBuilderId::TransparentBackfaceDistance;
         case RenderPassType::TransparentSceneColorCopy: return RenderPassBuilderId::TransparentSceneColorCopy;
         case RenderPassType::TransparentComposite: return RenderPassBuilderId::TransparentComposite;
+        case RenderPassType::ScreenSpaceReflection: return RenderPassBuilderId::ScreenSpaceReflection;
         case RenderPassType::SoftwareReflection: return RenderPassBuilderId::SoftwareReflection;
         case RenderPassType::SoftwareReflectionComposite: return RenderPassBuilderId::SoftwareReflectionComposite;
         default: return RenderPassBuilderId::Opaque;

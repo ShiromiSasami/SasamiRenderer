@@ -31,6 +31,7 @@ namespace SasamiRenderer
         TransparentBackfaceDistance,
         TransparentSceneColorCopy,
         TransparentComposite,
+        ScreenSpaceReflection,
         SoftwareReflection,
         SoftwareReflectionComposite,
         RayTracing,

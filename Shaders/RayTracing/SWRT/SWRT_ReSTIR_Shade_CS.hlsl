@@ -1,0 +1,182 @@
+//
+// SWRT_ReSTIR_Shade_CS.hlsl
+// Pass 4 of the ReSTIR DI pipeline – final shading.
+//
+// For each pixel: reads the post-spatial reservoir, casts one shadow ray to
+// the selected light, and evaluates full PBR shading weighted by reservoir W.
+//
+// Bindings:
+//   b0  : ReSTIRFrameConstants (inline CBV)
+//   t0-t5 : BVH SRVs (for shadow rays)
+//   t6  : g_gbuffer    (current frame GBuffer – scratch SRV[0])
+//   t7  : g_albedo     (scratch SRV[1] – unused, albedo stored in GBuffer α)
+//   t12 : g_pointLights (inline SRV)
+//   t13 : g_spotLights  (inline SRV)
+//   t14 : g_reservoir   (spatial reservoirs from Pass3, inline SRV)
+//   u0  : g_shadedOut   (R16G16B16A16_FLOAT, scratch UAV[0])
+//
+
+#include "RayTracing/SWRT/SWRT_Common.hlsli"
+#include "RayTracing/SWRT/SWRT_LightTypes.hlsli"
+#include "RayTracing/SWRT/SWRT_Reservoir.hlsli"
+#include "Effects/Sky/ProceduralSky/ProceduralSky.hlsli"
+
+cbuffer ReSTIRFrameConstants : register(b0)
+{
+    row_major float4x4 g_invVP;
+    row_major float4x4 g_prevVP;
+    float3 g_cameraPos;
+    float  g_tMin;
+    uint   g_renderWidth;
+    uint   g_renderHeight;
+    uint   g_frameIndex;
+    uint   g_reservoirWidth;
+    float  g_temporalAlpha;
+    float  g_phiColor;
+    float  g_phiNormal;
+    float  g_phiDepth;
+    float  g_stepWidth;
+    float  g_maxSurfaceRoughness;
+    float  g_maxPrimaryHitDistance;
+    float  g_minReflectionEnergy;
+    float3 g_dirLightDir;
+    float  g_dirLightIntensity;
+    float3 g_dirLightColor;
+    float  g_shadowBias;
+    float3 g_ambientColor;
+    float  g_ambientIntensity;
+    uint   g_pointLightCount;
+    uint   g_spotLightCount;
+    uint   g_cbPad0;
+    uint   g_cbPad1;
+};
+
+Texture2D<float4> g_gbuffer         : register(t6);  // secondary normal.xyz + hit distance
+Texture2D<float4> g_hitMaterial     : register(t7);  // secondary baseColor.rgb + roughness
+Texture2D<float4> g_hitPosition     : register(t9);  // secondary world position.xyz + (1 + metallic), 0 = invalid
+
+StructuredBuffer<GpuPointLightRT> g_pointLights : register(t12);
+StructuredBuffer<GpuSpotLightRT>  g_spotLights  : register(t13);
+
+StructuredBuffer<Reservoir> g_reservoir : register(t14);
+RWTexture2D<float4>         g_shadedOut : register(u0);   // scratch UAV[0]
+
+#include "SWRT_ReSTIR_Shading.hlsli"
+
+[numthreads(16, 16, 1)]
+void CS_ReSTIR_Shade(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= g_renderWidth || id.y >= g_renderHeight) return;
+
+    float4 gbuf  = g_gbuffer[id.xy];
+    float  depth = gbuf.w;
+    float4 hitPosSample = g_hitPosition[id.xy];
+
+    if (depth < 0.0f || hitPosSample.w <= 0.0f)
+    {
+        // depth == -2.0f: ray miss — gbuf.xyz holds the reflection direction.
+        // depth == -1.0f: fully invalid pixel (no primary geometry / TLAS / low energy).
+        if (depth < -1.5f)
+        {
+            float3 reflDir = normalize(gbuf.xyz);
+            float3 skyColor = ComputeSkyColor(reflDir,
+                                  normalize(g_dirLightDir),
+                                  g_dirLightColor,
+                                  g_dirLightIntensity);
+            g_shadedOut[id.xy] = float4(skyColor, 1.0f);
+        }
+        else
+        {
+            g_shadedOut[id.xy] = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        }
+        return;
+    }
+
+    float3 N       = normalize(gbuf.xyz);
+    float3 worldPos = hitPosSample.xyz;
+    float3 V       = normalize(g_cameraPos - worldPos);
+
+    uint pixIdx = id.y * g_reservoirWidth + id.x;
+    Reservoir r  = g_reservoir[pixIdx];
+
+    float4 hitMat = g_hitMaterial.Load(int3(id.xy, 0));
+    float3 albedo    = saturate(hitMat.rgb);
+    float  roughness = saturate(hitMat.a);
+    float  metallic  = saturate(hitPosSample.w - 1.0f);
+
+    float3 color = float3(0, 0, 0);
+
+    // --- Selected light (ReSTIR) ---
+    if (r.lightIndex != 0xFFFFFFFFu && r.W > 0.0f)
+    {
+        uint   totalLights = g_pointLightCount + g_spotLightCount;
+        uint   li          = r.lightIndex;
+        bool   valid       = li < totalLights;
+        float3 lightPos    = float3(0,0,0);
+        float3 lightRad    = float3(0,0,0);
+        float  lightRange  = 0.0f;
+
+        if (valid && li < g_pointLightCount)
+        {
+            GpuPointLightRT pl = g_pointLights[li];
+            lightPos   = pl.pos;
+            lightRad   = pl.colorIntensity;
+            lightRange = pl.range;
+        }
+        else if (valid)
+        {
+            uint si = li - g_pointLightCount;
+            GpuSpotLightRT sl = g_spotLights[si];
+            lightPos   = sl.pos;
+            lightRad   = sl.colorIntensity;
+            lightRange = sl.range;
+            float3 toL = normalize(lightPos - worldPos);
+            float  cosA = dot(-toL, normalize(sl.dir));
+            if (cosA >= sl.cosOuter)
+                lightRad *= smoothstep(sl.cosOuter, sl.cosInner, cosA);
+            else
+                valid = false;
+        }
+
+        if (valid)
+        {
+            float3 toLight = lightPos - worldPos;
+            float  dist    = length(toLight);
+            if (dist < lightRange)
+            {
+                float3 L       = toLight / dist;
+                float  NdotL   = max(dot(N, L), 0.0f);
+                bool   inShadow = TraceAnyHit(OffsetRay(worldPos, N), L, 0.0f, dist - 0.001f);
+                if (!inShadow && NdotL > 0.0f)
+                {
+                    // Distance attenuation
+                    float t     = dist / max(lightRange, 1e-4f);
+                    float atten = saturate(1.0f - t * t) * (1.0f - t * t);
+                    // ReSTIR contribution: PBR * W (the reservoir weight)
+                    color += EvalPBR(N, L, V, albedo, roughness, metallic,
+                                     lightRad * atten) * r.W;
+                }
+            }
+        }
+    }
+
+    // --- Directional light ---
+    {
+        float3 L     = normalize(g_dirLightDir);
+        float  NdotL = max(dot(N, L), 0.0f);
+        if (NdotL > 0.0f)
+        {
+            bool inShadow = TraceAnyHit(OffsetRay(worldPos, N), L, 0.0f, 200.0f);
+            if (!inShadow)
+                color += EvalPBR(N, L, V, albedo, roughness, metallic,
+                                 g_dirLightColor * g_dirLightIntensity);
+        }
+    }
+
+    // Ambient
+    color += albedo * g_ambientColor * g_ambientIntensity;
+
+    // Roughness attenuation only — Fresnel is applied per-channel in PBR_PS.hlsl.
+    // (Same convention as SWRT_Reflection_CS.hlsl: alpha = roughnessAtten, not fresnelWeight.)
+    g_shadedOut[id.xy] = float4(color, 1.0f);
+}

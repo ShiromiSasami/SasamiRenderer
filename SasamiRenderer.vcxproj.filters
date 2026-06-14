@@ -31,22 +31,40 @@
     <Filter Include="Shader Files">
       <UniqueIdentifier>{17e92507-9455-49a5-990c-1c4d5d9f3c4d}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Shader Files\Basic">
+    <Filter Include="Shader Files\Shared">
+      <UniqueIdentifier>{2a66ad75-91b0-4373-a271-1f18076d9670}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Shared\Common">
+      <UniqueIdentifier>{89ba8c21-4bf4-43b5-a062-267a933a6268}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Shared\Basic">
       <UniqueIdentifier>{9427fafa-7f99-4eb0-a3fa-593c9f3f26bc}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Shader Files\PBR">
+    <Filter Include="Shader Files\Raster">
+      <UniqueIdentifier>{291d6e90-46f9-4556-b9f5-6f91a4d85d4a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Raster\Geometry">
+      <UniqueIdentifier>{b6217e0f-4de9-4a71-8488-7b73e6d24ae6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Raster\Geometry\MeshShader">
+      <UniqueIdentifier>{ec32705d-2e59-4c18-8798-a74925b0d516}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Raster\Lighting">
+      <UniqueIdentifier>{f778f23d-2462-4efd-9f09-afc32ec41564}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Raster\Lighting\PBR">
       <UniqueIdentifier>{7a03e0a8-b451-403e-b0a1-8db53e27a13f}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Shader Files\Opaque">
+    <Filter Include="Shader Files\Raster\Geometry\Opaque">
       <UniqueIdentifier>{538f8593-c97f-4848-b4c8-2cba0baf2d04}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Shader Files\Tessellation">
+    <Filter Include="Shader Files\Raster\Geometry\Tessellation">
       <UniqueIdentifier>{79ba20ac-c4c8-407c-a71e-168086ea8481}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Shader Files\Transparent">
+    <Filter Include="Shader Files\Raster\Transparency">
       <UniqueIdentifier>{ebebad9f-1330-4236-af64-e7d926318d80}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Shader Files\SkinnedMesh">
+    <Filter Include="Shader Files\Raster\Geometry\SkinnedMesh">
       <UniqueIdentifier>{74816725-2739-4fca-9356-3774e58cd746}</UniqueIdentifier>
     </Filter>
     <Filter Include="Shader Files\Denoising">
@@ -55,11 +73,32 @@
     <Filter Include="Shader Files\Denoising\NRD">
       <UniqueIdentifier>{bb65cd1c-cc0d-46bd-a42d-589f4d2ba909}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Shader Files\Skybox">
+    <Filter Include="Shader Files\Effects">
+      <UniqueIdentifier>{9a1174a3-45f6-407e-a73e-65683d73f15a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Effects\PostProcess">
+      <UniqueIdentifier>{a5c15619-ce1c-4544-bbb7-ae6764b4293d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Effects\Sky">
+      <UniqueIdentifier>{b7160909-6a4c-4248-a108-88e95c1d9ec5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Effects\Sky\Skybox">
       <UniqueIdentifier>{0fe97ee0-0f8c-4ff0-8f5f-d6284a96e4ea}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Shader Files\SSAO">
+    <Filter Include="Shader Files\Effects\Sky\ProceduralSky">
+      <UniqueIdentifier>{c31a9fc7-c2e5-4221-9e61-bf727f1f8b3b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Effects\AmbientOcclusion">
+      <UniqueIdentifier>{d2fa45fa-0171-4238-8476-84241a25278a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Effects\AmbientOcclusion\SSAO">
       <UniqueIdentifier>{b3c1a2d4-e5f6-4789-ab01-23cd456ef789}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Effects\Reflections">
+      <UniqueIdentifier>{dc76098d-56db-4291-91ac-bd1f9763adbd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Effects\Reflections\SSR">
+      <UniqueIdentifier>{1a3df700-8dc2-47d3-a87c-131e8e42835f}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files\Tools">
       <UniqueIdentifier>{eb75eba7-f5ba-4126-aaa5-00245943bcd9}</UniqueIdentifier>
@@ -70,20 +109,32 @@
     <Filter Include="Source Files\GI">
       <UniqueIdentifier>{a1b2c3d4-e5f6-7890-ab01-23cd45ef6789}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Shader Files\GI">
-      <UniqueIdentifier>{b2c3d4e5-f6a7-8901-bc12-34de56f07891}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Shader Files\Debug">
+      <UniqueIdentifier>{970590c0-5d92-406f-9a74-5098e975af9e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Debug\ProbeGrid">
       <UniqueIdentifier>{c3d4e5f6-a7b8-9012-cd23-45ef67089012}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Shader Files\VolumetricCloud">
+    <Filter Include="Shader Files\Debug\Meshlet">
+      <UniqueIdentifier>{e9a8f2f8-95a5-4d00-ab4e-0c130601576b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Effects\Volumetric">
+      <UniqueIdentifier>{22b67a4d-9fc9-4654-9f68-91c66774e900}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Effects\Volumetric\Cloud">
       <UniqueIdentifier>{d4e5f6a7-b8c9-0123-de34-56f0781a2345}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Shader Files\RayMarch">
+    <Filter Include="Shader Files\Effects\RayMarch">
       <UniqueIdentifier>{e5f6a7b8-c9d0-1234-ef45-670891ab2345}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Shader Files\Shadow">
+    <Filter Include="Shader Files\Raster\Lighting\Shadow">
       <UniqueIdentifier>{f6a7b8c9-d0e1-2345-f056-781ab9cd2345}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Backend">
+      <UniqueIdentifier>{376f30bb-b3de-4609-8365-4a48b38f4f07}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Backend\Native">
+      <UniqueIdentifier>{cdf9d05e-711a-4989-a860-647eb7c565e6}</UniqueIdentifier>
     </Filter>
     <Filter Include="Header Files\Backends">
       <UniqueIdentifier>{2f6410aa-64b9-4a50-9b6f-79864cc25d15}</UniqueIdentifier>
@@ -118,6 +169,18 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="Libraries\packages.config" />
+    <None Include="Shaders\RayTracing\SWRT\SWRT_Reservoir.hlsli" />
+    <None Include="Shaders\RayTracing\SWRT\SWRT_ReSTIR_Initial_CS.hlsl" />
+    <None Include="Shaders\RayTracing\SWRT\SWRT_ReSTIR_Temporal_CS.hlsl" />
+    <None Include="Shaders\RayTracing\SWRT\SWRT_ReSTIR_Spatial_CS.hlsl" />
+    <None Include="Shaders\RayTracing\SWRT\SWRT_ReSTIR_Shade_CS.hlsl" />
+    <None Include="Shaders\RayTracing\SWRT\SWRT_NRD_Pack_CS.hlsl" />
+    <None Include="Shaders\RayTracing\SWRT\SWRT_Shadow_ReSTIR_CS.hlsl" />
+    <None Include="Shaders\RayTracing\GI\GI_Common.hlsli" />
+    <None Include="Shaders\RayTracing\GI\GI_ProbeUpdate_CS.hlsl" />
+    <None Include="Shaders\Shared\Common\LightCB.hlsli">
+      <Filter>Shader Files\Shared\Common</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Renderer\Backends\DirectX11\Dx11GraphicsDevice.h">
@@ -258,6 +321,9 @@
     <ClInclude Include="Source\Foundation\Math\MathUtil.h">
       <Filter>Header Files\Tool</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Foundation\Profiling\Profiler.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Renderer\Passes\Geometry\OpaqueRenderPass.h">
       <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
@@ -297,6 +363,9 @@
     <ClInclude Include="Source\Renderer\Passes\Lighting\SSAORenderPass.h">
       <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\Reflections\ScreenSpaceReflectionRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Renderer\Passes\Reflections\SoftwareReflectionRenderPass.h">
       <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
@@ -311,9 +380,6 @@
     </ClInclude>
     <ClInclude Include="Source\Renderer\GI\IrradianceProbeGrid.h">
       <Filter>Source Files\GI</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Renderer\RayTracing\SoftwareRayTracer.h">
-      <Filter>Source Files\RayTrace</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\RayTracing\GpuSoftwareRayTracer.h">
       <Filter>Source Files\RayTrace</Filter>
@@ -341,6 +407,12 @@
     </ClInclude>
     <ClInclude Include="Source\Renderer\Passes\RayMarch\RayMarchRenderPass.h">
       <Filter>Header Files\RenderPass</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\Geometry\MeshShaderRenderPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\MeshletBuffer.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -467,9 +539,6 @@
     <ClCompile Include="Source\Renderer\Utilities\RendererMathUtility.cpp">
       <Filter>Source Files\Tools</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\RayTracing\SoftwareRayTracer.cpp">
-      <Filter>Source Files\RayTrace</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwareRayTracer.cpp">
       <Filter>Source Files\RayTrace</Filter>
     </ClCompile>
@@ -486,6 +555,9 @@
       <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Passes\Lighting\SSAORenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\Reflections\ScreenSpaceReflectionRenderPass.cpp">
       <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Passes\Reflections\SoftwareReflectionRenderPass.cpp">
@@ -509,110 +581,171 @@
     <ClCompile Include="Source\Renderer\Passes\Sky\VolumetricCloudRenderPass.cpp">
       <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Renderer\Resources\RenderPipelineStateCache_Ssr.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Foundation\Profiling\Profiler.cpp">
+      <Filter>Source Files\Tools</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\RayTracing\DxrRayTracer_Setup.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwareBvhBuilder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwarePipelineCache.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwareRayTracer_Legacy.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwareRayTracer_ReSTIR.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\Geometry\MeshShaderRenderPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Scene\MeshletBuffer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Scene\LightSystem_Shadow.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Scene\Skybox_IBL.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\RenderGraph\RenderGraph_Registry.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Resources\RenderTargetPool_Swrt.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Runtime\Renderer_Render.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Runtime\RendererInitialization.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Runtime\RendererGraphicsCommands.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Resources\RenderPipelineStateCache_Effects.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Resources\RenderPipelineStateCache_Ssao.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Resources\RenderPipelineStateCache_MeshShader.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="Source\Renderer\Shaders\PBR\CookTorranceGGX_VS.hlsl">
-      <Filter>Shader Files\PBR</Filter>
+    <CustomBuild Include="Shaders\Raster\Lighting\PBR\CookTorranceGGX_VS.hlsl">
+      <Filter>Shader Files\Raster\Lighting\PBR</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\PBR\CookTorranceGGX_PS.hlsl">
-      <Filter>Shader Files\PBR</Filter>
+    <CustomBuild Include="Shaders\Raster\Lighting\PBR\CookTorranceGGX_PS.hlsl">
+      <Filter>Shader Files\Raster\Lighting\PBR</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\Transparent\TransparentBackfaceDistance_PS.hlsl">
-      <Filter>Shader Files\Transparent</Filter>
+    <CustomBuild Include="Shaders\Raster\Transparency\TransparentBackfaceDistance_PS.hlsl">
+      <Filter>Shader Files\Raster\Transparency</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\Transparent\TransparentOIT_PS.hlsl">
-      <Filter>Shader Files\Transparent</Filter>
+    <CustomBuild Include="Shaders\Raster\Transparency\TransparentOIT_PS.hlsl">
+      <Filter>Shader Files\Raster\Transparency</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\Transparent\TransparentOITComposite_PS.hlsl">
-      <Filter>Shader Files\Transparent</Filter>
+    <CustomBuild Include="Shaders\Raster\Transparency\TransparentOITComposite_PS.hlsl">
+      <Filter>Shader Files\Raster\Transparency</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\Opaque\Opaque_VS.hlsl">
-      <Filter>Shader Files\Opaque</Filter>
+    <CustomBuild Include="Shaders\Raster\Geometry\Opaque\Opaque_VS.hlsl">
+      <Filter>Shader Files\Raster\Geometry\Opaque</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\Opaque\Opaque_PS.hlsl">
-      <Filter>Shader Files\Opaque</Filter>
+    <CustomBuild Include="Shaders\Raster\Geometry\Opaque\Opaque_PS.hlsl">
+      <Filter>Shader Files\Raster\Geometry\Opaque</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\Skybox\Skybox_VS.hlsl">
-      <Filter>Shader Files\Skybox</Filter>
+    <CustomBuild Include="Shaders\Effects\Sky\Skybox\Skybox_VS.hlsl">
+      <Filter>Shader Files\Effects\Sky\Skybox</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\Skybox\Skybox_HDR_PS.hlsl">
-      <Filter>Shader Files\Skybox</Filter>
+    <CustomBuild Include="Shaders\Effects\Sky\Skybox\Skybox_HDR_PS.hlsl">
+      <Filter>Shader Files\Effects\Sky\Skybox</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\Skybox\Skybox_PS.hlsl">
-      <Filter>Shader Files\Skybox</Filter>
+    <CustomBuild Include="Shaders\Effects\Sky\Skybox\Skybox_PS.hlsl">
+      <Filter>Shader Files\Effects\Sky\Skybox</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\Tessellation\Tessellation_VS.hlsl">
-      <Filter>Shader Files\Tessellation</Filter>
+    <CustomBuild Include="Shaders\Raster\Geometry\Tessellation\Tessellation_VS.hlsl">
+      <Filter>Shader Files\Raster\Geometry\Tessellation</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\Tessellation\Tessellation_HS.hlsl">
-      <Filter>Shader Files\Tessellation</Filter>
+    <CustomBuild Include="Shaders\Raster\Geometry\Tessellation\Tessellation_HS.hlsl">
+      <Filter>Shader Files\Raster\Geometry\Tessellation</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\Tessellation\Tessellation_DS.hlsl">
-      <Filter>Shader Files\Tessellation</Filter>
+    <CustomBuild Include="Shaders\Raster\Geometry\Tessellation\Tessellation_DS.hlsl">
+      <Filter>Shader Files\Raster\Geometry\Tessellation</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\Tessellation\Tessellation_GS.hlsl">
-      <Filter>Shader Files\Tessellation</Filter>
+    <CustomBuild Include="Shaders\Raster\Geometry\Tessellation\Tessellation_GS.hlsl">
+      <Filter>Shader Files\Raster\Geometry\Tessellation</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\SSAO\SSAO_VS.hlsl">
-      <Filter>Shader Files\SSAO</Filter>
+    <CustomBuild Include="Shaders\Effects\AmbientOcclusion\SSAO\SSAO_VS.hlsl">
+      <Filter>Shader Files\Effects\AmbientOcclusion\SSAO</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\SSAO\SSAO_PS.hlsl">
-      <Filter>Shader Files\SSAO</Filter>
+    <CustomBuild Include="Shaders\Effects\AmbientOcclusion\SSAO\SSAO_PS.hlsl">
+      <Filter>Shader Files\Effects\AmbientOcclusion\SSAO</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\SWRT\SWRT_ReflectionComposite_PS.hlsl">
-      <Filter>Shader Files</Filter>
+    <CustomBuild Include="Shaders\Effects\AmbientOcclusion\SSAO\SSAO_Blur_PS.hlsl">
+      <Filter>Shader Files\Effects\AmbientOcclusion\SSAO</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\PostProcess\ToneMap_PS.hlsl">
-      <Filter>Shader Files</Filter>
+    <CustomBuild Include="Shaders\Effects\Reflections\SSR\ScreenSpaceReflection_CS.hlsl">
+      <Filter>Shader Files\Effects\Reflections\SSR</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\VolumetricCloud\VolumetricCloud_VS.hlsl">
-      <Filter>Shader Files\VolumetricCloud</Filter>
+    <CustomBuild Include="Shaders\Effects\PostProcess\ToneMap_PS.hlsl">
+      <Filter>Shader Files\Effects\PostProcess</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\VolumetricCloud\VolumetricCloud_PS.hlsl">
-      <Filter>Shader Files\VolumetricCloud</Filter>
+    <CustomBuild Include="Shaders\Effects\RayMarch\RayMarch_VS.hlsl">
+      <Filter>Shader Files\Effects\RayMarch</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\RayMarch\RayMarch_VS.hlsl">
-      <Filter>Shader Files\RayMarch</Filter>
+    <CustomBuild Include="Shaders\Effects\RayMarch\RayMarch_PS.hlsl">
+      <Filter>Shader Files\Effects\RayMarch</Filter>
     </CustomBuild>
-    <CustomBuild Include="Source\Renderer\Shaders\RayMarch\RayMarch_PS.hlsl">
-      <Filter>Shader Files\RayMarch</Filter>
+    <CustomBuild Include="Shaders\Effects\Sky\ProceduralSky\ProceduralSky_PS.hlsl">
+      <Filter>Shader Files\Effects\Sky\ProceduralSky</Filter>
     </CustomBuild>
+    <CustomBuild Include="Shaders\RayTracing\SWRT\SWRT_ReflectionComposite_PS.hlsl" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="Source\Renderer\Shaders\GI\GI_Common.hlsli">
-      <Filter>Shader Files\GI</Filter>
+    <None Include="Shaders\Raster\Geometry\MeshShader\MeshShader_AS.hlsl">
+      <Filter>Shader Files\Raster\Geometry\MeshShader</Filter>
     </None>
-    <None Include="Source\Renderer\Shaders\GI\GI_ProbeUpdate_CS.hlsl">
-      <Filter>Shader Files\GI</Filter>
+    <None Include="Shaders\Raster\Geometry\MeshShader\MeshShader_MS.hlsl">
+      <Filter>Shader Files\Raster\Geometry\MeshShader</Filter>
     </None>
-    <None Include="Source\Renderer\Shaders\Debug\DebugProbeGrid_VS.hlsl">
-      <Filter>Shader Files\Debug</Filter>
+    <None Include="Shaders\Debug\ProbeGrid\DebugProbeGrid_VS.hlsl">
+      <Filter>Shader Files\Debug\ProbeGrid</Filter>
     </None>
-    <None Include="Source\Renderer\Shaders\Debug\DebugProbeGrid_PS.hlsl">
-      <Filter>Shader Files\Debug</Filter>
+    <None Include="Shaders\Debug\ProbeGrid\DebugProbeGrid_PS.hlsl">
+      <Filter>Shader Files\Debug\ProbeGrid</Filter>
     </None>
-    <None Include="Source\Renderer\Shaders\Basic\BasicShader.hlsl">
-      <Filter>Shader Files\Basic</Filter>
+    <None Include="Shaders\Shared\Basic\BasicShader.hlsl">
+      <Filter>Shader Files\Shared\Basic</Filter>
     </None>
-    <None Include="Source\Renderer\Shaders\Tessellation\Tessellation_Debug_DS.hlsl">
-      <Filter>Shader Files\Tessellation</Filter>
+    <None Include="Shaders\Raster\Geometry\Tessellation\Tessellation_Debug_DS.hlsl">
+      <Filter>Shader Files\Raster\Geometry\Tessellation</Filter>
     </None>
-    <None Include="Source\Renderer\Shaders\Tessellation\Tessellation_Debug_PS.hlsl">
-      <Filter>Shader Files\Tessellation</Filter>
+    <None Include="Shaders\Raster\Geometry\Tessellation\Tessellation_Debug_PS.hlsl">
+      <Filter>Shader Files\Raster\Geometry\Tessellation</Filter>
     </None>
-    <None Include="Source\Renderer\Shaders\Shadow\ShadowVSM_PS.hlsl">
-      <Filter>Shader Files\Shadow</Filter>
+    <None Include="Shaders\Raster\Lighting\Shadow\ShadowVSM_PS.hlsl">
+      <Filter>Shader Files\Raster\Lighting\Shadow</Filter>
     </None>
-    <None Include="Source\Renderer\Shaders\Shadow\ShadowVSM_GaussBlur_CS.hlsl">
-      <Filter>Shader Files\Shadow</Filter>
+    <None Include="Shaders\Raster\Lighting\Shadow\ShadowVSM_GaussBlur_CS.hlsl">
+      <Filter>Shader Files\Raster\Lighting\Shadow</Filter>
     </None>
-    <None Include="Source\Renderer\Shaders\SkinnedMesh\SkinnedMesh_VS.hlsl">
-      <Filter>Shader Files\SkinnedMesh</Filter>
+    <None Include="Shaders\Raster\Geometry\SkinnedMesh\SkinnedMesh_VS.hlsl">
+      <Filter>Shader Files\Raster\Geometry\SkinnedMesh</Filter>
     </None>
-    <None Include="Source\Renderer\Shaders\Denoising\NRD\NRD.hlsli">
+    <None Include="Shaders\Backend\Native\NativeMesh.hlsl">
+      <Filter>Shader Files\Backend\Native</Filter>
+    </None>
+    <None Include="Shaders\Denoising\NRD\NRD.hlsli">
       <Filter>Shader Files\Denoising\NRD</Filter>
     </None>
-    <None Include="Source\Renderer\Shaders\Denoising\NRD\NRDConfig.hlsli">
+    <None Include="Shaders\Denoising\NRD\NRDConfig.hlsli">
       <Filter>Shader Files\Denoising\NRD</Filter>
     </None>
   </ItemGroup>

@@ -36,12 +36,13 @@ namespace SasamiRenderer
             RendererEnums::RenderPassType type = RendererEnums::RenderPassType::Opaque;
         };
 
-        constexpr std::array<RenderPassBuilderUiEntry, 15> kRenderPassBuilderUiEntries = {{
+        constexpr std::array<RenderPassBuilderUiEntry, 16> kRenderPassBuilderUiEntries = {{
             { "Shadow", RendererEnums::RenderPassType::Shadow },
             { "Opaque", RendererEnums::RenderPassType::Opaque },
             { "Runtime AO", RendererEnums::RenderPassType::RuntimeAO },
             { "Runtime AO Blur", RendererEnums::RenderPassType::RuntimeAOBlur },
             { "Lighting", RendererEnums::RenderPassType::Lighting },
+            { "Screen Space Reflection", RendererEnums::RenderPassType::ScreenSpaceReflection },
             { "Software Reflection", RendererEnums::RenderPassType::SoftwareReflection },
             { "Software Reflection Composite", RendererEnums::RenderPassType::SoftwareReflectionComposite },
             { "Skybox", RendererEnums::RenderPassType::Skybox },

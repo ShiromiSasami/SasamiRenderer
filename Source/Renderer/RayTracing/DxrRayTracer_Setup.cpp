@@ -53,9 +53,12 @@ namespace SasamiRenderer
             }
 
             for (;;) {
-                const std::filesystem::path shaderDir = dir / L"Source" / L"Renderer" / L"Shaders";
-                if (std::filesystem::exists(shaderDir, ec) &&
-                    std::filesystem::is_directory(shaderDir, ec)) {
+                const std::filesystem::path shaderDir = dir / L"Shaders";
+                const std::filesystem::path legacyShaderDir = dir / L"Source" / L"Renderer" / L"Shaders";
+                if ((std::filesystem::exists(shaderDir, ec) &&
+                     std::filesystem::is_directory(shaderDir, ec)) ||
+                    (std::filesystem::exists(legacyShaderDir, ec) &&
+                     std::filesystem::is_directory(legacyShaderDir, ec))) {
                     return dir;
                 }
 
@@ -74,9 +77,15 @@ namespace SasamiRenderer
             static const std::filesystem::path shaderRoot = []() {
                 const std::filesystem::path projectRoot = FindProjectRootWithShaders(GetExecutableDir());
                 if (!projectRoot.empty()) {
+                    const std::filesystem::path shaderDir = projectRoot / L"Shaders";
+                    std::error_code ec;
+                    if (std::filesystem::exists(shaderDir, ec) &&
+                        std::filesystem::is_directory(shaderDir, ec)) {
+                        return shaderDir;
+                    }
                     return projectRoot / L"Source" / L"Renderer" / L"Shaders";
                 }
-                return std::filesystem::path(L"Source/Renderer/Shaders");
+                return std::filesystem::path(L"Shaders");
             }();
             return shaderRoot;
         }
@@ -474,7 +483,7 @@ namespace SasamiRenderer
         }
 
         ComPtr<IDxcBlob> shaderLibrary;
-        if (!CompileShaderLibrary(GetShaderSourceRoot() / L"RayTracing" / L"RayTracing.hlsl", shaderLibrary)) {
+        if (!CompileShaderLibrary(GetShaderSourceRoot() / L"RayTracing" / L"DXR" / L"RayTracing.hlsl", shaderLibrary)) {
             return false;
         }
 

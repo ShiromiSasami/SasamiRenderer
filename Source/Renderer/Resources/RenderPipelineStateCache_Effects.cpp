@@ -126,8 +126,8 @@ namespace SasamiRenderer
         }
 
         ComPtr<ID3DBlob> rayMarchVS, rayMarchPS;
-        if (!LoadShaderBlob(L"RayMarch/RayMarch_VS.hlsl", "VSMain", vertexProfile.c_str(), rayMarchVS)) return false;
-        if (!LoadShaderBlob(L"RayMarch/RayMarch_PS.hlsl", "PSMain", pixelProfile.c_str(),  rayMarchPS)) return false;
+        if (!LoadShaderBlob(L"Effects/RayMarch/RayMarch_VS.hlsl", "VSMain", vertexProfile.c_str(), rayMarchVS)) return false;
+        if (!LoadShaderBlob(L"Effects/RayMarch/RayMarch_PS.hlsl", "PSMain", pixelProfile.c_str(),  rayMarchPS)) return false;
 
         {
             D3D12_GRAPHICS_PIPELINE_STATE_DESC pso = {};
@@ -173,8 +173,8 @@ namespace SasamiRenderer
         }
 
         ComPtr<ID3DBlob> cloudVS, cloudPS;
-        if (!LoadShaderBlob(L"VolumetricCloud/VolumetricCloud_VS.hlsl", "VSMain", vertexProfile.c_str(), cloudVS)) return false;
-        if (!LoadShaderBlob(L"VolumetricCloud/VolumetricCloud_PS.hlsl", "PSMain", pixelProfile.c_str(),  cloudPS)) return false;
+        if (!LoadShaderBlob(L"Effects/Volumetric/Cloud/VolumetricCloud_VS.hlsl", "VSMain", vertexProfile.c_str(), cloudVS)) return false;
+        if (!LoadShaderBlob(L"Effects/Volumetric/Cloud/VolumetricCloud_PS.hlsl", "PSMain", pixelProfile.c_str(),  cloudPS)) return false;
 
         {
             D3D12_BLEND_DESC cloudBlend = {};

@@ -63,6 +63,22 @@ namespace SasamiRenderer
             device.CreateShaderResourceView(nullResource, &nullSrvDesc, m_softwareReflectionSrvCpu);
         }
 
+        {
+            Resource nullResource;
+            D3D12_SHADER_RESOURCE_VIEW_DESC nullSrvDesc = {};
+            nullSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            nullSrvDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+            nullSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            nullSrvDesc.Texture2D.MipLevels = 1;
+            if (!m_srvAllocFn(1, m_ssrSceneColorCopySrvCpu, m_ssrSceneColorCopySrv) ||
+                !m_srvAllocFn(1, m_ssrReflectionSrvCpu, m_ssrReflectionSrv) ||
+                !m_srvAllocFn(1, m_ssrReflectionUavCpu, m_ssrReflectionUav)) {
+                return false;
+            }
+            device.CreateShaderResourceView(nullResource, &nullSrvDesc, m_ssrSceneColorCopySrvCpu);
+            device.CreateShaderResourceView(nullResource, &nullSrvDesc, m_ssrReflectionSrvCpu);
+        }
+
         // Software ambient occlusion
         {
             Resource nullResource;
@@ -383,6 +399,10 @@ namespace SasamiRenderer
         m_transparentSceneColorCopyTexture.Reset();
         m_transparentSceneColorCopyWidth = 0u;
         m_transparentSceneColorCopyHeight = 0u;
+        m_ssrSceneColorCopyTexture.Reset();
+        m_ssrReflectionTexture.Reset();
+        m_ssrWidth = 0u;
+        m_ssrHeight = 0u;
         m_transmissionSceneColorCopyTexture.Reset();
         m_transmissionSceneColorCopyWidth = 0u;
         m_transmissionSceneColorCopyHeight = 0u;
@@ -413,6 +433,8 @@ namespace SasamiRenderer
         m_sceneColorRtvHeap.Reset();
         m_softwareDirectionalShadowTexture.Reset();
         m_softwareReflectionTexture.Reset();
+        m_ssrSceneColorCopyTexture.Reset();
+        m_ssrReflectionTexture.Reset();
         m_softwareAmbientOcclusionTexture.Reset();
         m_transparentSceneColorCopyTexture.Reset();
         m_transmissionSceneColorCopyTexture.Reset();

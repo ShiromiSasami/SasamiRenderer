@@ -81,6 +81,28 @@ namespace
         return std::filesystem::path(exePath).parent_path();
     }
 
+    static bool DirectoryExists(const std::filesystem::path& path)
+    {
+        std::error_code ec;
+        return std::filesystem::exists(path, ec) &&
+            std::filesystem::is_directory(path, ec);
+    }
+
+    static std::filesystem::path ResolveShaderSourceRootFromProjectRoot(const std::filesystem::path& projectRoot)
+    {
+        const std::filesystem::path shaderRoot = projectRoot / L"Shaders";
+        if (DirectoryExists(shaderRoot)) {
+            return shaderRoot;
+        }
+
+        const std::filesystem::path legacyShaderRoot = projectRoot / L"Source" / L"Renderer" / L"Shaders";
+        if (DirectoryExists(legacyShaderRoot)) {
+            return legacyShaderRoot;
+        }
+
+        return shaderRoot;
+    }
+
     static std::filesystem::path FindProjectRootWithShaders(const std::filesystem::path& startDir)
     {
         std::error_code ec;
@@ -90,9 +112,8 @@ namespace
         }
 
         for (;;) {
-            const std::filesystem::path shaderDir = dir / L"Source" / L"Renderer" / L"Shaders";
-            if (std::filesystem::exists(shaderDir, ec) &&
-                std::filesystem::is_directory(shaderDir, ec)) {
+            if ((DirectoryExists(dir / L"Shaders") && DirectoryExists(dir / L"Source")) ||
+                DirectoryExists(dir / L"Source" / L"Renderer" / L"Shaders")) {
                 return dir;
             }
 
@@ -244,7 +265,7 @@ namespace
         const std::filesystem::path projectRoot = FindProjectRootWithShaders(GetExecutableDir());
         if (!projectRoot.empty()) {
             const std::filesystem::path shaderRootRelative =
-                projectRoot / L"Source" / L"Renderer" / L"Shaders" / includePath;
+                ResolveShaderSourceRootFromProjectRoot(projectRoot) / includePath;
             if (std::filesystem::exists(shaderRootRelative, ec) && !ec) {
                 return shaderRootRelative;
             }
@@ -410,9 +431,9 @@ namespace SasamiRenderer::ShaderCompilationService
         static const std::filesystem::path shaderRoot = []() {
             const std::filesystem::path projectRoot = FindProjectRootWithShaders(GetExecutableDir());
             if (!projectRoot.empty()) {
-                return projectRoot / L"Source" / L"Renderer" / L"Shaders";
+                return ResolveShaderSourceRootFromProjectRoot(projectRoot);
             }
-            return std::filesystem::path(L"Source/Renderer/Shaders");
+            return std::filesystem::path(L"Shaders");
         }();
 
         return shaderRoot;

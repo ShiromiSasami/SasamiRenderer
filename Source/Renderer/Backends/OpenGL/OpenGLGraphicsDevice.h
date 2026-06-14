@@ -34,6 +34,10 @@ namespace SasamiRenderer
         void WaitForGPU() override;
         bool ExecuteBackendFrame(const RhiBackendFrameDesc& frameDesc) override;
         bool RenderBackendClearFrame(const float clearColor[4]) override;
+        RhiTextureHandle CreateRhiTexture2DFromRgba8(uint32_t width,
+                                                     uint32_t height,
+                                                     const void* pixels,
+                                                     uint32_t rowPitchBytes) override;
         RhiTextureHandle CreateRhiTexture(const RhiTextureDesc& desc) override;
         RhiBufferHandle CreateRhiBuffer(const RhiBufferDesc& desc, const void* initialData = nullptr) override;
         RhiShaderHandle CreateRhiShaderModule(const RhiShaderModuleDesc& desc) override;
@@ -93,6 +97,8 @@ namespace SasamiRenderer
         };
 
         void Cleanup();
+        bool EnsureMeshFrameResources();
+        bool RenderMeshFrame(const RhiBackendMeshFrameDesc& desc);
 
         HWND m_hwnd = nullptr;
         HDC m_hdc = nullptr;
@@ -112,6 +118,12 @@ namespace SasamiRenderer
         std::unordered_map<uint64_t, uint32_t> m_rhiPipelineLayouts;
         std::unordered_map<uint64_t, OpenGLRhiPipeline> m_rhiPipelines;
         std::unordered_map<uint64_t, unsigned int> m_rhiTextureViews;
+        unsigned int m_meshProgram = 0;
+        int m_meshMvpLocation = -1;
+        int m_meshBaseColorLocation = -1;
+        int m_meshLightDirIntensityLocation = -1;
+        int m_meshLightColorLocation = -1;
+        int m_meshEmissiveRoughnessLocation = -1;
 
         friend class OpenGLRhiCommandEncoder;
     };

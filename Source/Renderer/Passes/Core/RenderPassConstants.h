@@ -11,12 +11,13 @@ namespace SasamiRenderer
         using RenderPassType = RendererEnums::RenderPassType;
 
         // Default forward render path order.
-        constexpr std::array<RenderPassType, 14> kDefaultRenderPathSequence = {
+        constexpr std::array<RenderPassType, 15> kDefaultRenderPathSequence = {
             RenderPassType::Shadow,
             RenderPassType::Opaque,
             RenderPassType::RuntimeAO,
             RenderPassType::RuntimeAOBlur,
             RenderPassType::Lighting,
+            RenderPassType::ScreenSpaceReflection,
             RenderPassType::SoftwareReflection,
             RenderPassType::SoftwareReflectionComposite,
             RenderPassType::Skybox,

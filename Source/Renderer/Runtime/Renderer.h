@@ -33,6 +33,7 @@
 #include "Renderer/Passes/PostProcess/PostProcessRenderPass.h"
 #include "Renderer/Passes/RayTracing/RayTracingRenderPass.h"
 #include "Renderer/Passes/Lighting/SSAORenderPass.h"
+#include "Renderer/Passes/Reflections/ScreenSpaceReflectionRenderPass.h"
 #include "Renderer/Passes/Reflections/SoftwareReflectionCompositeRenderPass.h"
 #include "Renderer/Passes/Reflections/SoftwareReflectionRenderPass.h"
 #include "Renderer/Passes/Sky/ProceduralSkyRenderPass.h"
@@ -409,6 +410,7 @@ namespace SasamiRenderer
         std::shared_ptr<RayTracingRenderPass> m_rayTracingRenderPass;
         std::shared_ptr<SSAORenderPass> m_ssaoRenderPass;
         std::shared_ptr<SSAOBlurRenderPass> m_ssaoBlurRenderPass;
+        std::shared_ptr<ScreenSpaceReflectionRenderPass> m_screenSpaceReflectionRenderPass;
         std::shared_ptr<SoftwareReflectionRenderPass> m_softwareReflectionRenderPass;
         std::shared_ptr<SoftwareReflectionCompositeRenderPass> m_softwareReflectionCompositeRenderPass;
         std::shared_ptr<ProceduralSkyRenderPass> m_proceduralSkyRenderPass;

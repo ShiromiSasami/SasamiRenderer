@@ -83,6 +83,19 @@ namespace SasamiRenderer
         uint32_t GetSWRTReflectionWidth()  const { return m_softwareReflectionWidth; }
         uint32_t GetSWRTReflectionHeight() const { return m_softwareReflectionHeight; }
 
+        // Screen-space reflection
+        bool EnsureScreenSpaceReflection(IRHIDevice& device, uint32_t width, uint32_t height);
+        Resource& GetSSRSceneColorCopyTexture()          { return m_ssrSceneColorCopyTexture; }
+        CpuDescriptorHandle GetSSRSceneColorCopySrvCpu() const { return m_ssrSceneColorCopySrvCpu; }
+        GpuDescriptorHandle GetSSRSceneColorCopySrv()    const { return m_ssrSceneColorCopySrv; }
+        Resource& GetSSRReflectionTexture()              { return m_ssrReflectionTexture; }
+        CpuDescriptorHandle GetSSRReflectionSrvCpu()     const { return m_ssrReflectionSrvCpu; }
+        GpuDescriptorHandle GetSSRReflectionSrv()        const { return m_ssrReflectionSrv; }
+        CpuDescriptorHandle GetSSRReflectionUavCpu()     const { return m_ssrReflectionUavCpu; }
+        GpuDescriptorHandle GetSSRReflectionUav()        const { return m_ssrReflectionUav; }
+        uint32_t GetSSRWidth()  const { return m_ssrWidth; }
+        uint32_t GetSSRHeight() const { return m_ssrHeight; }
+
         // Transparent scene color copy
         bool EnsureTransparentSceneColorCopy(IRHIDevice& device, uint32_t width, uint32_t height);
         Resource& GetTransparentSceneColorCopyTexture()          { return m_transparentSceneColorCopyTexture; }
@@ -197,6 +210,16 @@ namespace SasamiRenderer
         CpuDescriptorHandle m_softwareReflectionSrvCpu{};
         GpuDescriptorHandle m_softwareReflectionSrv{};
         uint32_t m_softwareReflectionWidth = 0, m_softwareReflectionHeight = 0;
+
+        Resource m_ssrSceneColorCopyTexture;
+        CpuDescriptorHandle m_ssrSceneColorCopySrvCpu{};
+        GpuDescriptorHandle m_ssrSceneColorCopySrv{};
+        Resource m_ssrReflectionTexture;
+        CpuDescriptorHandle m_ssrReflectionSrvCpu{};
+        GpuDescriptorHandle m_ssrReflectionSrv{};
+        CpuDescriptorHandle m_ssrReflectionUavCpu{};
+        GpuDescriptorHandle m_ssrReflectionUav{};
+        uint32_t m_ssrWidth = 0, m_ssrHeight = 0;
 
         // SWRT ambient occlusion
         Resource m_softwareAmbientOcclusionTexture;

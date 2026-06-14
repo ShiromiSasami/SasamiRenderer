@@ -266,6 +266,7 @@ float4 PSMain(PSInput input) : SV_TARGET
             case RhiFormat::R8G8B8A8UNorm: return DXGI_FORMAT_R8G8B8A8_UNORM;
             case RhiFormat::B8G8R8A8UNorm: return DXGI_FORMAT_B8G8R8A8_UNORM;
             case RhiFormat::R16G16B16A16Float: return DXGI_FORMAT_R16G16B16A16_FLOAT;
+            case RhiFormat::R32G32B32Float: return DXGI_FORMAT_R32G32B32_FLOAT;
             case RhiFormat::R32G32Float: return DXGI_FORMAT_R32G32_FLOAT;
             case RhiFormat::R32Float: return DXGI_FORMAT_R32_FLOAT;
             case RhiFormat::R32UInt: return DXGI_FORMAT_R32_UINT;
@@ -881,8 +882,8 @@ float4 PSMain(PSInput input) : SV_TARGET
 
         Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
         Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
-        if (!CompileDx11Shader(L"RayMarch/RayMarch_VS.hlsl", "VSMain", "vs_5_0", vsBlob) ||
-            !CompileDx11Shader(L"RayMarch/RayMarch_PS.hlsl", "PSMain", "ps_5_0", psBlob)) {
+        if (!CompileDx11Shader(L"Effects/RayMarch/RayMarch_VS.hlsl", "VSMain", "vs_5_0", vsBlob) ||
+            !CompileDx11Shader(L"Effects/RayMarch/RayMarch_PS.hlsl", "PSMain", "ps_5_0", psBlob)) {
             return false;
         }
 

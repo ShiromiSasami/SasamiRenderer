@@ -3,6 +3,7 @@
 #if RHI_OPENGL
 
 #include "Foundation/Tools/DebugOutput.h"
+#include "Foundation/Math/MathUtil.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -44,6 +45,12 @@ namespace SasamiRenderer
 #endif
 #ifndef GL_RG32F
         constexpr GLint GL_RG32F = 0x8230;
+#endif
+#ifndef GL_RGB32F
+        constexpr GLint GL_RGB32F = 0x8815;
+#endif
+#ifndef GL_RGB
+        constexpr GLenum GL_RGB = 0x1907;
 #endif
 #ifndef GL_R32F
         constexpr GLint GL_R32F = 0x822E;
@@ -117,6 +124,13 @@ namespace SasamiRenderer
         using GlGetProgramInfoLogFn = void (APIENTRY*)(GLuint, GLsizei, GLsizei*, char*);
         using GlDeleteProgramFn = void (APIENTRY*)(GLuint);
         using GlUseProgramFn = void (APIENTRY*)(GLuint);
+        using GlBindAttribLocationFn = void (APIENTRY*)(GLuint, GLuint, const char*);
+        using GlGetUniformLocationFn = GLint (APIENTRY*)(GLuint, const char*);
+        using GlUniformMatrix4fvFn = void (APIENTRY*)(GLint, GLsizei, GLboolean, const GLfloat*);
+        using GlUniform4fvFn = void (APIENTRY*)(GLint, GLsizei, const GLfloat*);
+        using GlEnableVertexAttribArrayFn = void (APIENTRY*)(GLuint);
+        using GlDisableVertexAttribArrayFn = void (APIENTRY*)(GLuint);
+        using GlVertexAttribPointerFn = void (APIENTRY*)(GLuint, GLint, GLenum, GLboolean, GLsizei, const void*);
         using GlDispatchComputeFn = void (APIENTRY*)(GLuint, GLuint, GLuint);
         using GlDrawArraysInstancedFn = void (APIENTRY*)(GLenum, GLint, GLsizei, GLsizei);
         using GlDrawElementsInstancedBaseVertexFn = void (APIENTRY*)(GLenum, GLsizei, GLenum, const void*, GLsizei, GLint);
@@ -127,6 +141,7 @@ namespace SasamiRenderer
             switch (format) {
             case RhiFormat::R8UNorm: return GL_R8;
             case RhiFormat::R16G16B16A16Float: return GL_RGBA16F;
+            case RhiFormat::R32G32B32Float: return GL_RGB32F;
             case RhiFormat::R32G32Float: return GL_RG32F;
             case RhiFormat::R32Float: return GL_R32F;
             case RhiFormat::D32Float: return GL_DEPTH_COMPONENT32F;
@@ -142,6 +157,8 @@ namespace SasamiRenderer
             case RhiFormat::R8UNorm:
             case RhiFormat::R32Float:
                 return GL_RED;
+            case RhiFormat::R32G32B32Float:
+                return GL_RGB;
             case RhiFormat::R32G32Float:
                 return GL_RG;
             case RhiFormat::D32Float:
@@ -155,6 +172,7 @@ namespace SasamiRenderer
         {
             switch (format) {
             case RhiFormat::R16G16B16A16Float:
+            case RhiFormat::R32G32B32Float:
             case RhiFormat::R32G32Float:
             case RhiFormat::R32Float:
             case RhiFormat::D32Float:
@@ -200,6 +218,45 @@ namespace SasamiRenderer
             default: return GL_TRIANGLES;
             }
         }
+
+        const char* kOpenGLNativeMeshVS = R"GLSL(
+#version 120
+attribute vec3 a_position;
+attribute vec3 a_normal;
+attribute vec4 a_color;
+attribute vec2 a_uv;
+uniform mat4 u_modelViewProjection;
+uniform vec4 u_baseColor;
+varying vec3 v_normal;
+varying vec4 v_color;
+void main()
+{
+    gl_Position = u_modelViewProjection * vec4(a_position, 1.0);
+    v_normal = normalize(a_normal);
+    v_color = a_color * u_baseColor;
+}
+)GLSL";
+
+        const char* kOpenGLNativeMeshPS = R"GLSL(
+#version 120
+uniform vec4 u_lightDirIntensity;
+uniform vec4 u_lightColor;
+uniform vec4 u_emissiveRoughness;
+varying vec3 v_normal;
+varying vec4 v_color;
+void main()
+{
+    vec3 n = normalize(v_normal);
+    vec3 l = normalize(-u_lightDirIntensity.xyz);
+    float ndotl = max(dot(n, l), 0.0);
+    float ambient = 0.16;
+    vec3 lit = v_color.rgb * u_lightColor.rgb * (ambient + ndotl * u_lightDirIntensity.w);
+    lit += u_emissiveRoughness.rgb;
+    lit = lit / (lit + vec3(1.0));
+    lit = pow(clamp(lit, 0.0, 1.0), vec3(1.0 / 2.2));
+    gl_FragColor = vec4(lit, v_color.a);
+}
+)GLSL";
     }
 
     class OpenGLRhiCommandEncoder final : public IRhiCommandEncoder
@@ -587,6 +644,183 @@ namespace SasamiRenderer
         }
     }
 
+    bool OpenGLGraphicsDevice::EnsureMeshFrameResources()
+    {
+        if (m_meshProgram != 0) {
+            return true;
+        }
+        if (!m_hdc || !m_context || !wglMakeCurrent(m_hdc, m_context)) {
+            return false;
+        }
+
+        auto createShader = LoadGlProc<GlCreateShaderFn>("glCreateShader");
+        auto shaderSource = LoadGlProc<GlShaderSourceFn>("glShaderSource");
+        auto compileShader = LoadGlProc<GlCompileShaderFn>("glCompileShader");
+        auto getShaderiv = LoadGlProc<GlGetShaderivFn>("glGetShaderiv");
+        auto getShaderInfoLog = LoadGlProc<GlGetShaderInfoLogFn>("glGetShaderInfoLog");
+        auto deleteShader = LoadGlProc<GlDeleteShaderFn>("glDeleteShader");
+        auto createProgram = LoadGlProc<GlCreateProgramFn>("glCreateProgram");
+        auto attachShader = LoadGlProc<GlAttachShaderFn>("glAttachShader");
+        auto bindAttribLocation = LoadGlProc<GlBindAttribLocationFn>("glBindAttribLocation");
+        auto linkProgram = LoadGlProc<GlLinkProgramFn>("glLinkProgram");
+        auto getProgramiv = LoadGlProc<GlGetProgramivFn>("glGetProgramiv");
+        auto getProgramInfoLog = LoadGlProc<GlGetProgramInfoLogFn>("glGetProgramInfoLog");
+        auto getUniformLocation = LoadGlProc<GlGetUniformLocationFn>("glGetUniformLocation");
+        if (!createShader || !shaderSource || !compileShader || !getShaderiv || !deleteShader ||
+            !createProgram || !attachShader || !bindAttribLocation || !linkProgram ||
+            !getProgramiv || !getUniformLocation) {
+            DebugLog("OpenGLGraphicsDevice::EnsureMeshFrameResources: required GL shader functions are unavailable.\n");
+            return false;
+        }
+
+        auto compile = [&](GLenum stage, const char* source) -> GLuint {
+            GLuint shader = createShader(stage);
+            shaderSource(shader, 1, &source, nullptr);
+            compileShader(shader);
+            GLint ok = GL_FALSE;
+            getShaderiv(shader, GL_COMPILE_STATUS, &ok);
+            if (ok == GL_FALSE) {
+                if (getShaderInfoLog) {
+                    char log[1024] = {};
+                    GLsizei len = 0;
+                    getShaderInfoLog(shader, static_cast<GLsizei>(sizeof(log)), &len, log);
+                    DebugLog(log);
+                    DebugLog("\n");
+                }
+                deleteShader(shader);
+                return 0;
+            }
+            return shader;
+        };
+
+        const GLuint vs = compile(GL_VERTEX_SHADER, kOpenGLNativeMeshVS);
+        const GLuint ps = compile(GL_FRAGMENT_SHADER, kOpenGLNativeMeshPS);
+        if (vs == 0 || ps == 0) {
+            if (vs != 0) deleteShader(vs);
+            if (ps != 0) deleteShader(ps);
+            return false;
+        }
+
+        const GLuint program = createProgram();
+        attachShader(program, vs);
+        attachShader(program, ps);
+        bindAttribLocation(program, 0, "a_position");
+        bindAttribLocation(program, 1, "a_normal");
+        bindAttribLocation(program, 2, "a_color");
+        bindAttribLocation(program, 3, "a_uv");
+        linkProgram(program);
+        deleteShader(ps);
+        deleteShader(vs);
+
+        GLint linked = GL_FALSE;
+        getProgramiv(program, GL_LINK_STATUS, &linked);
+        if (linked == GL_FALSE) {
+            if (getProgramInfoLog) {
+                char log[1024] = {};
+                GLsizei len = 0;
+                getProgramInfoLog(program, static_cast<GLsizei>(sizeof(log)), &len, log);
+                DebugLog(log);
+                DebugLog("\n");
+            }
+            auto deleteProgram = LoadGlProc<GlDeleteProgramFn>("glDeleteProgram");
+            if (deleteProgram) {
+                deleteProgram(program);
+            }
+            return false;
+        }
+
+        m_meshProgram = program;
+        m_meshMvpLocation = getUniformLocation(program, "u_modelViewProjection");
+        m_meshBaseColorLocation = getUniformLocation(program, "u_baseColor");
+        m_meshLightDirIntensityLocation = getUniformLocation(program, "u_lightDirIntensity");
+        m_meshLightColorLocation = getUniformLocation(program, "u_lightColor");
+        m_meshEmissiveRoughnessLocation = getUniformLocation(program, "u_emissiveRoughness");
+        return true;
+    }
+
+    bool OpenGLGraphicsDevice::RenderMeshFrame(const RhiBackendMeshFrameDesc& desc)
+    {
+        if (!desc.draws || desc.drawCount == 0 || !EnsureMeshFrameResources()) {
+            return false;
+        }
+
+        auto useProgram = LoadGlProc<GlUseProgramFn>("glUseProgram");
+        auto bindBuffer = LoadGlProc<GlBindBufferFn>("glBindBuffer");
+        auto enableVertexAttribArray = LoadGlProc<GlEnableVertexAttribArrayFn>("glEnableVertexAttribArray");
+        auto disableVertexAttribArray = LoadGlProc<GlDisableVertexAttribArrayFn>("glDisableVertexAttribArray");
+        auto vertexAttribPointer = LoadGlProc<GlVertexAttribPointerFn>("glVertexAttribPointer");
+        auto uniformMatrix4fv = LoadGlProc<GlUniformMatrix4fvFn>("glUniformMatrix4fv");
+        auto uniform4fv = LoadGlProc<GlUniform4fvFn>("glUniform4fv");
+        if (!useProgram || !bindBuffer || !enableVertexAttribArray || !disableVertexAttribArray ||
+            !vertexAttribPointer || !uniformMatrix4fv || !uniform4fv) {
+            return false;
+        }
+
+        glViewport(0, 0, static_cast<GLsizei>(desc.renderWidth), static_cast<GLsizei>(desc.renderHeight));
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LEQUAL);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        useProgram(m_meshProgram);
+
+        for (uint32_t i = 0; i < desc.drawCount; ++i) {
+            const RhiBackendMeshDrawDesc& draw = desc.draws[i];
+            const auto vbIt = m_rhiBuffers.find(draw.vertexBufferHandle);
+            if (vbIt == m_rhiBuffers.end()) {
+                continue;
+            }
+
+            float mvp[16] = {};
+            Math::Mul4x4(draw.model, desc.viewProjection, mvp);
+            uniformMatrix4fv(m_meshMvpLocation, 1, GL_TRUE, mvp);
+            uniform4fv(m_meshBaseColorLocation, 1, draw.baseColor);
+
+            const float lightDirIntensity[4] = {
+                desc.sunDir[0], desc.sunDir[1], desc.sunDir[2], desc.sunIntensity
+            };
+            const float lightColor[4] = {
+                desc.sunColor[0], desc.sunColor[1], desc.sunColor[2], 1.0f
+            };
+            const float emissiveRoughness[4] = {
+                draw.emissive[0], draw.emissive[1], draw.emissive[2], draw.roughness
+            };
+            uniform4fv(m_meshLightDirIntensityLocation, 1, lightDirIntensity);
+            uniform4fv(m_meshLightColorLocation, 1, lightColor);
+            uniform4fv(m_meshEmissiveRoughnessLocation, 1, emissiveRoughness);
+
+            bindBuffer(GL_ARRAY_BUFFER, vbIt->second);
+            enableVertexAttribArray(0);
+            enableVertexAttribArray(1);
+            enableVertexAttribArray(2);
+            enableVertexAttribArray(3);
+            vertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(draw.vertexStride), reinterpret_cast<const void*>(0));
+            vertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(draw.vertexStride), reinterpret_cast<const void*>(12));
+            vertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(draw.vertexStride), reinterpret_cast<const void*>(24));
+            vertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(draw.vertexStride), reinterpret_cast<const void*>(40));
+
+            const auto ibIt = m_rhiBuffers.find(draw.indexBufferHandle);
+            if (draw.indexCount > 0 && ibIt != m_rhiBuffers.end()) {
+                bindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibIt->second);
+                glDrawElements(GL_TRIANGLES,
+                               static_cast<GLsizei>(draw.indexCount),
+                               draw.index32Bit ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT,
+                               nullptr);
+            } else if (draw.vertexCount > 0) {
+                bindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+                glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(draw.vertexCount));
+            }
+        }
+
+        disableVertexAttribArray(3);
+        disableVertexAttribArray(2);
+        disableVertexAttribArray(1);
+        disableVertexAttribArray(0);
+        bindBuffer(GL_ARRAY_BUFFER, 0);
+        bindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        useProgram(0);
+        return true;
+    }
+
     bool OpenGLGraphicsDevice::ExecuteBackendFrame(const RhiBackendFrameDesc& frameDesc)
     {
         if (!m_hdc || !m_context || !frameDesc.present) {
@@ -600,6 +834,9 @@ namespace SasamiRenderer
                      frameDesc.clearColor.b,
                      frameDesc.clearColor.a);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        if (frameDesc.mesh.enabled) {
+            (void)RenderMeshFrame(frameDesc.mesh);
+        }
         glFlush();
         return SwapBuffers(m_hdc) != FALSE;
     }
@@ -612,6 +849,263 @@ namespace SasamiRenderer
         }
         frameDesc.present = true;
         return ExecuteBackendFrame(frameDesc);
+    }
+
+    RhiTextureHandle OpenGLGraphicsDevice::CreateRhiTexture2DFromRgba8(uint32_t width,
+                                                                       uint32_t height,
+                                                                       const void* pixels,
+                                                                       uint32_t rowPitchBytes)
+    {
+        if (!m_hdc || !m_context || width == 0 || height == 0 || !pixels || rowPitchBytes < width * 4u) {
+            return {};
+        }
+        if (!wglMakeCurrent(m_hdc, m_context)) {
+            return {};
+        }
+
+        GLuint texture = 0;
+        glGenTextures(1, &texture);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexImage2D(GL_TEXTURE_2D,
+                     0,
+                     GL_RGBA8,
+                     static_cast<GLsizei>(width),
+                     static_cast<GLsizei>(height),
+                     0,
+                     GL_RGBA,
+                     GL_UNSIGNED_BYTE,
+                     pixels);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        const uint64_t id = m_nextRhiResourceHandle++;
+        m_rhiTextures[id] = texture;
+        return RhiTextureHandle{ id };
+    }
+
+    RhiTextureHandle OpenGLGraphicsDevice::CreateRhiTexture(const RhiTextureDesc& desc)
+    {
+        if (!m_hdc || !m_context || desc.extent.width == 0 || desc.extent.height == 0 ||
+            desc.dimension != RhiResourceDimension::Texture2D) {
+            return {};
+        }
+        if (!wglMakeCurrent(m_hdc, m_context)) {
+            return {};
+        }
+
+        GLuint texture = 0;
+        glGenTextures(1, &texture);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexImage2D(GL_TEXTURE_2D,
+                     0,
+                     ToGlInternalFormat(desc.format),
+                     static_cast<GLsizei>(desc.extent.width),
+                     static_cast<GLsizei>(desc.extent.height),
+                     0,
+                     ToGlFormat(desc.format),
+                     ToGlType(desc.format),
+                     nullptr);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        const uint64_t id = m_nextRhiResourceHandle++;
+        m_rhiTextures[id] = texture;
+        return RhiTextureHandle{ id };
+    }
+
+    RhiBufferHandle OpenGLGraphicsDevice::CreateRhiBuffer(const RhiBufferDesc& desc, const void* initialData)
+    {
+        if (!m_hdc || !m_context || desc.sizeInBytes == 0) {
+            return {};
+        }
+        if (!wglMakeCurrent(m_hdc, m_context)) {
+            return {};
+        }
+
+        auto genBuffers = LoadGlProc<GlGenBuffersFn>("glGenBuffers");
+        auto bindBuffer = LoadGlProc<GlBindBufferFn>("glBindBuffer");
+        auto bufferData = LoadGlProc<GlBufferDataFn>("glBufferData");
+        if (!genBuffers || !bindBuffer || !bufferData) {
+            return {};
+        }
+
+        GLuint buffer = 0;
+        const GLenum target = ToGlBufferTarget(desc.usage);
+        genBuffers(1, &buffer);
+        bindBuffer(target, buffer);
+        bufferData(target,
+                   static_cast<std::ptrdiff_t>(desc.sizeInBytes),
+                   initialData,
+                   desc.memoryUsage == RhiMemoryUsage::CpuToGpu ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW);
+        bindBuffer(target, 0);
+
+        const uint64_t id = m_nextRhiResourceHandle++;
+        m_rhiBuffers[id] = buffer;
+        return RhiBufferHandle{ id };
+    }
+
+    RhiShaderHandle OpenGLGraphicsDevice::CreateRhiShaderModule(const RhiShaderModuleDesc& desc)
+    {
+        if (!m_hdc || !m_context || !desc.bytecode || desc.bytecodeSize == 0) {
+            return {};
+        }
+        if (!wglMakeCurrent(m_hdc, m_context)) {
+            return {};
+        }
+
+        auto createShader = LoadGlProc<GlCreateShaderFn>("glCreateShader");
+        auto shaderSource = LoadGlProc<GlShaderSourceFn>("glShaderSource");
+        auto compileShader = LoadGlProc<GlCompileShaderFn>("glCompileShader");
+        auto getShaderiv = LoadGlProc<GlGetShaderivFn>("glGetShaderiv");
+        auto deleteShader = LoadGlProc<GlDeleteShaderFn>("glDeleteShader");
+        const GLenum stage = ToGlShaderStage(desc.stage);
+        if (!createShader || !shaderSource || !compileShader || !getShaderiv || !deleteShader || stage == 0) {
+            return {};
+        }
+
+        const char* source = static_cast<const char*>(desc.bytecode);
+        const GLint length = static_cast<GLint>(desc.bytecodeSize);
+        GLuint shader = createShader(stage);
+        shaderSource(shader, 1, &source, &length);
+        compileShader(shader);
+        GLint ok = GL_FALSE;
+        getShaderiv(shader, GL_COMPILE_STATUS, &ok);
+        if (ok == GL_FALSE) {
+            deleteShader(shader);
+            return {};
+        }
+
+        const uint64_t id = m_nextRhiShaderHandle++;
+        m_rhiShaders[id] = OpenGLRhiShader{ shader, desc.stage, desc.entryPoint ? desc.entryPoint : "main" };
+        return RhiShaderHandle{ id };
+    }
+
+    RhiPipelineLayoutHandle OpenGLGraphicsDevice::CreateRhiPipelineLayout(const RhiPipelineLayoutDesc& desc)
+    {
+        const uint64_t id = m_nextRhiPipelineLayoutHandle++;
+        m_rhiPipelineLayouts[id] = desc.bindingCount;
+        return RhiPipelineLayoutHandle{ id };
+    }
+
+    RhiPipelineHandle OpenGLGraphicsDevice::CreateRhiGraphicsPipeline(const RhiGraphicsPipelineDesc& desc)
+    {
+        if (!m_hdc || !m_context || !wglMakeCurrent(m_hdc, m_context)) {
+            return {};
+        }
+        auto createProgram = LoadGlProc<GlCreateProgramFn>("glCreateProgram");
+        auto attachShader = LoadGlProc<GlAttachShaderFn>("glAttachShader");
+        auto linkProgram = LoadGlProc<GlLinkProgramFn>("glLinkProgram");
+        auto getProgramiv = LoadGlProc<GlGetProgramivFn>("glGetProgramiv");
+        auto deleteProgram = LoadGlProc<GlDeleteProgramFn>("glDeleteProgram");
+        if (!createProgram || !attachShader || !linkProgram || !getProgramiv || !deleteProgram) {
+            return {};
+        }
+
+        GLuint program = createProgram();
+        if (desc.shaderHandles) {
+            for (uint32_t i = 0; i < desc.shaderHandleCount; ++i) {
+                const auto it = m_rhiShaders.find(desc.shaderHandles[i].id);
+                if (it != m_rhiShaders.end() && it->second.shader != 0) {
+                    attachShader(program, it->second.shader);
+                }
+            }
+        }
+        linkProgram(program);
+        GLint linked = GL_FALSE;
+        getProgramiv(program, GL_LINK_STATUS, &linked);
+        if (linked == GL_FALSE) {
+            deleteProgram(program);
+            return {};
+        }
+
+        const uint64_t id = m_nextRhiPipelineHandle++;
+        m_rhiPipelines[id] = OpenGLRhiPipeline{ program };
+        return RhiPipelineHandle{ id };
+    }
+
+    RhiPipelineHandle OpenGLGraphicsDevice::CreateRhiComputePipeline(const RhiComputePipelineDesc&)
+    {
+        return {};
+    }
+
+    RhiDescriptorAllocation OpenGLGraphicsDevice::AllocateRhiDescriptors(RhiDescriptorHeapType type,
+                                                                        uint32_t count,
+                                                                        bool shaderVisible)
+    {
+        (void)shaderVisible;
+        if (count == 0) {
+            return {};
+        }
+        const uint64_t base = m_nextRhiDescriptorHandle;
+        m_nextRhiDescriptorHandle += count;
+
+        RhiDescriptorAllocation allocation{};
+        allocation.type = type;
+        allocation.cpu.ptr = base;
+        allocation.gpu.ptr = base;
+        allocation.count = count;
+        allocation.increment = 1;
+        return allocation;
+    }
+
+    bool OpenGLGraphicsDevice::CreateRhiShaderResourceView(RhiResourceHandle resource,
+                                                           const RhiTextureViewDesc&,
+                                                           RhiCpuDescriptorHandle destination)
+    {
+        const auto it = m_rhiTextures.find(resource.id);
+        if (it == m_rhiTextures.end() || !destination.IsValid()) {
+            return false;
+        }
+        m_rhiTextureViews[destination.ptr] = it->second;
+        return true;
+    }
+
+    bool OpenGLGraphicsDevice::CreateRhiRenderTargetView(RhiTextureHandle texture,
+                                                         const RhiRenderTargetViewDesc&,
+                                                         RhiCpuDescriptorHandle destination)
+    {
+        const auto it = m_rhiTextures.find(texture.id);
+        if (it == m_rhiTextures.end() || !destination.IsValid()) {
+            return false;
+        }
+        m_rhiTextureViews[destination.ptr] = it->second;
+        return true;
+    }
+
+    bool OpenGLGraphicsDevice::CreateRhiDepthStencilView(RhiTextureHandle texture,
+                                                         const RhiDepthStencilViewDesc&,
+                                                         RhiCpuDescriptorHandle destination)
+    {
+        const auto it = m_rhiTextures.find(texture.id);
+        if (it == m_rhiTextures.end() || !destination.IsValid()) {
+            return false;
+        }
+        m_rhiTextureViews[destination.ptr] = it->second;
+        return true;
+    }
+
+    std::unique_ptr<IRhiCommandEncoder> OpenGLGraphicsDevice::CreateCommandEncoder(RhiQueueType queueType)
+    {
+        if (!m_context) {
+            return std::make_unique<NullRhiCommandEncoder>();
+        }
+        return std::make_unique<OpenGLRhiCommandEncoder>(*this, queueType);
+    }
+
+    bool OpenGLGraphicsDevice::SubmitCommandEncoder(IRhiCommandEncoder& encoder, RhiQueueType queueType)
+    {
+        auto* glEncoder = dynamic_cast<OpenGLRhiCommandEncoder*>(&encoder);
+        if (!glEncoder || glEncoder->QueueType() != queueType || !m_context || !wglMakeCurrent(m_hdc, m_context)) {
+            return false;
+        }
+        glFlush();
+        return true;
     }
 
 
@@ -700,13 +1194,22 @@ namespace SasamiRenderer
                         glDeleteBuffersPtr(1, &buffer);
                     }
                 }
-                auto glDeleteProgramPtr = LoadGlProc<GlDeleteProgramFn>("glDeleteProgram");
-                if (glDeleteProgramPtr) {
-                    for (const auto& entry : m_rhiPipelines) {
-                        if (entry.second.program != 0) {
-                            glDeleteProgramPtr(entry.second.program);
-                        }
+            auto glDeleteProgramPtr = LoadGlProc<GlDeleteProgramFn>("glDeleteProgram");
+            if (glDeleteProgramPtr) {
+                if (m_meshProgram != 0) {
+                    glDeleteProgramPtr(m_meshProgram);
+                    m_meshProgram = 0;
+                    m_meshMvpLocation = -1;
+                    m_meshBaseColorLocation = -1;
+                    m_meshLightDirIntensityLocation = -1;
+                    m_meshLightColorLocation = -1;
+                    m_meshEmissiveRoughnessLocation = -1;
+                }
+                for (const auto& entry : m_rhiPipelines) {
+                    if (entry.second.program != 0) {
+                        glDeleteProgramPtr(entry.second.program);
                     }
+                }
                 }
                 auto glDeleteShaderPtr = LoadGlProc<GlDeleteShaderFn>("glDeleteShader");
                 if (glDeleteShaderPtr) {

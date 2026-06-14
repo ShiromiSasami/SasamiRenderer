@@ -37,12 +37,14 @@ namespace SasamiRenderer
         inline PipelineState& GetRayMarchPipelineState() { return m_rayMarchPipelineState; }
         inline PipelineState& GetVolumetricCloudPipelineState() { return m_volumetricCloudPipelineState; }
         inline PipelineState& GetSwrtReflectionCompositePipelineState() { return m_swrtReflectionCompositePipelineState; }
+        inline PipelineState& GetScreenSpaceReflectionPipelineState() { return m_screenSpaceReflectionPipelineState; }
         inline PipelineState& GetToneMapPipelineState() { return m_toneMapPipelineState; }
         inline RootSignature& GetRootSignature() { return m_rootSignature; }
         inline RootSignature& GetRayMarchRootSignature()  { return m_rayMarchRootSignature;  }
         inline RootSignature& GetVolumetricCloudRootSignature() { return m_volumetricCloudRootSignature; }
         inline RootSignature& GetSsaoRootSignature() { return m_ssaoRootSignature; }
         inline RootSignature& GetSsaoBlurRootSignature() { return m_ssaoBlurRootSignature; }
+        inline RootSignature& GetScreenSpaceReflectionRootSignature() { return m_screenSpaceReflectionRootSignature; }
 
         // Mesh shader pipeline (AS + MS + PS). Available only on DX12 Ultimate hardware.
         // Returns a null PipelineState if mesh shaders are not supported.
@@ -67,6 +69,7 @@ namespace SasamiRenderer
         bool InitializeMeshShaderPipeline(GraphicsDevice& device, const std::string& shaderModel);
         bool InitializeEffectPipelines(GraphicsDevice& device, const std::string& vertexProfile, const std::string& pixelProfile);
         bool InitializeSsaoPipelines(GraphicsDevice& device, const std::string& vertexProfile, const std::string& pixelProfile);
+        bool InitializeScreenSpaceReflectionPipeline(GraphicsDevice& device, const std::string& computeProfile);
         PipelineState m_pipelineState;
         PipelineState m_basicPipelineState;
         PipelineState m_transparentPipelineState;
@@ -92,12 +95,14 @@ namespace SasamiRenderer
         PipelineState m_rayMarchPipelineState;
         PipelineState m_volumetricCloudPipelineState;
         PipelineState m_swrtReflectionCompositePipelineState;
+        PipelineState m_screenSpaceReflectionPipelineState;
         PipelineState m_toneMapPipelineState;
         RootSignature m_rootSignature;
         RootSignature m_rayMarchRootSignature;
         RootSignature m_volumetricCloudRootSignature;
         RootSignature m_ssaoRootSignature;
         RootSignature m_ssaoBlurRootSignature;
+        RootSignature m_screenSpaceReflectionRootSignature;
         PipelineState m_meshShaderPipelineState;
         RootSignature m_meshShaderRootSignature;
         PipelineState m_skinnedPipelineState;

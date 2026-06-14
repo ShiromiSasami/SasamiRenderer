@@ -156,9 +156,9 @@ namespace SasamiRenderer
         }
 
         ComPtr<ID3DBlob> ssaoVS, ssaoPS, ssaoBlurPS;
-        if (!LoadShaderBlob(L"SSAO/SSAO_VS.hlsl",      "VSMain", vertexProfile.c_str(), ssaoVS))      return false;
-        if (!LoadShaderBlob(L"SSAO/SSAO_PS.hlsl",      "PSMain", pixelProfile.c_str(),  ssaoPS))      return false;
-        if (!LoadShaderBlob(L"SSAO/SSAO_Blur_PS.hlsl", "PSMain", pixelProfile.c_str(),  ssaoBlurPS))  return false;
+        if (!LoadShaderBlob(L"Effects/AmbientOcclusion/SSAO/SSAO_VS.hlsl",      "VSMain", vertexProfile.c_str(), ssaoVS))      return false;
+        if (!LoadShaderBlob(L"Effects/AmbientOcclusion/SSAO/SSAO_PS.hlsl",      "PSMain", pixelProfile.c_str(),  ssaoPS))      return false;
+        if (!LoadShaderBlob(L"Effects/AmbientOcclusion/SSAO/SSAO_Blur_PS.hlsl", "PSMain", pixelProfile.c_str(),  ssaoBlurPS))  return false;
 
         // SSAO PSO
         {

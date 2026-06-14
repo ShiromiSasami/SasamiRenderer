@@ -11,6 +11,7 @@
 
 #include "Foundation/Tools/DebugOutput.h"
 #include "Foundation/Tools/ScopedPerfTimer.h"
+#include "Foundation/Profiling/Profiler.h"
 #include "Input/InputSystem.h"
 #include "Loader/AssetLoader.h"
 #include "Object/Camera.h"
@@ -45,10 +46,15 @@ namespace SasamiRenderer
     ApplicationCore::ApplicationCore(UINT width, UINT height, const wchar_t* title, IApplication* game)
         : m_width(width), m_height(height), m_title(title), m_running(true), m_game(game)
     {
+        Profiler::Initialize();
         ScopedPerfTimer perfTimer("ApplicationCore::ApplicationCore");
     }
 
-    ApplicationCore::~ApplicationCore() { OnDestroy(); }
+    ApplicationCore::~ApplicationCore()
+    {
+        OnDestroy();
+        Profiler::Shutdown();
+    }
 
     bool ApplicationCore::IsRendererReady() const
     {

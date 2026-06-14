@@ -106,6 +106,85 @@ namespace SasamiRenderer
         return true;
     }
 
+    bool RenderTargetPool::EnsureScreenSpaceReflection(IRHIDevice& device, uint32_t width, uint32_t height)
+    {
+        if (width == 0u || height == 0u ||
+            m_ssrSceneColorCopySrvCpu.ptr == 0 ||
+            m_ssrReflectionSrvCpu.ptr == 0 ||
+            m_ssrReflectionUavCpu.ptr == 0) {
+            return false;
+        }
+
+        if (m_ssrSceneColorCopyTexture.IsValid() &&
+            m_ssrReflectionTexture.IsValid() &&
+            m_ssrWidth == width &&
+            m_ssrHeight == height) {
+            return true;
+        }
+
+        m_ssrSceneColorCopyTexture.Reset();
+        m_ssrReflectionTexture.Reset();
+        m_ssrWidth = 0u;
+        m_ssrHeight = 0u;
+
+        D3D12_RESOURCE_DESC copyDesc{};
+        copyDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        copyDesc.Width = width;
+        copyDesc.Height = height;
+        copyDesc.DepthOrArraySize = 1;
+        copyDesc.MipLevels = 1;
+        copyDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        copyDesc.SampleDesc.Count = 1;
+        copyDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        copyDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+        CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
+        if (FAILED(device.CreateCommittedResource(&defaultHeap,
+                                                  D3D12_HEAP_FLAG_NONE,
+                                                  &copyDesc,
+                                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                                  nullptr,
+                                                  m_ssrSceneColorCopyTexture))) {
+            return false;
+        }
+
+        D3D12_RESOURCE_DESC reflectionDesc = copyDesc;
+        reflectionDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+        if (FAILED(device.CreateCommittedResource(&defaultHeap,
+                                                  D3D12_HEAP_FLAG_NONE,
+                                                  &reflectionDesc,
+                                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                                  nullptr,
+                                                  m_ssrReflectionTexture))) {
+            m_ssrSceneColorCopyTexture.Reset();
+            return false;
+        }
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MipLevels = 1;
+        device.CreateShaderResourceView(m_ssrSceneColorCopyTexture, &srvDesc, m_ssrSceneColorCopySrvCpu);
+        device.CreateShaderResourceView(m_ssrReflectionTexture, &srvDesc, m_ssrReflectionSrvCpu);
+
+        ID3D12Device* nativeDevice = device.GetDevice();
+        if (!nativeDevice) {
+            m_ssrSceneColorCopyTexture.Reset();
+            m_ssrReflectionTexture.Reset();
+            return false;
+        }
+
+        D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+        uavDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        nativeDevice->CreateUnorderedAccessView(m_ssrReflectionTexture.Get(), nullptr, &uavDesc, m_ssrReflectionUavCpu);
+
+        m_ssrWidth = width;
+        m_ssrHeight = height;
+        return true;
+    }
+
     bool RenderTargetPool::EnsureSWRTAmbientOcclusion(IRHIDevice& device,
                                                       uint32_t width,
                                                       uint32_t height,

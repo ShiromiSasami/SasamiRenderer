@@ -36,6 +36,7 @@ namespace SasamiRenderer
         case RhiFormat::R8G8B8A8UNorm: return VK_FORMAT_R8G8B8A8_UNORM;
         case RhiFormat::B8G8R8A8UNorm: return VK_FORMAT_B8G8R8A8_UNORM;
         case RhiFormat::R16G16B16A16Float: return VK_FORMAT_R16G16B16A16_SFLOAT;
+        case RhiFormat::R32G32B32Float: return VK_FORMAT_R32G32B32_SFLOAT;
         case RhiFormat::R32G32Float: return VK_FORMAT_R32G32_SFLOAT;
         case RhiFormat::R32Float: return VK_FORMAT_R32_SFLOAT;
         case RhiFormat::R32UInt: return VK_FORMAT_R32_UINT;

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "Foundation/Tools/DebugOutput.h"
+#include "Foundation/Profiling/Profiler.h"
 #include "Renderer/Passes/Core/IRenderPass.h"
 #include "Renderer/Passes/Core/RenderPassSetupContext.h"
 
@@ -619,6 +620,8 @@ namespace SasamiRenderer
 
     bool RenderGraph::Execute()
     {
+        Profiler::ScopedCpuEvent graphEvent("RenderGraph::Execute");
+
         std::vector<size_t> executionOrder;
         if (!BuildExecutionOrder(executionOrder)) {
             return false;
@@ -666,6 +669,18 @@ namespace SasamiRenderer
                 DebugLog("RenderGraph::Execute: pass execute callback is null.\n");
                 return false;
             }
+
+            CommandList* profileCmdList = nullptr;
+            if (pass.preferCompute) {
+                profileCmdList = (m_hasExecuteContext && m_executeContext.computeFrameInputs)
+                    ? m_executeContext.computeFrameInputs->execution.cmdList
+                    : GetCommandList();
+            } else {
+                profileCmdList = GetCommandList();
+            }
+            Profiler::ScopedCpuEvent cpuEvent(pass.name.c_str());
+            Profiler::ScopedGpuEvent gpuEvent(profileCmdList, pass.name.c_str());
+
             // Compute-preferred passes bypass RTV/DSV setup (no rasterization).
             if (!pass.preferCompute) {
                 if (!PreparePassResources(pass)) {
@@ -788,6 +803,7 @@ namespace SasamiRenderer
                 DebugLog("RenderGraph::ExecutePhaseCompletionNodes: completion node callback is null.\n");
                 return false;
             }
+            Profiler::ScopedCpuEvent cpuEvent(node.name.c_str());
             if (!node.execute()) {
                 DebugLog("RenderGraph::ExecutePhaseCompletionNodes: completion node execution failed.\n");
                 return false;

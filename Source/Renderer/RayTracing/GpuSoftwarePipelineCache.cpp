@@ -40,7 +40,8 @@ namespace SasamiRenderer
         std::filesystem::path FindProjectRoot(std::filesystem::path dir)
         {
             for (int depth=0; depth<16; ++depth) {
-                if (std::filesystem::exists(dir/"Source"/"Renderer"/"Shaders")) return dir;
+                if (std::filesystem::exists(dir/"Shaders") ||
+                    std::filesystem::exists(dir/"Source"/"Renderer"/"Shaders")) return dir;
                 auto p = dir.parent_path();
                 if (p.empty()||p==dir) break;
                 dir = p;
@@ -52,8 +53,13 @@ namespace SasamiRenderer
         {
             static const std::filesystem::path root = [](){
                 auto pr = FindProjectRoot(GetExeDir());
-                return pr.empty() ? std::filesystem::path(L"Source/Renderer/Shaders")
-                                  : pr / L"Source" / L"Renderer" / L"Shaders";
+                if (pr.empty()) {
+                    return std::filesystem::path(L"Shaders");
+                }
+                const std::filesystem::path shaderRoot = pr / L"Shaders";
+                return std::filesystem::exists(shaderRoot)
+                    ? shaderRoot
+                    : pr / L"Source" / L"Renderer" / L"Shaders";
             }();
             return root;
         }
@@ -218,7 +224,7 @@ namespace SasamiRenderer
         // ---- Shadow PSO ----
         {
             ComPtr<ID3DBlob> cs;
-            if (!CompileComputeShader(L"SWRT/SWRT_Shadow_CS.hlsl", "CS_Shadow", cs)) {
+            if (!CompileComputeShader(L"RayTracing/SWRT/SWRT_Shadow_CS.hlsl", "CS_Shadow", cs)) {
                 OutputDebugStringA("GpuSWRT: failed to compile SWRT_Shadow_CS.hlsl\n");
                 return false;
             }
@@ -233,7 +239,7 @@ namespace SasamiRenderer
         // ---- Reflection PSO ----
         {
             ComPtr<ID3DBlob> cs;
-            if (!CompileComputeShader(L"SWRT/SWRT_Reflection_CS.hlsl", "CS_Reflection", cs)) {
+            if (!CompileComputeShader(L"RayTracing/SWRT/SWRT_Reflection_CS.hlsl", "CS_Reflection", cs)) {
                 OutputDebugStringA("GpuSWRT: failed to compile SWRT_Reflection_CS.hlsl\n");
                 return false;
             }
@@ -248,7 +254,7 @@ namespace SasamiRenderer
         // ---- AO PSO ----
         {
             ComPtr<ID3DBlob> cs;
-            if (!CompileComputeShader(L"SWRT/SWRT_AO_CS.hlsl", "CS_AO", cs)) {
+            if (!CompileComputeShader(L"RayTracing/SWRT/SWRT_AO_CS.hlsl", "CS_AO", cs)) {
                 OutputDebugStringA("GpuSWRT: failed to compile SWRT_AO_CS.hlsl\n");
                 return false;
             }
@@ -322,7 +328,7 @@ namespace SasamiRenderer
 
             // ---- Temporal EMA PSO ----
             ComPtr<ID3DBlob> tcs;
-            if (!CompileComputeShader(L"SWRT/SWRT_Reflection_Temporal_CS.hlsl",
+            if (!CompileComputeShader(L"RayTracing/SWRT/SWRT_Reflection_Temporal_CS.hlsl",
                                       "CS_ReflectionTemporal", tcs)) {
                 OutputDebugStringA("GpuSWRT: failed to compile SWRT_Reflection_Temporal_CS.hlsl\n");
                 return false;
@@ -391,7 +397,7 @@ namespace SasamiRenderer
             }
 
             ComPtr<ID3DBlob> acs;
-            if (!CompileComputeShader(L"SWRT/SWRT_Reflection_ATrous_CS.hlsl",
+            if (!CompileComputeShader(L"RayTracing/SWRT/SWRT_Reflection_ATrous_CS.hlsl",
                                       "CS_ReflectionATrous", acs)) {
                 OutputDebugStringA("GpuSWRT: failed to compile SWRT_Reflection_ATrous_CS.hlsl\n");
                 return false;
@@ -517,13 +523,13 @@ namespace SasamiRenderer
                 IID_PPV_ARGS(out.ReleaseAndGetAddressOf())));
         };
 
-        if (!MakePso(L"SWRT/SWRT_ReSTIR_Initial_CS.hlsl",  "CS_ReSTIR_Initial",  m_restirInitialPso))  return false;
-        if (!MakePso(L"SWRT/SWRT_ReSTIR_Temporal_CS.hlsl", "CS_ReSTIR_Temporal", m_restirTemporalPso)) return false;
-        if (!MakePso(L"SWRT/SWRT_ReSTIR_Spatial_CS.hlsl",  "CS_ReSTIR_Spatial",  m_restirSpatialPso))  return false;
-        if (!MakePso(L"SWRT/SWRT_ReSTIR_Shade_CS.hlsl",    "CS_ReSTIR_Shade",    m_restirShadePso))    return false;
-        if (!MakePso(L"SWRT/SWRT_NRD_Pack_CS.hlsl",        "CS_NRD_Pack",        m_nrdPackPso))        return false;
-        if (!MakePso(L"SWRT/SWRT_Shadow_ReSTIR_CS.hlsl",   "CS_Shadow_ReSTIR",   m_shadowReSTIRPso))   return false;
-        if (!MakePso(L"SWRT/SWRT_Denoise_ATrous_CS.hlsl",  "CS_Denoise_ATrous",  m_restirATrousPso))   return false;
+        if (!MakePso(L"RayTracing/SWRT/SWRT_ReSTIR_Initial_CS.hlsl",  "CS_ReSTIR_Initial",  m_restirInitialPso))  return false;
+        if (!MakePso(L"RayTracing/SWRT/SWRT_ReSTIR_Temporal_CS.hlsl", "CS_ReSTIR_Temporal", m_restirTemporalPso)) return false;
+        if (!MakePso(L"RayTracing/SWRT/SWRT_ReSTIR_Spatial_CS.hlsl",  "CS_ReSTIR_Spatial",  m_restirSpatialPso))  return false;
+        if (!MakePso(L"RayTracing/SWRT/SWRT_ReSTIR_Shade_CS.hlsl",    "CS_ReSTIR_Shade",    m_restirShadePso))    return false;
+        if (!MakePso(L"RayTracing/SWRT/SWRT_NRD_Pack_CS.hlsl",        "CS_NRD_Pack",        m_nrdPackPso))        return false;
+        if (!MakePso(L"RayTracing/SWRT/SWRT_Shadow_ReSTIR_CS.hlsl",   "CS_Shadow_ReSTIR",   m_shadowReSTIRPso))   return false;
+        if (!MakePso(L"RayTracing/SWRT/SWRT_Denoise_ATrous_CS.hlsl",  "CS_Denoise_ATrous",  m_restirATrousPso))   return false;
 
         m_restirPipelineReady = true;
         return true;

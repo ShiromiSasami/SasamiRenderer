@@ -23,6 +23,7 @@ namespace SasamiRenderer
         R8G8B8A8UNorm,
         B8G8R8A8UNorm,
         R16G16B16A16Float,
+        R32G32B32Float,
         R32G32Float,
         R32Float,
         R32UInt,

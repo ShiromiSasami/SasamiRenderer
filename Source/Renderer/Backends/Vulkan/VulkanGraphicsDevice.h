@@ -86,6 +86,13 @@ namespace SasamiRenderer
         bool CreateDevice();
         bool CreateSwapChain(UINT width, UINT height, UINT bufferCount);
         bool CreateFrameResources(UINT bufferCount);
+        bool CreateSwapChainImageViews();
+        bool EnsureNativeMeshResources();
+        bool RenderMeshFrame(uint32_t frame,
+                             uint32_t imageIndex,
+                             VkCommandBuffer cmd,
+                             const RhiBackendMeshFrameDesc& desc,
+                             const RhiClearColor& clearColor);
         void QueryCapabilities();
         uint32_t FindMemoryType(uint32_t typeBits, VkMemoryPropertyFlags properties) const;
         void DestroyFrameResources();
@@ -128,7 +135,10 @@ namespace SasamiRenderer
         VkQueue m_presentQueue = VK_NULL_HANDLE;
         VkSwapchainKHR m_swapchain = VK_NULL_HANDLE;
         VkCommandPool m_commandPool = VK_NULL_HANDLE;
+        VkFormat m_swapchainFormat = VK_FORMAT_UNDEFINED;
+        VkExtent2D m_swapchainExtent{};
         std::vector<VkImage> m_swapchainImages;
+        std::vector<VkImageView> m_swapchainImageViews;
         std::vector<VkImageLayout> m_swapchainImageLayouts;
         std::vector<VkCommandBuffer> m_commandBuffers;
         std::vector<VkSemaphore> m_imageAvailableSemaphores;
@@ -153,6 +163,10 @@ namespace SasamiRenderer
         std::unordered_map<uint64_t, VulkanRhiPipelineLayout> m_rhiPipelineLayouts;
         std::unordered_map<uint64_t, VulkanRhiPipeline> m_rhiPipelines;
         std::unordered_map<uint64_t, VkImageView> m_rhiImageViews;
+        VkRenderPass m_nativeMeshRenderPass = VK_NULL_HANDLE;
+        VkPipelineLayout m_nativeMeshPipelineLayout = VK_NULL_HANDLE;
+        VkPipeline m_nativeMeshPipeline = VK_NULL_HANDLE;
+        std::vector<VkFramebuffer> m_nativeMeshFramebuffers;
 
         friend class VulkanRhiCommandEncoder;
     };

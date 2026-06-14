@@ -370,13 +370,13 @@ namespace SasamiRenderer
             m_renderTargetPool.GetSWRTReflectionTexture().IsValid();
         const bool useScreenSpaceReflections =
             (m_settings.renderPathMode == RenderPathMode::Raster) &&
+            executeLightingFamilyPasses &&
             !policy.useSoftwareRayTracedReflections &&
             m_settings.rasterScreenSpaceReflectionEnabled &&
-            m_sceneColorHistoryValid &&
-            m_renderTargetPool.GetTransparentSceneColorCopyTexture().IsValid();
-        policy.reflectionMode = policy.useSoftwareRayTracedReflections
-            ? 1.0f
-            : (useScreenSpaceReflections ? 2.0f : 0.0f);
+            m_renderTargetPool.GetSSRSceneColorCopyTexture().IsValid() &&
+            m_renderTargetPool.GetSSRReflectionTexture().IsValid();
+        policy.useScreenSpaceReflections = useScreenSpaceReflections;
+        policy.reflectionMode = policy.useSoftwareRayTracedReflections ? 1.0f : 0.0f;
         policy.softwareRayTracedShadowMapSize =
             policy.useSoftwareRayTracedDirectionalShadow
                 ? partialBehavior.shadowMapSize
@@ -435,15 +435,9 @@ namespace SasamiRenderer
             (m_settings.renderPathMode == RenderPathMode::Raster) &&
             m_settings.rasterSoftwareRayTracedReflectionEnabled &&
             m_renderTargetPool.GetSWRTReflectionTexture().IsValid();
-        const bool useScreenSpaceReflection =
-            (m_settings.renderPathMode == RenderPathMode::Raster) &&
-            !useSwrtReflection &&
-            m_settings.rasterScreenSpaceReflectionEnabled &&
-            m_sceneColorHistoryValid &&
-            m_renderTargetPool.GetTransparentSceneColorCopyTexture().IsValid();
         inputs.reflectionSrv = useSwrtReflection
             ? m_renderTargetPool.GetSWRTReflectionSrv()
-            : (useScreenSpaceReflection ? m_renderTargetPool.GetTransparentSceneColorCopySrv() : m_nullTextureSrv);
+            : m_nullTextureSrv;
         inputs.transmissionSceneColorSrv = m_renderTargetPool.GetTransmissionSceneColorCopyTexture().IsValid()
             ? m_renderTargetPool.GetTransmissionSceneColorCopySrv()
             : m_nullTextureSrv;
@@ -463,6 +457,14 @@ namespace SasamiRenderer
         inputs.gbuffer.albedoSrv   = m_renderTargetPool.GetGBufferAlbedoSrv();
         inputs.gbuffer.materialSrv = m_renderTargetPool.GetGBufferMaterialSrv();
         inputs.gbuffer.emissiveSrv = m_renderTargetPool.GetGBufferEmissiveSrv();
+        inputs.gbuffer.albedoResource =
+            m_renderTargetPool.GetGBufferAlbedo().IsValid() ? m_renderTargetPool.GetGBufferAlbedo().Get() : nullptr;
+        inputs.gbuffer.normalResource =
+            m_renderTargetPool.GetGBufferNormal().IsValid() ? m_renderTargetPool.GetGBufferNormal().Get() : nullptr;
+        inputs.gbuffer.materialResource =
+            m_renderTargetPool.GetGBufferMaterial().IsValid() ? m_renderTargetPool.GetGBufferMaterial().Get() : nullptr;
+        inputs.gbuffer.emissiveResource =
+            m_renderTargetPool.GetGBufferEmissive().IsValid() ? m_renderTargetPool.GetGBufferEmissive().Get() : nullptr;
 
         // Runtime AO resources. SSAO and RTAO share the same AO consumption slot in lighting.
         inputs.gbuffer.depthSrv = m_renderTargetPool.GetDepthSrv();
@@ -470,6 +472,17 @@ namespace SasamiRenderer
             ? m_renderTargetPool.GetGBufferNormalSrv()
             : m_nullTextureSrv;
         inputs.gbuffer.depthResource = m_renderTargetPool.GetDepth().IsValid() ? m_renderTargetPool.GetDepth().Get() : nullptr;
+        if (m_renderTargetPool.GetSceneColorTexture().IsValid() &&
+            m_renderTargetPool.GetSSRSceneColorCopyTexture().IsValid() &&
+            m_renderTargetPool.GetSSRReflectionTexture().IsValid()) {
+            inputs.ssr.sceneColorResource = m_renderTargetPool.GetSceneColorTexture().Get();
+            inputs.ssr.sceneColorCopyResource = m_renderTargetPool.GetSSRSceneColorCopyTexture().Get();
+            inputs.ssr.reflectionResource = m_renderTargetPool.GetSSRReflectionTexture().Get();
+            inputs.ssr.sceneColorRtv = m_renderTargetPool.GetSceneColorRtv();
+            inputs.ssr.sceneColorCopySrv = m_renderTargetPool.GetSSRSceneColorCopySrv();
+            inputs.ssr.reflectionSrv = m_renderTargetPool.GetSSRReflectionSrv();
+            inputs.ssr.reflectionUav = m_renderTargetPool.GetSSRReflectionUav();
+        }
         const bool usesSsaoAo = m_settings.runtimeAoEnabled &&
             UsesSsaoRuntimeAmbientOcclusion(m_settings.ambientOcclusionMode, m_settings.runtimeAoMethod);
         const bool usesRayTracedAo = m_settings.runtimeAoEnabled &&
@@ -597,6 +610,8 @@ namespace SasamiRenderer
             builtins[static_cast<size_t>(RenderPassType::RuntimeAO)]);
         m_ssaoBlurRenderPass = std::dynamic_pointer_cast<SSAOBlurRenderPass>(
             builtins[static_cast<size_t>(RenderPassType::RuntimeAOBlur)]);
+        m_screenSpaceReflectionRenderPass = std::dynamic_pointer_cast<ScreenSpaceReflectionRenderPass>(
+            builtins[static_cast<size_t>(RenderPassType::ScreenSpaceReflection)]);
         m_softwareReflectionRenderPass = std::dynamic_pointer_cast<SoftwareReflectionRenderPass>(
             builtins[static_cast<size_t>(RenderPassType::SoftwareReflection)]);
         m_softwareReflectionCompositeRenderPass = std::dynamic_pointer_cast<SoftwareReflectionCompositeRenderPass>(

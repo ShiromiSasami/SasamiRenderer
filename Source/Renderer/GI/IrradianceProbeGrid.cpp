@@ -46,7 +46,8 @@ namespace SasamiRenderer
         std::filesystem::path FindProjectRoot(std::filesystem::path dir)
         {
             for (int depth = 0; depth < 16; ++depth) {
-                if (std::filesystem::exists(dir / "Source" / "Renderer" / "Shaders")) return dir;
+                if (std::filesystem::exists(dir / "Shaders") ||
+                    std::filesystem::exists(dir / "Source" / "Renderer" / "Shaders")) return dir;
                 auto p = dir.parent_path();
                 if (p.empty() || p == dir) break;
                 dir = p;
@@ -58,8 +59,12 @@ namespace SasamiRenderer
         {
             static const std::filesystem::path root = []() {
                 auto pr = FindProjectRoot(GetExeDir());
-                return pr.empty()
-                    ? std::filesystem::path(L"Source/Renderer/Shaders")
+                if (pr.empty()) {
+                    return std::filesystem::path(L"Shaders");
+                }
+                const std::filesystem::path shaderRoot = pr / L"Shaders";
+                return std::filesystem::exists(shaderRoot)
+                    ? shaderRoot
                     : pr / L"Source" / L"Renderer" / L"Shaders";
             }();
             return root;
@@ -385,7 +390,7 @@ namespace SasamiRenderer
 
         // Compile and create PSO
         ComPtr<ID3DBlob> cs;
-        if (!CompileCS(L"GI/GI_ProbeUpdate_CS.hlsl", "CS_ProbeUpdate", cs)) {
+        if (!CompileCS(L"RayTracing/GI/GI_ProbeUpdate_CS.hlsl", "CS_ProbeUpdate", cs)) {
             return false;
         }
         D3D12_COMPUTE_PIPELINE_STATE_DESC pso{};

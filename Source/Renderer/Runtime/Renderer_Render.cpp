@@ -29,6 +29,7 @@
 
 #include "Foundation/Tools/DebugOutput.h"
 #include "Foundation/Tools/ScopedPerfTimer.h"
+#include "Foundation/Profiling/Profiler.h"
 #include "Foundation/Math/MathUtil.h"
 #include "Renderer/Utilities/ResourceUploadUtility.h"
 #include "Renderer/Passes/RayMarch/RayMarchRenderPass.h"
@@ -348,6 +349,8 @@ namespace SasamiRenderer
 
     void Renderer::Render(const OverlayRenderCallback& overlay)
     {
+        Profiler::ScopedCpuEvent frameEvent("Renderer::Render");
+
         if (!m_device) {
             return;
         }
@@ -519,6 +522,13 @@ namespace SasamiRenderer
         if (!m_renderTargetPool.EnsureTransparentOit(*m_device, sceneColorW, sceneColorH)) {
             return;
         }
+        const bool useScreenSpaceReflections =
+            (m_settings.renderPathMode == RenderPathMode::Raster) &&
+            m_settings.rasterScreenSpaceReflectionEnabled;
+        if (useScreenSpaceReflections &&
+            !m_renderTargetPool.EnsureScreenSpaceReflection(*m_device, sceneColorW, sceneColorH)) {
+            DebugLog("Renderer::Render: failed to prepare screen-space reflection resources. Disabling SSR for this frame.\n");
+        }
 
         ExternalRenderGraphResourceDesc sceneColorDesc{};
         sceneColorDesc.resource = m_renderTargetPool.GetSceneColorTexture().Get();
@@ -533,6 +543,27 @@ namespace SasamiRenderer
         sceneColorDesc.clearColor[2] = 0.2f;
         sceneColorDesc.clearColor[3] = 1.0f;
         m_renderGraph.ImportExternalResource("SceneColor", sceneColorDesc);
+
+        if (m_renderTargetPool.GetSSRSceneColorCopyTexture().IsValid() &&
+            m_renderTargetPool.GetSSRReflectionTexture().IsValid()) {
+            ExternalRenderGraphResourceDesc ssrSceneColorCopyDesc{};
+            ssrSceneColorCopyDesc.resource = m_renderTargetPool.GetSSRSceneColorCopyTexture().Get();
+            ssrSceneColorCopyDesc.initialState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            ssrSceneColorCopyDesc.finalState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            ssrSceneColorCopyDesc.transitionToFinalState = true;
+            ssrSceneColorCopyDesc.gpuSrv = m_renderTargetPool.GetSSRSceneColorCopySrv();
+            ssrSceneColorCopyDesc.hasSrv = true;
+            m_renderGraph.ImportExternalResource("SSRSceneColorCopy", ssrSceneColorCopyDesc);
+
+            ExternalRenderGraphResourceDesc ssrReflectionDesc{};
+            ssrReflectionDesc.resource = m_renderTargetPool.GetSSRReflectionTexture().Get();
+            ssrReflectionDesc.initialState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            ssrReflectionDesc.finalState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            ssrReflectionDesc.transitionToFinalState = true;
+            ssrReflectionDesc.gpuSrv = m_renderTargetPool.GetSSRReflectionSrv();
+            ssrReflectionDesc.hasSrv = true;
+            m_renderGraph.ImportExternalResource("SSRReflection", ssrReflectionDesc);
+        }
 
         ExternalRenderGraphResourceDesc backBufferDesc{};
         backBufferDesc.resource = backBuffer->Get();
@@ -1131,7 +1162,7 @@ namespace SasamiRenderer
         if (!graphExecuted) {
             if (overlay) {
                 TransitionBackBufferToRenderTarget(cmdList, backIndex);
-                BindMainTargets(cmdList, backIndex);
+                ClearAndBindMainTargets(cmdList, backIndex);
                 overlay(*cmdList, m_renderTargetPool.GetBackBufferRtv(backIndex));
                 TransitionBackBufferToPresent(cmdList, backIndex);
             }

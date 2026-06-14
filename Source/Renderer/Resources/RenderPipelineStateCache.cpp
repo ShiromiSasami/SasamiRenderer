@@ -349,36 +349,36 @@ namespace SasamiRenderer
         const std::string geometryProfile = "gs_" + shaderModel;
         const std::string computeProfile = "cs_" + shaderModel;
         const std::array<ShaderSpec, 30> shaderSpecs{ {
-            { L"PBR/CookTorranceGGX_VS.hlsl", "VSMain", vertexProfile.c_str(), &vertexShader },
-            { L"PBR/CookTorranceGGX_PS.hlsl", "PSMain", pixelProfile.c_str(), &pixelShader },
-            { L"Opaque/Opaque_VS.hlsl", "VSMain", vertexProfile.c_str(), &basicVertexShader },
-            { L"Opaque/Opaque_PS.hlsl", "PSMain", pixelProfile.c_str(), &basicPixelShader },
-            { L"Skybox/Skybox_VS.hlsl", "VSMain", vertexProfile.c_str(), &skyboxVS },
-            { L"Skybox/Skybox_HDR_PS.hlsl", "PSMain", pixelProfile.c_str(), &skyboxHdrPS },
-            { L"Skybox/Skybox_PS.hlsl", "PSMain", pixelProfile.c_str(), &skyboxLdrPS },
-            { L"Tessellation/Tessellation_VS.hlsl", "VSMain", vertexProfile.c_str(), &tessVS },
-            { L"Tessellation/Tessellation_HS.hlsl", "HSMain", hullProfile.c_str(), &tessHS },
-            { L"Tessellation/Tessellation_DS.hlsl", "DSMain", domainProfile.c_str(), &tessDS },
-            { L"Tessellation/Tessellation_GS.hlsl", "GSMain", geometryProfile.c_str(), &tessGS },
-            { L"Tessellation/Tessellation_Debug_DS.hlsl", "DSMain", domainProfile.c_str(), &tessDebugDS },
-            { L"Tessellation/Tessellation_Debug_PS.hlsl", "PSMain", pixelProfile.c_str(), &tessDebugPS },
-            { L"Debug/MeshletDebug_PS.hlsl",        "PSMain", pixelProfile.c_str(), &meshletDebugPS },
-            { L"SSAO/SSAO_VS.hlsl", "VSMain", vertexProfile.c_str(), &ssaoVS },
-            { L"SSAO/SSAO_PS.hlsl", "PSMain", pixelProfile.c_str(), &ssaoPS },
-            { L"SSAO/SSAO_Blur_PS.hlsl", "PSMain", pixelProfile.c_str(), &ssaoBlurPS },
-            { L"ProceduralSky/ProceduralSky_PS.hlsl", "PSMain", pixelProfile.c_str(), &proceduralSkyPS },
-            { L"VolumetricCloud/VolumetricCloud_VS.hlsl", "VSMain", vertexProfile.c_str(), &volumetricCloudVS },
-            { L"VolumetricCloud/VolumetricCloud_PS.hlsl", "PSMain", pixelProfile.c_str(), &volumetricCloudPS },
-            { L"SWRT/SWRT_ReflectionComposite_PS.hlsl", "PSMain", pixelProfile.c_str(), &swrtReflectionCompositePS },
-            { L"PostProcess/ToneMap_PS.hlsl", "PSMain", pixelProfile.c_str(), &toneMapPS },
-            { L"RayMarch/RayMarch_VS.hlsl", "VSMain", vertexProfile.c_str(), &rayMarchVS },
-            { L"RayMarch/RayMarch_PS.hlsl", "PSMain", pixelProfile.c_str(), &rayMarchPS },
-            { L"Transparent/TransparentBackfaceDistance_PS.hlsl", "PSMain", pixelProfile.c_str(), &transparentBackfaceDistancePS },
-            { L"Transparent/TransparentOIT_PS.hlsl", "PSMain", pixelProfile.c_str(), &transparentOitPS },
-            { L"Transparent/TransparentOITComposite_PS.hlsl", "PSMain", pixelProfile.c_str(), &transparentOitCompositePS },
-            { L"Shadow/ShadowVSM_PS.hlsl", "PS_ShadowVSM", pixelProfile.c_str(), &shadowVsmPS },
-            { L"Shadow/ShadowVSM_GaussBlur_CS.hlsl", "CS_BlurH", computeProfile.c_str(), &shadowVsmBlurHCS },
-            { L"Shadow/ShadowVSM_GaussBlur_CS.hlsl", "CS_BlurV", computeProfile.c_str(), &shadowVsmBlurVCS },
+            { L"Raster/Lighting/PBR/CookTorranceGGX_VS.hlsl", "VSMain", vertexProfile.c_str(), &vertexShader },
+            { L"Raster/Lighting/PBR/CookTorranceGGX_PS.hlsl", "PSMain", pixelProfile.c_str(), &pixelShader },
+            { L"Raster/Geometry/Opaque/Opaque_VS.hlsl", "VSMain", vertexProfile.c_str(), &basicVertexShader },
+            { L"Raster/Geometry/Opaque/Opaque_PS.hlsl", "PSMain", pixelProfile.c_str(), &basicPixelShader },
+            { L"Effects/Sky/Skybox/Skybox_VS.hlsl", "VSMain", vertexProfile.c_str(), &skyboxVS },
+            { L"Effects/Sky/Skybox/Skybox_HDR_PS.hlsl", "PSMain", pixelProfile.c_str(), &skyboxHdrPS },
+            { L"Effects/Sky/Skybox/Skybox_PS.hlsl", "PSMain", pixelProfile.c_str(), &skyboxLdrPS },
+            { L"Raster/Geometry/Tessellation/Tessellation_VS.hlsl", "VSMain", vertexProfile.c_str(), &tessVS },
+            { L"Raster/Geometry/Tessellation/Tessellation_HS.hlsl", "HSMain", hullProfile.c_str(), &tessHS },
+            { L"Raster/Geometry/Tessellation/Tessellation_DS.hlsl", "DSMain", domainProfile.c_str(), &tessDS },
+            { L"Raster/Geometry/Tessellation/Tessellation_GS.hlsl", "GSMain", geometryProfile.c_str(), &tessGS },
+            { L"Raster/Geometry/Tessellation/Tessellation_Debug_DS.hlsl", "DSMain", domainProfile.c_str(), &tessDebugDS },
+            { L"Raster/Geometry/Tessellation/Tessellation_Debug_PS.hlsl", "PSMain", pixelProfile.c_str(), &tessDebugPS },
+            { L"Debug/Meshlet/MeshletDebug_PS.hlsl", "PSMain", pixelProfile.c_str(), &meshletDebugPS },
+            { L"Effects/AmbientOcclusion/SSAO/SSAO_VS.hlsl", "VSMain", vertexProfile.c_str(), &ssaoVS },
+            { L"Effects/AmbientOcclusion/SSAO/SSAO_PS.hlsl", "PSMain", pixelProfile.c_str(), &ssaoPS },
+            { L"Effects/AmbientOcclusion/SSAO/SSAO_Blur_PS.hlsl", "PSMain", pixelProfile.c_str(), &ssaoBlurPS },
+            { L"Effects/Sky/ProceduralSky/ProceduralSky_PS.hlsl", "PSMain", pixelProfile.c_str(), &proceduralSkyPS },
+            { L"Effects/Volumetric/Cloud/VolumetricCloud_VS.hlsl", "VSMain", vertexProfile.c_str(), &volumetricCloudVS },
+            { L"Effects/Volumetric/Cloud/VolumetricCloud_PS.hlsl", "PSMain", pixelProfile.c_str(), &volumetricCloudPS },
+            { L"RayTracing/SWRT/SWRT_ReflectionComposite_PS.hlsl", "PSMain", pixelProfile.c_str(), &swrtReflectionCompositePS },
+            { L"Effects/PostProcess/ToneMap_PS.hlsl", "PSMain", pixelProfile.c_str(), &toneMapPS },
+            { L"Effects/RayMarch/RayMarch_VS.hlsl", "VSMain", vertexProfile.c_str(), &rayMarchVS },
+            { L"Effects/RayMarch/RayMarch_PS.hlsl", "PSMain", pixelProfile.c_str(), &rayMarchPS },
+            { L"Raster/Transparency/TransparentBackfaceDistance_PS.hlsl", "PSMain", pixelProfile.c_str(), &transparentBackfaceDistancePS },
+            { L"Raster/Transparency/TransparentOIT_PS.hlsl", "PSMain", pixelProfile.c_str(), &transparentOitPS },
+            { L"Raster/Transparency/TransparentOITComposite_PS.hlsl", "PSMain", pixelProfile.c_str(), &transparentOitCompositePS },
+            { L"Raster/Lighting/Shadow/ShadowVSM_PS.hlsl", "PS_ShadowVSM", pixelProfile.c_str(), &shadowVsmPS },
+            { L"Raster/Lighting/Shadow/ShadowVSM_GaussBlur_CS.hlsl", "CS_BlurH", computeProfile.c_str(), &shadowVsmBlurHCS },
+            { L"Raster/Lighting/Shadow/ShadowVSM_GaussBlur_CS.hlsl", "CS_BlurV", computeProfile.c_str(), &shadowVsmBlurVCS },
         } };
 
         for (const ShaderSpec& spec : shaderSpecs) {
@@ -806,6 +806,7 @@ namespace SasamiRenderer
 
         // SSAO + SSAO Blur ↁEInitializeSsaoPipelines
         if (!InitializeSsaoPipelines(device, vertexProfile, pixelProfile)) { return false; }
+        if (!InitializeScreenSpaceReflectionPipeline(device, computeProfile)) { return false; }
         // Mesh shader pipeline  Eoptional, requires D3D12 Mesh Shader Tier 1
         InitializeMeshShaderPipeline(device, shaderModel);
 
@@ -841,7 +842,7 @@ namespace SasamiRenderer
 
         // Load/compile SkinnedMesh_VS.hlsl
         ComPtr<ID3DBlob> skinnedVS;
-        if (!loadOrCompileShader({ L"SkinnedMesh/SkinnedMesh_VS.hlsl", "VSMain", vertexProfile.c_str(), &skinnedVS })) {
+        if (!loadOrCompileShader({ L"Raster/Geometry/SkinnedMesh/SkinnedMesh_VS.hlsl", "VSMain", vertexProfile.c_str(), &skinnedVS })) {
             return false;
         }
 

@@ -137,9 +137,9 @@ namespace SasamiRenderer
         const std::string psProfile = "ps_" + shaderModel;
 
         ComPtr<ID3DBlob> asBlob, msBlob, psBlob;
-        if (!LoadMsShaderBlob(L"MeshShader/MeshShader_AS.hlsl", "AS_Meshlet", asProfile.c_str(), asBlob)) return false;
-        if (!LoadMsShaderBlob(L"MeshShader/MeshShader_MS.hlsl", "MS_Meshlet", msProfile.c_str(), msBlob)) return false;
-        if (!LoadMsShaderBlob(L"PBR/CookTorranceGGX_PS.hlsl",   "PSMain",     psProfile.c_str(), psBlob)) return false;
+        if (!LoadMsShaderBlob(L"Raster/Geometry/MeshShader/MeshShader_AS.hlsl", "AS_Meshlet", asProfile.c_str(), asBlob)) return false;
+        if (!LoadMsShaderBlob(L"Raster/Geometry/MeshShader/MeshShader_MS.hlsl", "MS_Meshlet", msProfile.c_str(), msBlob)) return false;
+        if (!LoadMsShaderBlob(L"Raster/Lighting/PBR/CookTorranceGGX_PS.hlsl",   "PSMain",     psProfile.c_str(), psBlob)) return false;
 
         // Root Signature
         // [0] t0 - MeshletDesc SRV   (AS + MS, inline root SRV)

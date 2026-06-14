@@ -102,8 +102,9 @@ namespace SasamiRenderer
             TransparentComposite = 10,
             RuntimeAOBlur = 11,
             TransparentSceneColorCopy = 12,
-            SoftwareReflection = 13,
-            SoftwareReflectionComposite = 14,
+            ScreenSpaceReflection = 13,
+            SoftwareReflection = 14,
+            SoftwareReflectionComposite = 15,
         };
     }
 }

@@ -386,6 +386,7 @@ namespace SasamiRenderer
             m_transparentCompositeRenderPass,
             m_ssaoBlurRenderPass,
             m_transparentSceneColorCopyRenderPass,
+            m_screenSpaceReflectionRenderPass,
             m_softwareReflectionRenderPass,
             m_softwareReflectionCompositeRenderPass
         });
