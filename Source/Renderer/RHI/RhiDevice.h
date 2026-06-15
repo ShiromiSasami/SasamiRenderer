@@ -53,6 +53,9 @@ namespace SasamiRenderer
         virtual void SetVertexBuffers(uint32_t startSlot, uint32_t count,
                                       const RhiVertexBufferView* views) {}
         virtual void SetIndexBuffer(const RhiIndexBufferView& view) {}
+        virtual void SetVertexBufferBindings(uint32_t startSlot, uint32_t count,
+                                             const RhiVertexBufferBinding* bindings) {}
+        virtual void SetIndexBufferBinding(const RhiIndexBufferBinding& binding) {}
     };
 
     class NullRhiCommandEncoder final : public IRhiCommandEncoder

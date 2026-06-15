@@ -50,7 +50,8 @@ namespace SasamiRenderer
 
         bool IsSkyboxTextureUploaded() const { return m_skyboxTextureUploaded; }
         bool HasSkyboxUploadAttempted() const { return m_skyboxUploadAttempted; }
-        bool IsSkyboxVBValid() const { return m_skyboxVB.IsValid(); }
+        bool IsSkyboxVBValid() const { return m_skyboxVbBinding.buffer.IsValid() || m_skyboxVB.IsValid(); }
+        const RhiVertexBufferBinding& GetSkyboxVBBinding() const { return m_skyboxVbBinding; }
         VertexBufferView GetSkyboxVBV() const { return m_skyboxVBV; }
         bool IsIblUploaded() const { return m_iblUploaded; }
         bool HasIblUploadAttempted() const { return m_iblUploadAttempted; }
@@ -160,5 +161,7 @@ namespace SasamiRenderer
 
         Resource m_skyboxVB;
         VertexBufferView m_skyboxVBV{};
+        RhiBufferHandle m_skyboxRhiVB{};
+        RhiVertexBufferBinding m_skyboxVbBinding{};
     };
 }

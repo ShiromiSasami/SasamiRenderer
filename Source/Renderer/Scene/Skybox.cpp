@@ -308,6 +308,8 @@ namespace SasamiRenderer
         RefreshEnvironmentAssets();
         m_skyboxVB.Reset();
         m_skyboxVBV = {};
+        m_skyboxRhiVB = {};
+        m_skyboxVbBinding = {};
         m_device = nullptr;
     }
 
@@ -452,6 +454,30 @@ namespace SasamiRenderer
         }
 
         const UINT64 vbBytes = sizeof(kSkyboxCubeVertices);
+
+        if (m_device->GetCapabilities().supportsRhiResourceCreation) {
+            RhiBufferDesc vbDesc{};
+            vbDesc.sizeInBytes = vbBytes;
+            vbDesc.strideInBytes = sizeof(SkyboxVertex);
+            vbDesc.usage = RhiBufferUsageFlags::Vertex;
+            vbDesc.memoryUsage = RhiMemoryUsage::CpuToGpu;
+            vbDesc.initialState = RhiResourceState::Common;
+
+            m_skyboxRhiVB = m_device->CreateRhiBuffer(vbDesc, kSkyboxCubeVertices);
+            if (!m_skyboxRhiVB.IsValid()) {
+                return false;
+            }
+
+            m_skyboxVbBinding.buffer = m_skyboxRhiVB;
+            m_skyboxVbBinding.offsetInBytes = 0;
+            m_skyboxVbBinding.strideInBytes = sizeof(SkyboxVertex);
+            m_skyboxVbBinding.sizeInBytes = static_cast<uint32_t>(vbBytes);
+            return true;
+        }
+
+        if (!m_device->GetCapabilities().supportsD3D12CompatibilitySurface) {
+            return false;
+        }
 
         D3D12_HEAP_PROPERTIES heapProps = {};
         heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
@@ -741,7 +767,7 @@ namespace SasamiRenderer
                         const RenderDirectionalLight& directionalLight,
                         const PushCameraCbCallback& pushCameraCb) const
     {
-        if (!enc || !m_skyboxTextureUploaded || !m_skyboxVB.IsValid()) {
+        if (!enc || !m_skyboxTextureUploaded || !IsSkyboxVBValid()) {
             return;
         }
 
@@ -806,8 +832,12 @@ namespace SasamiRenderer
             }
         }
 
-        const RhiVertexBufferView rhiVbv{ m_skyboxVBV.BufferLocation, m_skyboxVBV.StrideInBytes, m_skyboxVBV.SizeInBytes };
-        enc->SetVertexBuffers(0, 1, &rhiVbv);
+        if (m_skyboxVbBinding.buffer.IsValid()) {
+            enc->SetVertexBufferBindings(0, 1, &m_skyboxVbBinding);
+        } else {
+            const RhiVertexBufferView rhiVbv{ m_skyboxVBV.BufferLocation, m_skyboxVBV.StrideInBytes, m_skyboxVBV.SizeInBytes };
+            enc->SetVertexBuffers(0, 1, &rhiVbv);
+        }
         enc->Draw({ static_cast<uint32_t>(_countof(kSkyboxCubeVertices)), 1u, 0u, 0u });
     }
 }

@@ -144,12 +144,14 @@ Microsoft 系ツールは以下の役割で使います。
 
 ## RHI Migration Notes
 
-Status as of 2026-06-14:
+Status as of 2026-06-16:
 
 - `IRhiDevice` is the neutral lower RHI interface. `IRHIDevice` is the transitional renderer-facing device that still exposes the D3D12 compatibility surface used by the current feature render path.
 - `DebugProbeGridRenderPass` now creates its pipeline layout, graphics pipeline, and vertex buffer through RHI descriptors/API instead of directly owning D3D12 root signature and PSO objects.
 - `RhiFormat::R32G32B32Float` is available for float3 vertex attributes and is mapped in the DX12, DX11, Vulkan, and OpenGL backend vertex-format converters.
-- Remaining limitation: `IRhiCommandEncoder::SetVertexBuffers` still takes GPU virtual addresses through `RhiVertexBufferView`, so `DebugProbeGridRenderPass` still uses `GetD3D12CompatibilityResource()` to obtain the DX12 GPU address after RHI buffer creation. A future step should add buffer-handle-based vertex/index binding to remove this compatibility dependency.
+- `IRhiCommandEncoder` now has buffer-handle-based `SetVertexBufferBindings()` and `SetIndexBufferBinding()` methods. `DebugProbeGridRenderPass`, `MeshBuffer`, `SkinnedMeshBuffer`, `Skybox`, and `ProceduralSkyRenderPass` use these for RHI-created vertex/index buffers instead of packing RHI handle IDs into GPU-address views.
+- `MeshBuffer`, `SkinnedMeshBuffer`, and `Skybox` use RHI buffer creation whenever `supportsRhiResourceCreation` is available. Their old GPU virtual address vertex/index binding paths are now D3D12-compatibility fallbacks only.
+- Remaining limitation: several DX12 feature-path systems still expose GPU virtual addresses for constant buffers, shader resource buffers, ray tracing structures, and compatibility resources. Future work should move these resource owners to RHI handles where the backend contract can represent the required binding type.
 
 レンダラー、graphics API、shading、lighting、ray tracing、GI、material、render graph を変更する場合は、実装前に短い実装方針を作り、可能な範囲で論文、公式 API 仕様、Unreal Engine などの既存実装、ベンダーサンプル、保守されているオープンソースレンダラーを参照してください。
 

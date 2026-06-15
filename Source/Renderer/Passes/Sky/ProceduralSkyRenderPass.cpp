@@ -116,9 +116,14 @@ namespace SasamiRenderer
         }
 
         // --- Draw skybox cube ---
-        const VertexBufferView vbv = skybox.GetSkyboxVBV();
-        const RhiVertexBufferView rhiVbv{ vbv.BufferLocation, vbv.StrideInBytes, vbv.SizeInBytes };
-        enc->SetVertexBuffers(0, 1, &rhiVbv);
+        const RhiVertexBufferBinding& vbBinding = skybox.GetSkyboxVBBinding();
+        if (vbBinding.buffer.IsValid()) {
+            enc->SetVertexBufferBindings(0, 1, &vbBinding);
+        } else {
+            const VertexBufferView vbv = skybox.GetSkyboxVBV();
+            const RhiVertexBufferView rhiVbv{ vbv.BufferLocation, vbv.StrideInBytes, vbv.SizeInBytes };
+            enc->SetVertexBuffers(0, 1, &rhiVbv);
+        }
         enc->Draw({36u, 1u, 0u, 0u});
 
         return true;

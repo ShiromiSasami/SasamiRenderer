@@ -447,6 +447,36 @@ namespace SasamiRenderer
                 m_commandList.IASetIndexBuffer(&ibv);
             }
 
+            void SetVertexBufferBindings(uint32_t startSlot, uint32_t count, const RhiVertexBufferBinding* bindings) override
+            {
+                if (!m_valid || count == 0 || !bindings) return;
+                std::vector<D3D12_VERTEX_BUFFER_VIEW> dxViews(count);
+                for (uint32_t i = 0; i < count; ++i) {
+                    Resource* resource = m_device.GetD3D12CompatibilityResource(bindings[i].buffer);
+                    if (!resource) {
+                        continue;
+                    }
+                    dxViews[i].BufferLocation = resource->GetGPUVirtualAddress() + bindings[i].offsetInBytes;
+                    dxViews[i].StrideInBytes  = bindings[i].strideInBytes;
+                    dxViews[i].SizeInBytes    = bindings[i].sizeInBytes;
+                }
+                m_commandList.IASetVertexBuffers(startSlot, count, dxViews.data());
+            }
+
+            void SetIndexBufferBinding(const RhiIndexBufferBinding& binding) override
+            {
+                if (!m_valid) return;
+                Resource* resource = m_device.GetD3D12CompatibilityResource(binding.buffer);
+                if (!resource) {
+                    return;
+                }
+                D3D12_INDEX_BUFFER_VIEW ibv{};
+                ibv.BufferLocation = resource->GetGPUVirtualAddress() + binding.offsetInBytes;
+                ibv.SizeInBytes    = binding.sizeInBytes;
+                ibv.Format         = binding.is32Bit ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT;
+                m_commandList.IASetIndexBuffer(&ibv);
+            }
+
         private:
             Dx12GraphicsDevice& m_device;
             RhiQueueType m_queueType = RhiQueueType::Graphics;

@@ -693,6 +693,51 @@ float4 PSMain(PSInput input) : SV_TARGET
             }
         }
 
+        void SetVertexBufferBindings(uint32_t startSlot, uint32_t count, const RhiVertexBufferBinding* bindings) override
+        {
+            if (!m_device.m_context || !bindings || count == 0) {
+                return;
+            }
+
+            std::vector<ID3D11Buffer*> buffers(count, nullptr);
+            std::vector<UINT> strides(count, 0);
+            std::vector<UINT> offsets(count, 0);
+            m_boundVertexBuffers.clear();
+            m_boundVertexBuffers.reserve(count);
+            for (uint32_t i = 0; i < count; ++i) {
+                const auto it = m_device.m_rhiResources.find(bindings[i].buffer.id);
+                if (it == m_device.m_rhiResources.end()) {
+                    continue;
+                }
+                Microsoft::WRL::ComPtr<ID3D11Buffer> buffer;
+                if (SUCCEEDED(it->second.As(&buffer))) {
+                    buffers[i] = buffer.Get();
+                    strides[i] = bindings[i].strideInBytes;
+                    offsets[i] = static_cast<UINT>(bindings[i].offsetInBytes);
+                    m_boundVertexBuffers.push_back(buffer);
+                }
+            }
+            m_device.m_context->IASetVertexBuffers(startSlot, count, buffers.data(), strides.data(), offsets.data());
+        }
+
+        void SetIndexBufferBinding(const RhiIndexBufferBinding& binding) override
+        {
+            if (!m_device.m_context || !binding.buffer.IsValid()) {
+                return;
+            }
+            const auto it = m_device.m_rhiResources.find(binding.buffer.id);
+            if (it == m_device.m_rhiResources.end()) {
+                return;
+            }
+            Microsoft::WRL::ComPtr<ID3D11Buffer> buffer;
+            if (SUCCEEDED(it->second.As(&buffer))) {
+                m_boundIndexBuffer = buffer;
+                m_device.m_context->IASetIndexBuffer(buffer.Get(),
+                                                     binding.is32Bit ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT,
+                                                     static_cast<UINT>(binding.offsetInBytes));
+            }
+        }
+
     private:
         Dx11GraphicsDevice& m_device;
         RhiQueueType m_queueType = RhiQueueType::Graphics;

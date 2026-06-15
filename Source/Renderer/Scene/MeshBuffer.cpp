@@ -12,8 +12,7 @@ namespace SasamiRenderer
             return false;
         }
 
-        if (!device.GetCapabilities().supportsD3D12CompatibilitySurface &&
-            device.GetCapabilities().supportsRhiResourceCreation) {
+        if (device.GetCapabilities().supportsRhiResourceCreation) {
             for (const auto& m : meshes) {
                 GPUItem item{};
 
@@ -29,7 +28,6 @@ namespace SasamiRenderer
                     if (!item.rhiVb.IsValid()) {
                         return false;
                     }
-                    item.vbv.BufferLocation = item.rhiVb.id;
                     item.vbv.StrideInBytes = sizeof(Vertex);
                     item.vbv.SizeInBytes = static_cast<UINT>(vbBytes);
                     item.vertexCount = static_cast<UINT>(m.vertices.size());
@@ -47,7 +45,6 @@ namespace SasamiRenderer
                     if (!item.rhiIb.IsValid()) {
                         return false;
                     }
-                    item.ibv.BufferLocation = item.rhiIb.id;
                     item.ibv.SizeInBytes = static_cast<UINT>(ibBytes);
                     item.ibv.Format = DXGI_FORMAT_R32_UINT;
                     item.indexCount = static_cast<UINT>(m.indices.size());
@@ -56,6 +53,10 @@ namespace SasamiRenderer
                 m_items.push_back(std::move(item));
             }
             return !m_items.empty();
+        }
+
+        if (!device.GetCapabilities().supportsD3D12CompatibilitySurface) {
+            return false;
         }
 
         CommandAllocator uploadAlloc;
@@ -168,16 +169,21 @@ namespace SasamiRenderer
         if (!enc || i >= m_items.size()) return;
         auto& it = m_items[i];
         if (it.rhiVb.IsValid()) {
-            RhiVertexBufferView vbv{ it.rhiVb.id, it.vbv.StrideInBytes, it.vbv.SizeInBytes };
-            enc->SetVertexBuffers(0, 1, &vbv);
+            RhiVertexBufferBinding vb{};
+            vb.buffer = it.rhiVb;
+            vb.strideInBytes = it.vbv.StrideInBytes;
+            vb.sizeInBytes = it.vbv.SizeInBytes;
+            enc->SetVertexBufferBindings(0, 1, &vb);
         } else if (it.vb.IsValid()) {
             RhiVertexBufferView vbv{ it.vbv.BufferLocation, it.vbv.StrideInBytes, it.vbv.SizeInBytes };
             enc->SetVertexBuffers(0, 1, &vbv);
         }
         if (it.rhiIb.IsValid()) {
-            RhiIndexBufferView ibv{ it.rhiIb.id, it.ibv.SizeInBytes,
-                                    it.ibv.Format == DXGI_FORMAT_R32_UINT };
-            enc->SetIndexBuffer(ibv);
+            RhiIndexBufferBinding ib{};
+            ib.buffer = it.rhiIb;
+            ib.sizeInBytes = it.ibv.SizeInBytes;
+            ib.is32Bit = it.ibv.Format == DXGI_FORMAT_R32_UINT;
+            enc->SetIndexBufferBinding(ib);
         } else if (it.ib.IsValid()) {
             RhiIndexBufferView ibv{ it.ibv.BufferLocation, it.ibv.SizeInBytes,
                                     it.ibv.Format == DXGI_FORMAT_R32_UINT };

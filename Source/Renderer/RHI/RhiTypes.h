@@ -605,6 +605,22 @@ namespace SasamiRenderer
         bool          is32Bit     = true;
     };
 
+    struct RhiVertexBufferBinding
+    {
+        RhiBufferHandle buffer{};
+        uint64_t        offsetInBytes = 0;
+        uint32_t        strideInBytes = 0;
+        uint32_t        sizeInBytes   = 0;
+    };
+
+    struct RhiIndexBufferBinding
+    {
+        RhiBufferHandle buffer{};
+        uint64_t        offsetInBytes = 0;
+        uint32_t        sizeInBytes   = 0;
+        bool            is32Bit       = true;
+    };
+
     struct RhiBackendCapabilities
     {
         RhiBackendApi api = RhiBackendApi::Unknown;

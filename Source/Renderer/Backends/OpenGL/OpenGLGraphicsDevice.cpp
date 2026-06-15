@@ -492,6 +492,36 @@ void main()
             }
         }
 
+        void SetVertexBufferBindings(uint32_t, uint32_t count, const RhiVertexBufferBinding* bindings) override
+        {
+            if (!MakeCurrent() || !bindings || count == 0) {
+                return;
+            }
+            auto bindBuffer = LoadGlProc<GlBindBufferFn>("glBindBuffer");
+            if (!bindBuffer) {
+                return;
+            }
+            const auto it = m_device.m_rhiBuffers.find(bindings[0].buffer.id);
+            if (it != m_device.m_rhiBuffers.end()) {
+                bindBuffer(GL_ARRAY_BUFFER, it->second);
+            }
+        }
+
+        void SetIndexBufferBinding(const RhiIndexBufferBinding& binding) override
+        {
+            if (!MakeCurrent() || !binding.buffer.IsValid()) {
+                return;
+            }
+            auto bindBuffer = LoadGlProc<GlBindBufferFn>("glBindBuffer");
+            if (!bindBuffer) {
+                return;
+            }
+            const auto it = m_device.m_rhiBuffers.find(binding.buffer.id);
+            if (it != m_device.m_rhiBuffers.end()) {
+                bindBuffer(GL_ELEMENT_ARRAY_BUFFER, it->second);
+            }
+        }
+
     private:
         bool MakeCurrent() const
         {

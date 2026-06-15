@@ -497,6 +497,38 @@ namespace SasamiRenderer
             }
         }
 
+        void SetVertexBufferBindings(uint32_t startSlot, uint32_t count, const RhiVertexBufferBinding* bindings) override
+        {
+            if (!IsValid() || !bindings || count == 0) {
+                return;
+            }
+
+            std::vector<VkBuffer> buffers(count, VK_NULL_HANDLE);
+            std::vector<VkDeviceSize> offsets(count, 0);
+            for (uint32_t i = 0; i < count; ++i) {
+                const auto it = m_device.m_rhiResources.find(bindings[i].buffer.id);
+                if (it != m_device.m_rhiResources.end()) {
+                    buffers[i] = it->second.buffer;
+                    offsets[i] = bindings[i].offsetInBytes;
+                }
+            }
+            vkCmdBindVertexBuffers(m_commandBuffer, startSlot, count, buffers.data(), offsets.data());
+        }
+
+        void SetIndexBufferBinding(const RhiIndexBufferBinding& binding) override
+        {
+            if (!IsValid() || !binding.buffer.IsValid()) {
+                return;
+            }
+            const auto it = m_device.m_rhiResources.find(binding.buffer.id);
+            if (it != m_device.m_rhiResources.end() && it->second.buffer != VK_NULL_HANDLE) {
+                vkCmdBindIndexBuffer(m_commandBuffer,
+                                     it->second.buffer,
+                                     binding.offsetInBytes,
+                                     binding.is32Bit ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
+            }
+        }
+
     private:
         VulkanGraphicsDevice& m_device;
         RhiQueueType m_queueType = RhiQueueType::Graphics;
