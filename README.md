@@ -73,7 +73,7 @@ Vulkan / DirectX 11 / OpenGL が灰色画面になる場合は、native fallback
 既定パス順:
 
 ```text
-Shadow -> Opaque -> RuntimeAO -> RuntimeAOBlur -> Lighting -> ScreenSpaceReflection -> SoftwareReflection -> SoftwareReflectionComposite -> Skybox -> TransparentBackfaceDistance -> TransparentSceneColorCopy -> Transparent -> TransparentLighting -> TransparentComposite -> PostProcess
+Shadow -> Opaque -> OpaqueGBuffer -> RuntimeAO -> RuntimeAOBlur -> Lighting -> ScreenSpaceReflection -> SoftwareReflection -> SoftwareReflectionComposite -> Skybox -> TransparentBackfaceDistance -> TransparentSceneColorCopy -> Transparent -> TransparentLighting -> TransparentComposite -> PostProcess
 ```
 
 主なパス:
@@ -81,7 +81,8 @@ Shadow -> Opaque -> RuntimeAO -> RuntimeAOBlur -> Lighting -> ScreenSpaceReflect
 - `Shadow`: directional / CSM / VSM shadow map
 - `Opaque`: forward opaque fallback と GBuffer 生成の前段
 - `RuntimeAO` / `RuntimeAOBlur`: SSAO または runtime AO
-- `Lighting`: PBR lighting と GBuffer 出力
+- `OpaqueGBuffer`: opaque mesh から GBuffer と depth を出力
+- `Lighting`: GBuffer/depth/light/shadow/IBL/AO を読む fullscreen deferred lighting combine。`SceneColor` を生成
 - `ScreenSpaceReflection`: Lighting 後の `SceneColor` をコピーし、compute shader で SSR radiance/confidence を生成
 - `SoftwareReflection` / `SoftwareReflectionComposite`: SWRT reflection。SWRT が有効な場合は SSR より優先
 - `Skybox`: sky / procedural sky
@@ -151,7 +152,11 @@ Status as of 2026-06-16:
 - `RhiFormat::R32G32B32Float` is available for float3 vertex attributes and is mapped in the DX12, DX11, Vulkan, and OpenGL backend vertex-format converters.
 - `IRhiCommandEncoder` now has buffer-handle-based `SetVertexBufferBindings()` and `SetIndexBufferBinding()` methods. `DebugProbeGridRenderPass`, `MeshBuffer`, `SkinnedMeshBuffer`, `Skybox`, and `ProceduralSkyRenderPass` use these for RHI-created vertex/index buffers instead of packing RHI handle IDs into GPU-address views.
 - `MeshBuffer`, `SkinnedMeshBuffer`, and `Skybox` use RHI buffer creation whenever `supportsRhiResourceCreation` is available. Their old GPU virtual address vertex/index binding paths are now D3D12-compatibility fallbacks only.
-- Remaining limitation: several DX12 feature-path systems still expose GPU virtual addresses for constant buffers, shader resource buffers, ray tracing structures, and compatibility resources. Future work should move these resource owners to RHI handles where the backend contract can represent the required binding type.
+- `SceneSubmitter` now creates submitted RGBA8 scene textures through `CreateRhiTexture2DFromRgba8()` when RHI resource and descriptor creation are available. On the DX12 feature path, it writes SRVs into the renderer's existing global SRV heap so descriptor-table binding stays compatible with current passes.
+- The Vulkan backend implements `CreateRhiTexture2DFromRgba8()` using a host-visible staging buffer, `vkCmdCopyBufferToImage()`, and layout transitions from undefined to transfer destination to shader-read-only.
+- `OpaqueGBufferRenderPass` owns the opaque mesh GBuffer/depth draw that was previously submitted from `LightingRenderPass`. `LightingRenderPass` no longer calls `drawOpaqueItems`; it now runs a fullscreen deferred lighting combine shader and writes `SceneColor`.
+- Deferred lighting currently covers the core raster opaque path: directional/point/spot lights, CSM/VSM/spot shadows, IBL diffuse, runtime AO, emissive, GBuffer debug views, GI probe irradiance, and specular-glossiness material workflow. Specular-glossiness uses `GBufferSpecularWorkflow` to carry per-pixel specular color and workflow flag into the fullscreen lighting combine. Runtime visual parity with the previous forward path still needs scene-level capture verification.
+- Remaining limitation: several DX12 feature-path systems still expose GPU virtual addresses for constant buffers, shader resource buffers, ray tracing structures, and compatibility resources. Skybox IBL/render-target ownership still has direct DX12 paths. Future work should move these resource owners to RHI handles where the backend contract can represent the required binding type.
 
 レンダラー、graphics API、shading、lighting、ray tracing、GI、material、render graph を変更する場合は、実装前に短い実装方針を作り、可能な範囲で論文、公式 API 仕様、Unreal Engine などの既存実装、ベンダーサンプル、保守されているオープンソースレンダラーを参照してください。
 

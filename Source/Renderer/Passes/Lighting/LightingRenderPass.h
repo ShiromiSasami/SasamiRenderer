@@ -41,26 +41,8 @@ namespace SasamiRenderer
         // Executes through the render graph context.
         bool Execute(const RenderPassContextView& context) const override;
 
-        // Issues the lighting draw commands.
-        void Execute(IRhiCommandEncoder* enc,
-                     RenderPipelineStateCache& pipelineStateCache,
-                     DescriptorHeap& srvHeap,
-                     const Viewport& viewport,
-                     const Rect& scissorRect,
-                     bool useTessellation,
-                     bool useTessellationWireframe,
-                     bool useTessellationDebugColors,
-                     bool useMeshletDebugView,
-                     GpuDescriptorHandle shadowSrv,
-                     GpuDescriptorHandle spotShadowSrv,
-                     GpuDescriptorHandle vsmSrv,
-                     GpuDescriptorHandle lightSrvTable,
-                     GpuDescriptorHandle iblSrvTable,
-                     GpuDescriptorHandle aoSrv,
-                     GpuDescriptorHandle reflectionSrv,
-                     GpuDescriptorHandle depthSrv,
-                     GpuDescriptorHandle transparentBackfaceDistanceSrv,
-                     D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu,
-                     const std::function<void()>& drawCallback) const;
+        // Fullscreen deferred lighting combine. OpaqueGBufferRenderPass owns
+        // the mesh GBuffer/depth draw; this pass reads those resources and
+        // writes SceneColor.
     };
 }

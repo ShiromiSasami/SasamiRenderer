@@ -11,6 +11,8 @@ namespace SasamiRenderer
     public:
         bool Initialize(GraphicsDevice& device);
         inline PipelineState& GetPipelineState() { return m_pipelineState; }
+        inline PipelineState& GetGBufferPipelineState() { return m_gbufferPipelineState; }
+        inline PipelineState& GetDeferredLightingPipelineState() { return m_deferredLightingPipelineState; }
         inline PipelineState& GetBasicPipelineState() { return m_basicPipelineState; }
         inline PipelineState& GetTransparentPipelineState() { return m_transparentPipelineState; }
         inline PipelineState& GetTransparentOitPipelineState() { return m_transparentOitPipelineState; }
@@ -23,7 +25,9 @@ namespace SasamiRenderer
         inline PipelineState& GetShadowVsmBlurVPipelineState() { return m_vsmBlurVPso; }
         inline RootSignature& GetShadowVsmBlurRootSignature() { return m_vsmBlurRootSignature; }
         inline PipelineState& GetTessellationPipelineState() { return m_tessPipelineState; }
+        inline PipelineState& GetTessellationGBufferPipelineState() { return m_tessGBufferPipelineState; }
         inline PipelineState& GetTessellationWireframePipelineState() { return m_tessWireframePipelineState; }
+        inline PipelineState& GetTessellationGBufferWireframePipelineState() { return m_tessGBufferWireframePipelineState; }
         inline PipelineState& GetTessellationShadowPipelineState() { return m_tessShadowPipelineState; }
         inline PipelineState& GetTessellationDebugPipelineState() { return m_tessDebugPipelineState; }
         inline PipelineState& GetMeshletDebugPipelineState() { return m_meshletDebugPipelineState; }
@@ -40,6 +44,7 @@ namespace SasamiRenderer
         inline PipelineState& GetScreenSpaceReflectionPipelineState() { return m_screenSpaceReflectionPipelineState; }
         inline PipelineState& GetToneMapPipelineState() { return m_toneMapPipelineState; }
         inline RootSignature& GetRootSignature() { return m_rootSignature; }
+        inline RootSignature& GetDeferredLightingRootSignature() { return m_deferredLightingRootSignature; }
         inline RootSignature& GetRayMarchRootSignature()  { return m_rayMarchRootSignature;  }
         inline RootSignature& GetVolumetricCloudRootSignature() { return m_volumetricCloudRootSignature; }
         inline RootSignature& GetSsaoRootSignature() { return m_ssaoRootSignature; }
@@ -53,6 +58,7 @@ namespace SasamiRenderer
 
         // Skinned mesh pipelines (GPU skinning with bone matrix CB at b3 / root param [14])
         inline PipelineState& GetSkinnedPipelineState()            { return m_skinnedPipelineState; }
+        inline PipelineState& GetSkinnedGBufferPipelineState()     { return m_skinnedGBufferPipelineState; }
         inline PipelineState& GetSkinnedTransparentPipelineState() { return m_skinnedTransparentPipelineState; }
         inline PipelineState& GetSkinnedTransparentOitPipelineState() { return m_skinnedTransparentOitPipelineState; }
         inline PipelineState& GetSkinnedTransparentBackfaceDistancePipelineState() { return m_skinnedTransparentBackfaceDistancePipelineState; }
@@ -71,6 +77,8 @@ namespace SasamiRenderer
         bool InitializeSsaoPipelines(GraphicsDevice& device, const std::string& vertexProfile, const std::string& pixelProfile);
         bool InitializeScreenSpaceReflectionPipeline(GraphicsDevice& device, const std::string& computeProfile);
         PipelineState m_pipelineState;
+        PipelineState m_gbufferPipelineState;
+        PipelineState m_deferredLightingPipelineState;
         PipelineState m_basicPipelineState;
         PipelineState m_transparentPipelineState;
         PipelineState m_transparentOitPipelineState;
@@ -83,7 +91,9 @@ namespace SasamiRenderer
         PipelineState m_vsmBlurVPso;
         RootSignature m_vsmBlurRootSignature;
         PipelineState m_tessPipelineState;
+        PipelineState m_tessGBufferPipelineState;
         PipelineState m_tessWireframePipelineState;
+        PipelineState m_tessGBufferWireframePipelineState;
         PipelineState m_tessShadowPipelineState;
         PipelineState m_tessDebugPipelineState;
         PipelineState m_meshletDebugPipelineState;
@@ -98,6 +108,7 @@ namespace SasamiRenderer
         PipelineState m_screenSpaceReflectionPipelineState;
         PipelineState m_toneMapPipelineState;
         RootSignature m_rootSignature;
+        RootSignature m_deferredLightingRootSignature;
         RootSignature m_rayMarchRootSignature;
         RootSignature m_volumetricCloudRootSignature;
         RootSignature m_ssaoRootSignature;
@@ -106,6 +117,7 @@ namespace SasamiRenderer
         PipelineState m_meshShaderPipelineState;
         RootSignature m_meshShaderRootSignature;
         PipelineState m_skinnedPipelineState;
+        PipelineState m_skinnedGBufferPipelineState;
         PipelineState m_skinnedTransparentPipelineState;
         PipelineState m_skinnedTransparentOitPipelineState;
         PipelineState m_skinnedTransparentBackfaceDistancePipelineState;

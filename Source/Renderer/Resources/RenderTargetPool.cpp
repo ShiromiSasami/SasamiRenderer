@@ -219,11 +219,11 @@ namespace SasamiRenderer
             m_ssaoBlurRtvCpu = m_ssaoBlurRtvHeap->GetCPUDescriptorHandleForHeapStart();
         }
 
-        // GBuffer RTV heap (4 descriptors: Albedo, Normal, Material, Emissive)
+        // GBuffer RTV heap (5 descriptors: Albedo, Normal, Material, Emissive, SpecularWorkflow)
         {
             Resource nullResource;
             D3D12_DESCRIPTOR_HEAP_DESC gbufferRtvHeapDesc = {};
-            gbufferRtvHeapDesc.NumDescriptors = 4;
+            gbufferRtvHeapDesc.NumDescriptors = 5;
             gbufferRtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
             gbufferRtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
             if (FAILED(device.CreateDescriptorHeap(gbufferRtvHeapDesc, m_gbufferRtvHeap))) {
@@ -235,11 +235,13 @@ namespace SasamiRenderer
             m_gbufferNormalRtv.ptr   = gbufferRtvBase.ptr + gbufferRtvSize;
             m_gbufferMaterialRtv.ptr = gbufferRtvBase.ptr + gbufferRtvSize * 2;
             m_gbufferEmissiveRtv.ptr = gbufferRtvBase.ptr + gbufferRtvSize * 3;
+            m_gbufferSpecularWorkflowRtv.ptr = gbufferRtvBase.ptr + gbufferRtvSize * 4;
 
             if (!m_srvAllocFn(1, m_gbufferAlbedoSrvCpu, m_gbufferAlbedoSrv) ||
                 !m_srvAllocFn(1, m_gbufferNormalSrvCpu, m_gbufferNormalSrv) ||
                 !m_srvAllocFn(1, m_gbufferMaterialSrvCpu, m_gbufferMaterialSrv) ||
-                !m_srvAllocFn(1, m_gbufferEmissiveSrvCpu, m_gbufferEmissiveSrv)) {
+                !m_srvAllocFn(1, m_gbufferEmissiveSrvCpu, m_gbufferEmissiveSrv) ||
+                !m_srvAllocFn(1, m_gbufferSpecularWorkflowSrvCpu, m_gbufferSpecularWorkflowSrv)) {
                 return false;
             }
 
@@ -270,6 +272,13 @@ namespace SasamiRenderer
             gbufferEmissiveNullSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
             gbufferEmissiveNullSrvDesc.Texture2D.MipLevels = 1;
             device.CreateShaderResourceView(nullResource, &gbufferEmissiveNullSrvDesc, m_gbufferEmissiveSrvCpu);
+
+            D3D12_SHADER_RESOURCE_VIEW_DESC gbufferSpecularWorkflowNullSrvDesc{};
+            gbufferSpecularWorkflowNullSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            gbufferSpecularWorkflowNullSrvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+            gbufferSpecularWorkflowNullSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            gbufferSpecularWorkflowNullSrvDesc.Texture2D.MipLevels = 1;
+            device.CreateShaderResourceView(nullResource, &gbufferSpecularWorkflowNullSrvDesc, m_gbufferSpecularWorkflowSrvCpu);
         }
 
         // Depth resource creation
@@ -391,6 +400,7 @@ namespace SasamiRenderer
         m_gbufferNormal.Reset();
         m_gbufferMaterial.Reset();
         m_gbufferEmissive.Reset();
+        m_gbufferSpecularWorkflow.Reset();
         m_gbufferWidth = 0u;
         m_gbufferHeight = 0u;
         m_sceneColor.Reset();
@@ -428,6 +438,7 @@ namespace SasamiRenderer
         m_gbufferNormal.Reset();
         m_gbufferMaterial.Reset();
         m_gbufferEmissive.Reset();
+        m_gbufferSpecularWorkflow.Reset();
         m_gbufferRtvHeap.Reset();
         m_sceneColor.Reset();
         m_sceneColorRtvHeap.Reset();
@@ -579,7 +590,13 @@ namespace SasamiRenderer
             return false;
         }
 
-        if (m_gbufferAlbedo.IsValid() && m_gbufferWidth == width && m_gbufferHeight == height) {
+        if (m_gbufferAlbedo.IsValid() &&
+            m_gbufferNormal.IsValid() &&
+            m_gbufferMaterial.IsValid() &&
+            m_gbufferEmissive.IsValid() &&
+            m_gbufferSpecularWorkflow.IsValid() &&
+            m_gbufferWidth == width &&
+            m_gbufferHeight == height) {
             return true;
         }
 
@@ -587,6 +604,7 @@ namespace SasamiRenderer
         m_gbufferNormal.Reset();
         m_gbufferMaterial.Reset();
         m_gbufferEmissive.Reset();
+        m_gbufferSpecularWorkflow.Reset();
         m_gbufferWidth = 0u;
         m_gbufferHeight = 0u;
 
@@ -690,6 +708,28 @@ namespace SasamiRenderer
             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
             srvDesc.Texture2D.MipLevels = 1;
             device.CreateShaderResourceView(m_gbufferEmissive, &srvDesc, m_gbufferEmissiveSrvCpu);
+        }
+
+        // --- Specular workflow (RGBA8): specular color RGB / workflow flag A ---
+        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        clearZero.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        if (FAILED(device.CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE, &desc,
+                                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                                  &clearZero, m_gbufferSpecularWorkflow))) {
+            return false;
+        }
+        {
+            D3D12_RENDER_TARGET_VIEW_DESC rtvDesc{};
+            rtvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+            rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+            device.CreateRenderTargetView(m_gbufferSpecularWorkflow, &rtvDesc, m_gbufferSpecularWorkflowRtv);
+
+            D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+            srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+            srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            srvDesc.Texture2D.MipLevels = 1;
+            device.CreateShaderResourceView(m_gbufferSpecularWorkflow, &srvDesc, m_gbufferSpecularWorkflowSrvCpu);
         }
 
         m_gbufferWidth  = width;

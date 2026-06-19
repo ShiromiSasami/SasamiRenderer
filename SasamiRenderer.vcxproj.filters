@@ -55,8 +55,14 @@
     <Filter Include="Shader Files\Raster\Lighting\PBR">
       <UniqueIdentifier>{7a03e0a8-b451-403e-b0a1-8db53e27a13f}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Shader Files\Raster\Lighting\Deferred">
+      <UniqueIdentifier>{2bc0b9ea-f88f-4b21-bf6a-71704ac35a33}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Shader Files\Raster\Geometry\Opaque">
       <UniqueIdentifier>{538f8593-c97f-4848-b4c8-2cba0baf2d04}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Raster\Geometry\OpaqueGBuffer">
+      <UniqueIdentifier>{c4f5ea6e-b7a4-4c63-84f0-8513bd5a4d3a}</UniqueIdentifier>
     </Filter>
     <Filter Include="Shader Files\Raster\Geometry\Tessellation">
       <UniqueIdentifier>{79ba20ac-c4c8-407c-a71e-168086ea8481}</UniqueIdentifier>
@@ -327,6 +333,9 @@
     <ClInclude Include="Source\Renderer\Passes\Geometry\OpaqueRenderPass.h">
       <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\Geometry\OpaqueGBufferRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Renderer\Passes\Lighting\LightingRenderPass.h">
       <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
@@ -512,6 +521,9 @@
     <ClCompile Include="Source\Renderer\Passes\Geometry\OpaqueRenderPass.cpp">
       <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\Geometry\OpaqueGBufferRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Renderer\Passes\Lighting\LightingRenderPass.cpp">
       <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
@@ -645,6 +657,12 @@
     </CustomBuild>
     <CustomBuild Include="Shaders\Raster\Lighting\PBR\CookTorranceGGX_PS.hlsl">
       <Filter>Shader Files\Raster\Lighting\PBR</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Shaders\Raster\Geometry\OpaqueGBuffer\OpaqueGBuffer_PS.hlsl">
+      <Filter>Shader Files\Raster\Geometry\OpaqueGBuffer</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Shaders\Raster\Lighting\Deferred\DeferredLighting_PS.hlsl">
+      <Filter>Shader Files\Raster\Lighting\Deferred</Filter>
     </CustomBuild>
     <CustomBuild Include="Shaders\Raster\Transparency\TransparentBackfaceDistance_PS.hlsl">
       <Filter>Shader Files\Raster\Transparency</Filter>

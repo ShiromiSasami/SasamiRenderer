@@ -18,6 +18,7 @@ namespace SasamiRenderer
         // Resource state transitions for depth and the SSAO render target are handled
         // manually in Execute() using explicit D3D12 barriers.
         builder.Read("SceneDepth");
+        builder.Read("GBufferNormal");
         builder.DependsOnPrevious();
     }
 

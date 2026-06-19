@@ -139,42 +139,49 @@ namespace SasamiRenderer
         }
 
         if (m_device &&
-            !m_device->GetCapabilities().supportsD3D12CompatibilitySurface &&
             m_device->GetCapabilities().supportsRhiResourceCreation &&
             m_device->GetCapabilities().supportsRhiDescriptorCreation) {
             RhiTextureHandle rhiTexture = m_device->CreateRhiTexture2DFromRgba8(src.width,
                                                                                 src.height,
                                                                                 src.pixels.data(),
                                                                                 src.width * 4u);
-            if (!rhiTexture.IsValid()) {
-                return nullptr;
+            if (rhiTexture.IsValid()) {
+                RhiCpuDescriptorHandle rhiCpu{};
+                GpuDescriptorHandle gpu{};
+                bool descriptorReady = false;
+
+                if (m_device->GetCapabilities().supportsD3D12CompatibilitySurface) {
+                    CpuDescriptorHandle cpu{};
+                    descriptorReady = m_srvAllocFn && m_srvAllocFn(1, cpu, gpu);
+                    rhiCpu = { cpu.ptr };
+                } else {
+                    RhiDescriptorAllocation allocation =
+                        m_device->AllocateRhiDescriptors(RhiDescriptorHeapType::CbvSrvUav, 1, true);
+                    descriptorReady = allocation.cpu.IsValid() && allocation.gpu.IsValid();
+                    rhiCpu = allocation.cpu;
+                    gpu = { allocation.gpu.ptr };
+                }
+
+                if (descriptorReady) {
+                    RhiTextureViewDesc srvDesc{};
+                    srvDesc.format = RhiFormat::R8G8B8A8UNorm;
+                    srvDesc.dimension = RhiTextureViewDimension::Texture2D;
+                    srvDesc.mipLevelCount = 1;
+                    srvDesc.arrayLayerCount = 1;
+                    if (m_device->CreateRhiShaderResourceView(rhiTexture, srvDesc, rhiCpu)) {
+                        auto texObj = std::make_unique<Texture>();
+                        texObj->rhiTexture   = rhiTexture;
+                        texObj->srv          = gpu;
+                        texObj->desc.width   = src.width;
+                        texObj->desc.height  = src.height;
+                        texObj->desc.mips    = 1;
+                        texObj->desc.format  = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+                        m_sceneTextures.push_back(std::move(texObj));
+                        return m_sceneTextures.back().get();
+                    }
+                }
             }
-
-            RhiDescriptorAllocation allocation =
-                m_device->AllocateRhiDescriptors(RhiDescriptorHeapType::CbvSrvUav, 1, true);
-            if (!allocation.cpu.IsValid() || !allocation.gpu.IsValid()) {
-                return nullptr;
-            }
-
-            RhiTextureViewDesc srvDesc{};
-            srvDesc.format = RhiFormat::R8G8B8A8UNorm;
-            srvDesc.dimension = RhiTextureViewDimension::Texture2D;
-            srvDesc.mipLevelCount = 1;
-            srvDesc.arrayLayerCount = 1;
-            if (!m_device->CreateRhiShaderResourceView(rhiTexture, srvDesc, allocation.cpu)) {
-                return nullptr;
-            }
-
-            auto texObj = std::make_unique<Texture>();
-            texObj->rhiTexture   = rhiTexture;
-            texObj->srv          = { allocation.gpu.ptr };
-            texObj->desc.width   = src.width;
-            texObj->desc.height  = src.height;
-            texObj->desc.mips    = 1;
-            texObj->desc.format  = DXGI_FORMAT_R8G8B8A8_UNORM;
-
-            m_sceneTextures.push_back(std::move(texObj));
-            return m_sceneTextures.back().get();
         }
 
         if (!cmdList) {

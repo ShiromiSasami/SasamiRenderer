@@ -34,6 +34,10 @@ namespace SasamiRenderer
         void WaitForGPU() override;
         bool ExecuteBackendFrame(const RhiBackendFrameDesc& frameDesc) override;
         bool RenderBackendClearFrame(const float clearColor[4]) override;
+        RhiTextureHandle CreateRhiTexture2DFromRgba8(uint32_t width,
+                                                     uint32_t height,
+                                                     const void* pixels,
+                                                     uint32_t rowPitchBytes) override;
         RhiTextureHandle CreateRhiTexture(const RhiTextureDesc& desc) override;
         RhiBufferHandle CreateRhiBuffer(const RhiBufferDesc& desc, const void* initialData = nullptr) override;
         RhiShaderHandle CreateRhiShaderModule(const RhiShaderModuleDesc& desc) override;

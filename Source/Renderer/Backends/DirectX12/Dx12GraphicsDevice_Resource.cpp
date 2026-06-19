@@ -262,6 +262,84 @@ namespace SasamiRenderer
         return StoreRhiResource(std::move(resource));
     }
 
+    RhiTextureHandle Dx12GraphicsDevice::CreateRhiTexture2DFromRgba8(uint32_t width,
+                                                                     uint32_t height,
+                                                                     const void* pixels,
+                                                                     uint32_t rowPitchBytes)
+    {
+        if (!m_device || width == 0 || height == 0 || !pixels || rowPitchBytes < width * 4u) {
+            return {};
+        }
+
+        D3D12_RESOURCE_DESC textureDesc{};
+        textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        textureDesc.Width = width;
+        textureDesc.Height = height;
+        textureDesc.DepthOrArraySize = 1;
+        textureDesc.MipLevels = 1;
+        textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        textureDesc.SampleDesc.Count = 1;
+        textureDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+        CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
+        Resource texture;
+        HRESULT hr = CreateCommittedResource(&defaultHeap,
+                                             D3D12_HEAP_FLAG_NONE,
+                                             &textureDesc,
+                                             D3D12_RESOURCE_STATE_COPY_DEST,
+                                             nullptr,
+                                             texture);
+        if (FAILED(hr)) {
+            return {};
+        }
+
+        const UINT64 uploadBufferSize = GetRequiredIntermediateSize(texture.Get(), 0, 1);
+        CD3DX12_HEAP_PROPERTIES uploadHeap(D3D12_HEAP_TYPE_UPLOAD);
+        CD3DX12_RESOURCE_DESC uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
+        Resource upload;
+        hr = CreateCommittedResource(&uploadHeap,
+                                     D3D12_HEAP_FLAG_NONE,
+                                     &uploadDesc,
+                                     D3D12_RESOURCE_STATE_GENERIC_READ,
+                                     nullptr,
+                                     upload);
+        if (FAILED(hr)) {
+            return {};
+        }
+
+        CommandAllocator allocator;
+        CommandList commandList;
+        hr = CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, allocator);
+        if (FAILED(hr)) {
+            return {};
+        }
+        hr = CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nullptr, commandList);
+        if (FAILED(hr)) {
+            return {};
+        }
+
+        D3D12_SUBRESOURCE_DATA textureData{};
+        textureData.pData = pixels;
+        textureData.RowPitch = rowPitchBytes;
+        textureData.SlicePitch = static_cast<LONG_PTR>(rowPitchBytes) * static_cast<LONG_PTR>(height);
+        UpdateSubresources(commandList.Get(), texture.Get(), upload.Get(), 0, 0, 1, &textureData);
+        ResourceBarrier barrier = CD3DX12_RESOURCE_BARRIER::Transition(texture.Get(),
+                                                                       D3D12_RESOURCE_STATE_COPY_DEST,
+                                                                       D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        commandList.ResourceBarrier(1, &barrier);
+        hr = commandList.Close();
+        if (FAILED(hr)) {
+            return {};
+        }
+
+        ID3D12CommandList* lists[] = { commandList.Get() };
+        m_commandQueue.ExecuteCommandLists(1, lists);
+        WaitForGPU();
+
+        return StoreRhiResource(std::move(texture));
+    }
+
     RhiBufferHandle Dx12GraphicsDevice::CreateRhiBuffer(const RhiBufferDesc& desc, const void* initialData)
     {
         if (!m_device || desc.sizeInBytes == 0) {

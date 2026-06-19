@@ -667,21 +667,21 @@ namespace SasamiRenderer
             }
         }
 
-        // Reflections run immediately after the lighting draw while the G-Buffer is
-        // still in render-target state, so transition from RENDER_TARGET here.
+        // Deferred lighting reads the GBuffer before SWRT reflection generation,
+        // so the graph has already moved these textures to pixel SRV state.
         if (m_renderTargetPool->GetGBufferNormal().IsValid() &&
             m_renderTargetPool->GetGBufferMaterial().IsValid() &&
             m_renderTargetPool->GetGBufferAlbedo().IsValid())
         {
             D3D12_RESOURCE_BARRIER toNps[] = {
                 CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool->GetGBufferNormal().Get(),
-                    D3D12_RESOURCE_STATE_RENDER_TARGET,
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
                 CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool->GetGBufferMaterial().Get(),
-                    D3D12_RESOURCE_STATE_RENDER_TARGET,
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
                 CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool->GetGBufferAlbedo().Get(),
-                    D3D12_RESOURCE_STATE_RENDER_TARGET,
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
             };
             cmdList->ResourceBarrier(_countof(toNps), toNps);
@@ -740,24 +740,23 @@ namespace SasamiRenderer
             }
         }
 
-        // Restore the render graph's expected state. Final graph cleanup will later
-        // transition these resources to PIXEL_SHADER_RESOURCE for the next frame.
+        // Restore the graph-visible state for later pixel-shader composite passes.
         if (m_renderTargetPool->GetGBufferNormal().IsValid() &&
             m_renderTargetPool->GetGBufferMaterial().IsValid() &&
             m_renderTargetPool->GetGBufferAlbedo().IsValid())
         {
-            D3D12_RESOURCE_BARRIER toRenderTarget[] = {
+            D3D12_RESOURCE_BARRIER toPixelSrv[] = {
                 CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool->GetGBufferNormal().Get(),
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                    D3D12_RESOURCE_STATE_RENDER_TARGET),
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
                 CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool->GetGBufferMaterial().Get(),
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                    D3D12_RESOURCE_STATE_RENDER_TARGET),
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
                 CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool->GetGBufferAlbedo().Get(),
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                    D3D12_RESOURCE_STATE_RENDER_TARGET),
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
             };
-            cmdList->ResourceBarrier(_countof(toRenderTarget), toRenderTarget);
+            cmdList->ResourceBarrier(_countof(toPixelSrv), toPixelSrv);
         }
 
         if (!reflOk) {

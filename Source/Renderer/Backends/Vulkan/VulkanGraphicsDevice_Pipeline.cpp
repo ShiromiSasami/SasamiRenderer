@@ -16,6 +16,224 @@
 
 namespace SasamiRenderer
 {
+    RhiTextureHandle VulkanGraphicsDevice::CreateRhiTexture2DFromRgba8(uint32_t width,
+                                                                       uint32_t height,
+                                                                       const void* pixels,
+                                                                       uint32_t rowPitchBytes)
+    {
+        if (m_device == VK_NULL_HANDLE ||
+            m_graphicsQueue == VK_NULL_HANDLE ||
+            m_commandPool == VK_NULL_HANDLE ||
+            width == 0 ||
+            height == 0 ||
+            !pixels ||
+            rowPitchBytes < width * 4u ||
+            (rowPitchBytes % 4u) != 0u) {
+            return {};
+        }
+
+        const VkDeviceSize uploadSize =
+            static_cast<VkDeviceSize>(rowPitchBytes) * static_cast<VkDeviceSize>(height);
+
+        VulkanRhiResource texture{};
+        VkImageCreateInfo imageInfo{};
+        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.imageType = VK_IMAGE_TYPE_2D;
+        imageInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+        imageInfo.extent = { width, height, 1u };
+        imageInfo.mipLevels = 1;
+        imageInfo.arrayLayers = 1;
+        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        if (vkCreateImage(m_device, &imageInfo, nullptr, &texture.image) != VK_SUCCESS) {
+            return {};
+        }
+
+        VkMemoryRequirements imageRequirements{};
+        vkGetImageMemoryRequirements(m_device, texture.image, &imageRequirements);
+
+        VkMemoryAllocateInfo imageAllocateInfo{};
+        imageAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        imageAllocateInfo.allocationSize = imageRequirements.size;
+        imageAllocateInfo.memoryTypeIndex =
+            FindMemoryType(imageRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if (imageAllocateInfo.memoryTypeIndex == UINT32_MAX ||
+            vkAllocateMemory(m_device, &imageAllocateInfo, nullptr, &texture.memory) != VK_SUCCESS) {
+            vkDestroyImage(m_device, texture.image, nullptr);
+            return {};
+        }
+        if (vkBindImageMemory(m_device, texture.image, texture.memory, 0) != VK_SUCCESS) {
+            vkFreeMemory(m_device, texture.memory, nullptr);
+            vkDestroyImage(m_device, texture.image, nullptr);
+            return {};
+        }
+
+        VulkanRhiResource staging{};
+        VkBufferCreateInfo stagingInfo{};
+        stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        stagingInfo.size = uploadSize;
+        stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        stagingInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        if (vkCreateBuffer(m_device, &stagingInfo, nullptr, &staging.buffer) != VK_SUCCESS) {
+            vkFreeMemory(m_device, texture.memory, nullptr);
+            vkDestroyImage(m_device, texture.image, nullptr);
+            return {};
+        }
+
+        VkMemoryRequirements stagingRequirements{};
+        vkGetBufferMemoryRequirements(m_device, staging.buffer, &stagingRequirements);
+
+        VkMemoryAllocateInfo stagingAllocateInfo{};
+        stagingAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        stagingAllocateInfo.allocationSize = stagingRequirements.size;
+        stagingAllocateInfo.memoryTypeIndex =
+            FindMemoryType(stagingRequirements.memoryTypeBits,
+                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        if (stagingAllocateInfo.memoryTypeIndex == UINT32_MAX ||
+            vkAllocateMemory(m_device, &stagingAllocateInfo, nullptr, &staging.memory) != VK_SUCCESS) {
+            vkDestroyBuffer(m_device, staging.buffer, nullptr);
+            vkFreeMemory(m_device, texture.memory, nullptr);
+            vkDestroyImage(m_device, texture.image, nullptr);
+            return {};
+        }
+        if (vkBindBufferMemory(m_device, staging.buffer, staging.memory, 0) != VK_SUCCESS) {
+            vkFreeMemory(m_device, staging.memory, nullptr);
+            vkDestroyBuffer(m_device, staging.buffer, nullptr);
+            vkFreeMemory(m_device, texture.memory, nullptr);
+            vkDestroyImage(m_device, texture.image, nullptr);
+            return {};
+        }
+
+        void* mapped = nullptr;
+        if (vkMapMemory(m_device, staging.memory, 0, uploadSize, 0, &mapped) != VK_SUCCESS || !mapped) {
+            vkFreeMemory(m_device, staging.memory, nullptr);
+            vkDestroyBuffer(m_device, staging.buffer, nullptr);
+            vkFreeMemory(m_device, texture.memory, nullptr);
+            vkDestroyImage(m_device, texture.image, nullptr);
+            return {};
+        }
+        std::memcpy(mapped, pixels, static_cast<size_t>(uploadSize));
+        vkUnmapMemory(m_device, staging.memory);
+
+        VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+        VkCommandBufferAllocateInfo commandAllocateInfo{};
+        commandAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        commandAllocateInfo.commandPool = m_commandPool;
+        commandAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        commandAllocateInfo.commandBufferCount = 1;
+        if (vkAllocateCommandBuffers(m_device, &commandAllocateInfo, &commandBuffer) != VK_SUCCESS) {
+            vkFreeMemory(m_device, staging.memory, nullptr);
+            vkDestroyBuffer(m_device, staging.buffer, nullptr);
+            vkFreeMemory(m_device, texture.memory, nullptr);
+            vkDestroyImage(m_device, texture.image, nullptr);
+            return {};
+        }
+
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        bool uploadSucceeded = vkBeginCommandBuffer(commandBuffer, &beginInfo) == VK_SUCCESS;
+        if (uploadSucceeded) {
+            VkImageMemoryBarrier toTransfer{};
+            toTransfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            toTransfer.srcAccessMask = 0;
+            toTransfer.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            toTransfer.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            toTransfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            toTransfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            toTransfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            toTransfer.image = texture.image;
+            toTransfer.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            toTransfer.subresourceRange.baseMipLevel = 0;
+            toTransfer.subresourceRange.levelCount = 1;
+            toTransfer.subresourceRange.baseArrayLayer = 0;
+            toTransfer.subresourceRange.layerCount = 1;
+            vkCmdPipelineBarrier(commandBuffer,
+                                 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                 VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                 0,
+                                 0,
+                                 nullptr,
+                                 0,
+                                 nullptr,
+                                 1,
+                                 &toTransfer);
+
+            VkBufferImageCopy copyRegion{};
+            copyRegion.bufferOffset = 0;
+            copyRegion.bufferRowLength = rowPitchBytes == width * 4u ? 0u : rowPitchBytes / 4u;
+            copyRegion.bufferImageHeight = 0;
+            copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            copyRegion.imageSubresource.mipLevel = 0;
+            copyRegion.imageSubresource.baseArrayLayer = 0;
+            copyRegion.imageSubresource.layerCount = 1;
+            copyRegion.imageOffset = { 0, 0, 0 };
+            copyRegion.imageExtent = { width, height, 1u };
+            vkCmdCopyBufferToImage(commandBuffer,
+                                   staging.buffer,
+                                   texture.image,
+                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                   1,
+                                   &copyRegion);
+
+            VkImageMemoryBarrier toShaderRead{};
+            toShaderRead.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            toShaderRead.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            toShaderRead.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            toShaderRead.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            toShaderRead.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            toShaderRead.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            toShaderRead.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            toShaderRead.image = texture.image;
+            toShaderRead.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            toShaderRead.subresourceRange.baseMipLevel = 0;
+            toShaderRead.subresourceRange.levelCount = 1;
+            toShaderRead.subresourceRange.baseArrayLayer = 0;
+            toShaderRead.subresourceRange.layerCount = 1;
+            vkCmdPipelineBarrier(commandBuffer,
+                                 VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                 VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+                                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                 0,
+                                 0,
+                                 nullptr,
+                                 0,
+                                 nullptr,
+                                 1,
+                                 &toShaderRead);
+
+            uploadSucceeded = vkEndCommandBuffer(commandBuffer) == VK_SUCCESS;
+        }
+
+        if (uploadSucceeded) {
+            VkSubmitInfo submitInfo{};
+            submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            submitInfo.commandBufferCount = 1;
+            submitInfo.pCommandBuffers = &commandBuffer;
+            uploadSucceeded =
+                vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE) == VK_SUCCESS &&
+                vkQueueWaitIdle(m_graphicsQueue) == VK_SUCCESS;
+        }
+
+        vkFreeCommandBuffers(m_device, m_commandPool, 1, &commandBuffer);
+        vkFreeMemory(m_device, staging.memory, nullptr);
+        vkDestroyBuffer(m_device, staging.buffer, nullptr);
+
+        if (!uploadSucceeded) {
+            vkFreeMemory(m_device, texture.memory, nullptr);
+            vkDestroyImage(m_device, texture.image, nullptr);
+            return {};
+        }
+
+        const uint64_t id = m_nextRhiResourceHandle++;
+        m_rhiResources.emplace(id, texture);
+        return RhiTextureHandle{ id };
+    }
+
     RhiTextureHandle VulkanGraphicsDevice::CreateRhiTexture(const RhiTextureDesc& desc)
     {
         if (m_device == VK_NULL_HANDLE || desc.extent.width == 0 || desc.extent.height == 0) {

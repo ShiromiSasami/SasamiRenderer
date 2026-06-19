@@ -76,18 +76,22 @@ namespace SasamiRenderer
         GpuDescriptorHandle lightSrvTable{};
         GpuDescriptorHandle iblSrvTable{};
         RhiGpuAddress lightCbGpu = 0;
+        RhiGpuAddress giProbeGridCbGpu = 0;
+        RhiGpuAddress giProbeDataGpu = 0;
     };
 
     struct RenderPassGBufferData {
         GpuDescriptorHandle albedoSrv{};
         GpuDescriptorHandle materialSrv{};
         GpuDescriptorHandle emissiveSrv{};
+        GpuDescriptorHandle specularWorkflowSrv{};
         GpuDescriptorHandle normalSrv{};
         GpuDescriptorHandle depthSrv{};
         ID3D12Resource* albedoResource = nullptr;
         ID3D12Resource* normalResource = nullptr;
         ID3D12Resource* materialResource = nullptr;
         ID3D12Resource* emissiveResource = nullptr;
+        ID3D12Resource* specularWorkflowResource = nullptr;
         ID3D12Resource* depthResource = nullptr;
     };
 

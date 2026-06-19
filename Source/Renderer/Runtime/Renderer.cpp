@@ -460,6 +460,10 @@ namespace SasamiRenderer
         inputs.shadow.vsmSrv = m_lightSystem.GetVsmSrv();
         inputs.lighting.lightSrvTable = frame ? frame->light.lightSrvTable : GpuDescriptorHandle{};
         inputs.lighting.iblSrvTable = m_skybox.GetIblSrvTable();
+        if (m_probeGrid.IsInitialized()) {
+            inputs.lighting.giProbeGridCbGpu = m_probeGrid.GetProbeGridCbGpuAddress();
+            inputs.lighting.giProbeDataGpu = m_probeGrid.GetProbeDataGpuVA();
+        }
         inputs.ao.aoSrv = defaultAoSrv;
         const bool useSwrtReflection =
             (m_settings.renderPathMode == RenderPathMode::Raster) &&
@@ -487,6 +491,7 @@ namespace SasamiRenderer
         inputs.gbuffer.albedoSrv   = m_renderTargetPool.GetGBufferAlbedoSrv();
         inputs.gbuffer.materialSrv = m_renderTargetPool.GetGBufferMaterialSrv();
         inputs.gbuffer.emissiveSrv = m_renderTargetPool.GetGBufferEmissiveSrv();
+        inputs.gbuffer.specularWorkflowSrv = m_renderTargetPool.GetGBufferSpecularWorkflowSrv();
         inputs.gbuffer.albedoResource =
             m_renderTargetPool.GetGBufferAlbedo().IsValid() ? m_renderTargetPool.GetGBufferAlbedo().Get() : nullptr;
         inputs.gbuffer.normalResource =
@@ -495,6 +500,8 @@ namespace SasamiRenderer
             m_renderTargetPool.GetGBufferMaterial().IsValid() ? m_renderTargetPool.GetGBufferMaterial().Get() : nullptr;
         inputs.gbuffer.emissiveResource =
             m_renderTargetPool.GetGBufferEmissive().IsValid() ? m_renderTargetPool.GetGBufferEmissive().Get() : nullptr;
+        inputs.gbuffer.specularWorkflowResource =
+            m_renderTargetPool.GetGBufferSpecularWorkflow().IsValid() ? m_renderTargetPool.GetGBufferSpecularWorkflow().Get() : nullptr;
 
         // Runtime AO resources. SSAO and RTAO share the same AO consumption slot in lighting.
         inputs.gbuffer.depthSrv = m_renderTargetPool.GetDepthSrv();

@@ -259,6 +259,8 @@ namespace SasamiRenderer
         // Resolve shader blobs from precompiled CSO first, then compile only stale/missing ones.
         ComPtr<ID3DBlob> vertexShader;
         ComPtr<ID3DBlob> pixelShader;
+        ComPtr<ID3DBlob> gbufferPixelShader;
+        ComPtr<ID3DBlob> deferredLightingPixelShader;
         ComPtr<ID3DBlob> basicVertexShader;
         ComPtr<ID3DBlob> basicPixelShader;
         ComPtr<ID3DBlob> skyboxVS;
@@ -348,9 +350,11 @@ namespace SasamiRenderer
         const std::string domainProfile = "ds_" + shaderModel;
         const std::string geometryProfile = "gs_" + shaderModel;
         const std::string computeProfile = "cs_" + shaderModel;
-        const std::array<ShaderSpec, 30> shaderSpecs{ {
+        const std::array<ShaderSpec, 32> shaderSpecs{ {
             { L"Raster/Lighting/PBR/CookTorranceGGX_VS.hlsl", "VSMain", vertexProfile.c_str(), &vertexShader },
             { L"Raster/Lighting/PBR/CookTorranceGGX_PS.hlsl", "PSMain", pixelProfile.c_str(), &pixelShader },
+            { L"Raster/Geometry/OpaqueGBuffer/OpaqueGBuffer_PS.hlsl", "PSMain", pixelProfile.c_str(), &gbufferPixelShader },
+            { L"Raster/Lighting/Deferred/DeferredLighting_PS.hlsl", "PSMain", pixelProfile.c_str(), &deferredLightingPixelShader },
             { L"Raster/Geometry/Opaque/Opaque_VS.hlsl", "VSMain", vertexProfile.c_str(), &basicVertexShader },
             { L"Raster/Geometry/Opaque/Opaque_PS.hlsl", "PSMain", pixelProfile.c_str(), &basicPixelShader },
             { L"Effects/Sky/Skybox/Skybox_VS.hlsl", "VSMain", vertexProfile.c_str(), &skyboxVS },
@@ -471,6 +475,113 @@ namespace SasamiRenderer
         };
 
         if (!createPipelineState("CookTorranceGGX", psoDesc, m_pipelineState)) { return false; }
+
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoGBuffer = psoDesc;
+        psoGBuffer.PS = { gbufferPixelShader->GetBufferPointer(), gbufferPixelShader->GetBufferSize() };
+        psoGBuffer.NumRenderTargets = 5;
+        psoGBuffer.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;     // GBufferAlbedo
+        psoGBuffer.RTVFormats[1] = DXGI_FORMAT_R16G16B16A16_FLOAT; // GBufferNormal
+        psoGBuffer.RTVFormats[2] = DXGI_FORMAT_R8G8B8A8_UNORM;     // GBufferMaterial
+        psoGBuffer.RTVFormats[3] = DXGI_FORMAT_R16G16B16A16_FLOAT; // GBufferEmissive
+        psoGBuffer.RTVFormats[4] = DXGI_FORMAT_R8G8B8A8_UNORM;     // GBufferSpecularWorkflow
+        for (UINT rtIndex = 5; rtIndex < _countof(psoGBuffer.RTVFormats); ++rtIndex) {
+            psoGBuffer.RTVFormats[rtIndex] = DXGI_FORMAT_UNKNOWN;
+        }
+        if (!createPipelineState("OpaqueGBuffer", psoGBuffer, m_gbufferPipelineState)) { return false; }
+
+        {
+            D3D12_DESCRIPTOR_RANGE deferredRanges[14] = {};
+            const UINT deferredBaseRegisters[14] = {
+                0,  // GBufferAlbedo
+                1,  // GBufferNormal
+                2,  // GBufferMaterial
+                3,  // GBufferEmissive
+                4,  // ShadowMap
+                5,  // SceneDepth
+                6,  // Point/spot light buffers, range t6-t7
+                8,  // Irradiance cubemap
+                9,  // Runtime AO
+                11, // Reflection
+                12, // Spot shadow map
+                13, // VSM shadow array
+                14, // Transparent backface distance
+                15, // GBufferSpecularWorkflow
+            };
+            for (UINT i = 0; i < 14; ++i) {
+                deferredRanges[i].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+                deferredRanges[i].NumDescriptors = 1;
+                deferredRanges[i].BaseShaderRegister = deferredBaseRegisters[i];
+                deferredRanges[i].RegisterSpace = 0;
+                deferredRanges[i].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+            }
+            deferredRanges[6].NumDescriptors = 2; // t6-t7 point/spot light buffers
+
+            D3D12_ROOT_PARAMETER deferredParams[17] = {};
+            for (UINT i = 0; i < 14; ++i) {
+                deferredParams[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+                deferredParams[i].DescriptorTable.NumDescriptorRanges = 1;
+                deferredParams[i].DescriptorTable.pDescriptorRanges = &deferredRanges[i];
+                deferredParams[i].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+            }
+            deferredParams[14].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+            deferredParams[14].Descriptor.ShaderRegister = 1;
+            deferredParams[14].Descriptor.RegisterSpace = 0;
+            deferredParams[14].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+            deferredParams[15].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+            deferredParams[15].Descriptor.ShaderRegister = 2;
+            deferredParams[15].Descriptor.RegisterSpace = 0;
+            deferredParams[15].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+            deferredParams[16].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+            deferredParams[16].Descriptor.ShaderRegister = 10;
+            deferredParams[16].Descriptor.RegisterSpace = 0;
+            deferredParams[16].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+            D3D12_ROOT_SIGNATURE_DESC deferredRootDesc = {};
+            deferredRootDesc.NumParameters = _countof(deferredParams);
+            deferredRootDesc.pParameters = deferredParams;
+            deferredRootDesc.NumStaticSamplers = 1;
+            deferredRootDesc.pStaticSamplers = &samplerDesc;
+            deferredRootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+
+            ComPtr<ID3DBlob> deferredSignature;
+            ComPtr<ID3DBlob> deferredError;
+            hr = D3D12SerializeRootSignature(&deferredRootDesc, D3D_ROOT_SIGNATURE_VERSION_1,
+                                             &deferredSignature, &deferredError);
+            if (FAILED(hr)) {
+                if (deferredError && deferredError->GetBufferPointer() && deferredError->GetBufferSize() > 0) {
+                    DebugLog(static_cast<const char*>(deferredError->GetBufferPointer()));
+                    DebugLog("\n");
+                }
+                LogFailureMessage("RenderPipelineStateCache::Initialize: DeferredLighting root signature", hr);
+                return false;
+            }
+            hr = device.CreateRootSignature(0,
+                                            deferredSignature->GetBufferPointer(),
+                                            deferredSignature->GetBufferSize(),
+                                            m_deferredLightingRootSignature);
+            if (FAILED(hr)) {
+                LogFailureMessage("RenderPipelineStateCache::Initialize: DeferredLighting CreateRootSignature", hr);
+                return false;
+            }
+
+            D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDeferredLighting = psoDesc;
+            psoDeferredLighting.InputLayout = { nullptr, 0 };
+            psoDeferredLighting.pRootSignature = m_deferredLightingRootSignature.Get();
+            psoDeferredLighting.VS = { ssaoVS->GetBufferPointer(), ssaoVS->GetBufferSize() };
+            psoDeferredLighting.PS = { deferredLightingPixelShader->GetBufferPointer(), deferredLightingPixelShader->GetBufferSize() };
+            psoDeferredLighting.DepthStencilState.DepthEnable = FALSE;
+            psoDeferredLighting.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+            psoDeferredLighting.DepthStencilState.StencilEnable = FALSE;
+            psoDeferredLighting.NumRenderTargets = 1;
+            psoDeferredLighting.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
+            for (UINT rtIndex = 1; rtIndex < _countof(psoDeferredLighting.RTVFormats); ++rtIndex) {
+                psoDeferredLighting.RTVFormats[rtIndex] = DXGI_FORMAT_UNKNOWN;
+            }
+            psoDeferredLighting.DSVFormat = DXGI_FORMAT_UNKNOWN;
+            if (!createPipelineState("DeferredLighting", psoDeferredLighting, m_deferredLightingPipelineState)) { return false; }
+        }
 
         D3D12_BLEND_DESC transparentBlend = blendDesc;
         for (UINT rtIndex = 0; rtIndex < 5; ++rtIndex) {
@@ -715,6 +826,19 @@ namespace SasamiRenderer
 
         if (!createPipelineState("Tessellation", psoTess, m_tessPipelineState)) { return false; }
 
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoTessGBuffer = psoTess;
+        psoTessGBuffer.PS = { gbufferPixelShader->GetBufferPointer(), gbufferPixelShader->GetBufferSize() };
+        psoTessGBuffer.NumRenderTargets = 5;
+        psoTessGBuffer.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        psoTessGBuffer.RTVFormats[1] = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        psoTessGBuffer.RTVFormats[2] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        psoTessGBuffer.RTVFormats[3] = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        psoTessGBuffer.RTVFormats[4] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        for (UINT rtIndex = 5; rtIndex < _countof(psoTessGBuffer.RTVFormats); ++rtIndex) {
+            psoTessGBuffer.RTVFormats[rtIndex] = DXGI_FORMAT_UNKNOWN;
+        }
+        if (!createPipelineState("TessellationGBuffer", psoTessGBuffer, m_tessGBufferPipelineState)) { return false; }
+
         // Tessellation wireframe pipeline  Esame as tessellation but FillMode = WIREFRAME.
         // Lets the user visualize the polygon mesh formed by the tessellation stage.
         {
@@ -723,6 +847,10 @@ namespace SasamiRenderer
             rastTessWF.FillMode = D3D12_FILL_MODE_WIREFRAME;
             psoTessWF.RasterizerState = rastTessWF;
             if (!createPipelineState("TessellationWireframe", psoTessWF, m_tessWireframePipelineState)) { return false; }
+
+            D3D12_GRAPHICS_PIPELINE_STATE_DESC psoTessGBufferWF = psoTessGBuffer;
+            psoTessGBufferWF.RasterizerState = rastTessWF;
+            if (!createPipelineState("TessellationGBufferWireframe", psoTessGBufferWF, m_tessGBufferWireframePipelineState)) { return false; }
         }
 
         // Tessellation debug pipeline  Esame stages as tessellation but uses
@@ -862,6 +990,12 @@ namespace SasamiRenderer
         psoSkinned.pRootSignature = m_skinnedRootSignature.Get();
         psoSkinned.VS             = { skinnedVS->GetBufferPointer(), skinnedVS->GetBufferSize() };
         if (!createPipelineState("SkinnedOpaque", psoSkinned, m_skinnedPipelineState)) { return false; }
+
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoSkinnedGBuffer = psoGBuffer;
+        psoSkinnedGBuffer.InputLayout = { skinnedInputLayout, _countof(skinnedInputLayout) };
+        psoSkinnedGBuffer.pRootSignature = m_skinnedRootSignature.Get();
+        psoSkinnedGBuffer.VS = { skinnedVS->GetBufferPointer(), skinnedVS->GetBufferSize() };
+        if (!createPipelineState("SkinnedOpaqueGBuffer", psoSkinnedGBuffer, m_skinnedGBufferPipelineState)) { return false; }
 
         // Transparent skinned PSO
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoSkinnedTransparent = psoSkinned;

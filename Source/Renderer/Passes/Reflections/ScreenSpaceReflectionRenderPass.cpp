@@ -104,13 +104,13 @@ namespace SasamiRenderer
                                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
                                                  D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
             CD3DX12_RESOURCE_BARRIER::Transition(inputs.gbuffer.depthResource,
-                                                 D3D12_RESOURCE_STATE_DEPTH_WRITE,
+                                                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
                                                  D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
             CD3DX12_RESOURCE_BARRIER::Transition(inputs.gbuffer.normalResource,
-                                                 D3D12_RESOURCE_STATE_RENDER_TARGET,
+                                                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
                                                  D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
             CD3DX12_RESOURCE_BARRIER::Transition(inputs.gbuffer.materialResource,
-                                                 D3D12_RESOURCE_STATE_RENDER_TARGET,
+                                                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
                                                  D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
         };
         cmdList->ResourceBarrier(_countof(toCompute), toCompute);
@@ -183,7 +183,7 @@ namespace SasamiRenderer
                                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
             CD3DX12_RESOURCE_BARRIER::Transition(inputs.gbuffer.depthResource,
                                                  D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                                                 D3D12_RESOURCE_STATE_DEPTH_WRITE),
+                                                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
             CD3DX12_RESOURCE_BARRIER::Transition(inputs.gbuffer.normalResource,
                                                  D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
@@ -208,15 +208,6 @@ namespace SasamiRenderer
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         cmdList->DrawInstanced(3u, 1u, 0u, 0u);
 
-        D3D12_RESOURCE_BARRIER restoreGBuffer[] = {
-            CD3DX12_RESOURCE_BARRIER::Transition(inputs.gbuffer.normalResource,
-                                                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                 D3D12_RESOURCE_STATE_RENDER_TARGET),
-            CD3DX12_RESOURCE_BARRIER::Transition(inputs.gbuffer.materialResource,
-                                                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                 D3D12_RESOURCE_STATE_RENDER_TARGET),
-        };
-        cmdList->ResourceBarrier(_countof(restoreGBuffer), restoreGBuffer);
         return true;
     }
 }

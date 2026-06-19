@@ -2,6 +2,7 @@
 
 #include "Renderer/Passes/Debug/DebugProbeGridRenderPass.h"
 #include "Renderer/Passes/Lighting/LightingRenderPass.h"
+#include "Renderer/Passes/Geometry/OpaqueGBufferRenderPass.h"
 #include "Renderer/Passes/Geometry/OpaqueRenderPass.h"
 #include "Renderer/Passes/PostProcess/PostProcessRenderPass.h"
 #include "Renderer/Passes/Sky/ProceduralSkyRenderPass.h"
@@ -78,6 +79,8 @@ namespace SasamiRenderer
             RenderPassBuilderId::Shadow, "Shadow"));
         catalog.Register(std::make_unique<StatelessRenderPassBuilder<OpaqueRenderPass>>(
             RenderPassBuilderId::Opaque, "Opaque"));
+        catalog.Register(std::make_unique<StatelessRenderPassBuilder<OpaqueGBufferRenderPass>>(
+            RenderPassBuilderId::OpaqueGBuffer, "Opaque GBuffer"));
         catalog.Register(std::make_unique<StatelessRenderPassBuilder<LightingRenderPass>>(
             RenderPassBuilderId::Lighting, "Lighting"));
         catalog.Register(std::make_unique<StatelessRenderPassBuilder<TransparentRenderPass>>(
@@ -154,6 +157,7 @@ namespace SasamiRenderer
         switch (type) {
         case RenderPassType::Shadow: return RenderPassBuilderId::Shadow;
         case RenderPassType::Opaque: return RenderPassBuilderId::Opaque;
+        case RenderPassType::OpaqueGBuffer: return RenderPassBuilderId::OpaqueGBuffer;
         case RenderPassType::Lighting: return RenderPassBuilderId::Lighting;
         case RenderPassType::Transparent: return RenderPassBuilderId::Transparent;
         case RenderPassType::TransparentLighting: return RenderPassBuilderId::TransparentLighting;

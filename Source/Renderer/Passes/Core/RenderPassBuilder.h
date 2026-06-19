@@ -20,6 +20,7 @@ namespace SasamiRenderer
     {
         Shadow,
         Opaque,
+        OpaqueGBuffer,
         Lighting,
         Transparent,
         TransparentLighting,
@@ -55,7 +56,7 @@ namespace SasamiRenderer
     public:
         using RenderPassType = RendererEnums::RenderPassType;
         static constexpr size_t kSequencePassCount =
-            static_cast<size_t>(RendererEnums::RenderPassType::SoftwareReflectionComposite) + 1u;
+            static_cast<size_t>(RendererEnums::RenderPassType::OpaqueGBuffer) + 1u;
 
         static RenderPassBuilderCatalog CreateDefault();
 

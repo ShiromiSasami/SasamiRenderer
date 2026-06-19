@@ -105,6 +105,7 @@
     <ClInclude Include="Source\Renderer\Config\RayTracingStats.h" />
     <ClInclude Include="Source\Renderer\Scene\SceneSubmitter.h" />
     <ClInclude Include="Source\Renderer\Scene\LightCBData.h" />
+    <ClInclude Include="Source\Renderer\Passes\Geometry\OpaqueGBufferRenderPass.h" />
     <ClInclude Include="Source\Renderer\Passes\Geometry\OpaqueRenderPass.h" />
     <ClInclude Include="Source\Renderer\Passes\Lighting\LightingRenderPass.h" />
     <ClInclude Include="Source\Renderer\Passes\Transparency\TransparentRenderPass.h" />
@@ -163,6 +164,7 @@
     <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwareRayTracer_Legacy.cpp" />
     <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwareRayTracer_ReSTIR.cpp" />
     <ClCompile Include="Source\Renderer\Scene\SceneSubmitter.cpp" />
+    <ClCompile Include="Source\Renderer\Passes\Geometry\OpaqueGBufferRenderPass.cpp" />
     <ClCompile Include="Source\Renderer\Passes\Geometry\OpaqueRenderPass.cpp" />
     <ClCompile Include="Source\Renderer\Passes\Lighting\LightingRenderPass.cpp" />
     <ClCompile Include="Source\Renderer\Passes\Transparency\TransparentRenderPass.cpp" />
@@ -373,6 +375,22 @@
       <Command>if not exist "$(OutDir)Shaders\Raster\Lighting\PBR" mkdir "$(OutDir)Shaders\Raster\Lighting\PBR"
 "$(DxcExecutable)" -E PSMain -T ps_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\Raster\Lighting\PBR\CookTorranceGGX_PS.PSMain.ps_$(RendererShaderModel).cso" "%(FullPath)"</Command>
       <Outputs>$(OutDir)Shaders\Raster\Lighting\PBR\CookTorranceGGX_PS.PSMain.ps_$(RendererShaderModel).cso</Outputs>
+      <AdditionalInputs>%(FullPath);@(ShaderBuildDependency)</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="Shaders\Raster\Geometry\OpaqueGBuffer\OpaqueGBuffer_PS.hlsl">
+      <FileType>Document</FileType>
+      <Message>DXC %(Filename)%(Extension)</Message>
+      <Command>if not exist "$(OutDir)Shaders\Raster\Geometry\OpaqueGBuffer" mkdir "$(OutDir)Shaders\Raster\Geometry\OpaqueGBuffer"
+"$(DxcExecutable)" -E PSMain -T ps_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\Raster\Geometry\OpaqueGBuffer\OpaqueGBuffer_PS.PSMain.ps_$(RendererShaderModel).cso" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Shaders\Raster\Geometry\OpaqueGBuffer\OpaqueGBuffer_PS.PSMain.ps_$(RendererShaderModel).cso</Outputs>
+      <AdditionalInputs>%(FullPath);@(ShaderBuildDependency)</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="Shaders\Raster\Lighting\Deferred\DeferredLighting_PS.hlsl">
+      <FileType>Document</FileType>
+      <Message>DXC %(Filename)%(Extension)</Message>
+      <Command>if not exist "$(OutDir)Shaders\Raster\Lighting\Deferred" mkdir "$(OutDir)Shaders\Raster\Lighting\Deferred"
+"$(DxcExecutable)" -E PSMain -T ps_$(RendererShaderModel) -I "$(ShaderSourceRoot)" -WX -Fo "$(OutDir)Shaders\Raster\Lighting\Deferred\DeferredLighting_PS.PSMain.ps_$(RendererShaderModel).cso" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Shaders\Raster\Lighting\Deferred\DeferredLighting_PS.PSMain.ps_$(RendererShaderModel).cso</Outputs>
       <AdditionalInputs>%(FullPath);@(ShaderBuildDependency)</AdditionalInputs>
     </CustomBuild>
     <CustomBuild Include="Shaders\Raster\Transparency\TransparentBackfaceDistance_PS.hlsl">

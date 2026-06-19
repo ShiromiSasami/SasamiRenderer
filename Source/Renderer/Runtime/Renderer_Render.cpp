@@ -657,7 +657,7 @@ namespace SasamiRenderer
         transparentOitRevealageDesc.clearColor[3] = 1.0f;
         m_renderGraph.ImportExternalResource("TransparentOitRevealage", transparentOitRevealageDesc);
 
-        // Import GBuffer resources so LightingRenderPass can bind them as MRTs.
+        // Import GBuffer resources so OpaqueGBufferRenderPass can bind them as MRTs.
         const UINT gbufferW = static_cast<UINT>(m_viewport.Width);
         const UINT gbufferH = static_cast<UINT>(m_viewport.Height);
         m_renderTargetPool.EnsureGBuffer(*m_device, gbufferW, gbufferH);
@@ -680,6 +680,7 @@ namespace SasamiRenderer
             importGBuffer("GBufferNormal",   m_renderTargetPool.GetGBufferNormal(),   m_renderTargetPool.GetGBufferNormalRtv(),   m_renderTargetPool.GetGBufferNormalSrv());
             importGBuffer("GBufferMaterial", m_renderTargetPool.GetGBufferMaterial(), m_renderTargetPool.GetGBufferMaterialRtv(), m_renderTargetPool.GetGBufferMaterialSrv());
             importGBuffer("GBufferEmissive", m_renderTargetPool.GetGBufferEmissive(), m_renderTargetPool.GetGBufferEmissiveRtv(), m_renderTargetPool.GetGBufferEmissiveSrv());
+            importGBuffer("GBufferSpecularWorkflow", m_renderTargetPool.GetGBufferSpecularWorkflow(), m_renderTargetPool.GetGBufferSpecularWorkflowRtv(), m_renderTargetPool.GetGBufferSpecularWorkflowSrv());
         }
 
         D3D12CommandListRhiEncoder graphicsCommandEncoder(*m_device, *cmdList);

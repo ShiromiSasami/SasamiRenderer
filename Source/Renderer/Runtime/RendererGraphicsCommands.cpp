@@ -144,19 +144,6 @@ namespace SasamiRenderer
             return true;
         }
 
-        D3D12_RESOURCE_BARRIER toSrv[] = {
-            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool.GetGBufferAlbedo().Get(),
-                D3D12_RESOURCE_STATE_RENDER_TARGET,
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
-            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool.GetGBufferNormal().Get(),
-                D3D12_RESOURCE_STATE_RENDER_TARGET,
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
-            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool.GetGBufferMaterial().Get(),
-                D3D12_RESOURCE_STATE_RENDER_TARGET,
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
-        };
-        cmdList->ResourceBarrier(_countof(toSrv), toSrv);
-
         cmdList->SetGraphicsRootSignature(m_pipelineStateCache.GetRootSignature());
         cmdList->SetPipelineState(m_pipelineStateCache.GetSwrtReflectionCompositePipelineState());
         cmdList->RSSetViewports(1, &m_viewport);
@@ -175,18 +162,6 @@ namespace SasamiRenderer
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         cmdList->DrawInstanced(3u, 1u, 0u, 0u);
 
-        D3D12_RESOURCE_BARRIER toRenderTarget[] = {
-            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool.GetGBufferAlbedo().Get(),
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                D3D12_RESOURCE_STATE_RENDER_TARGET),
-            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool.GetGBufferNormal().Get(),
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                D3D12_RESOURCE_STATE_RENDER_TARGET),
-            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargetPool.GetGBufferMaterial().Get(),
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                D3D12_RESOURCE_STATE_RENDER_TARGET),
-        };
-        cmdList->ResourceBarrier(_countof(toRenderTarget), toRenderTarget);
         return true;
     }
 

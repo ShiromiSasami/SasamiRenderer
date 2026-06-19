@@ -105,6 +105,7 @@ namespace SasamiRenderer
             ScreenSpaceReflection = 13,
             SoftwareReflection = 14,
             SoftwareReflectionComposite = 15,
+            OpaqueGBuffer = 16,
         };
     }
 }

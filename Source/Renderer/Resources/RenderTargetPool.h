@@ -44,14 +44,17 @@ namespace SasamiRenderer
         Resource& GetGBufferNormal()   { return m_gbufferNormal; }
         Resource& GetGBufferMaterial() { return m_gbufferMaterial; }
         Resource& GetGBufferEmissive() { return m_gbufferEmissive; }
+        Resource& GetGBufferSpecularWorkflow() { return m_gbufferSpecularWorkflow; }
         CpuDescriptorHandle GetGBufferAlbedoRtv()   const { return m_gbufferAlbedoRtv; }
         CpuDescriptorHandle GetGBufferNormalRtv()   const { return m_gbufferNormalRtv; }
         CpuDescriptorHandle GetGBufferMaterialRtv() const { return m_gbufferMaterialRtv; }
         CpuDescriptorHandle GetGBufferEmissiveRtv() const { return m_gbufferEmissiveRtv; }
+        CpuDescriptorHandle GetGBufferSpecularWorkflowRtv() const { return m_gbufferSpecularWorkflowRtv; }
         GpuDescriptorHandle GetGBufferAlbedoSrv() const { return m_gbufferAlbedoSrv; }
         GpuDescriptorHandle GetGBufferNormalSrv() const { return m_gbufferNormalSrv; }
         GpuDescriptorHandle GetGBufferMaterialSrv() const { return m_gbufferMaterialSrv; }
         GpuDescriptorHandle GetGBufferEmissiveSrv() const { return m_gbufferEmissiveSrv; }
+        GpuDescriptorHandle GetGBufferSpecularWorkflowSrv() const { return m_gbufferSpecularWorkflowSrv; }
         UINT GetGBufferWidth()  const { return m_gbufferWidth; }
         UINT GetGBufferHeight() const { return m_gbufferHeight; }
 
@@ -192,11 +195,11 @@ namespace SasamiRenderer
         GpuDescriptorHandle m_ssaoBlurSrv{};
 
         // GBuffer
-        Resource m_gbufferAlbedo, m_gbufferNormal, m_gbufferMaterial, m_gbufferEmissive;
+        Resource m_gbufferAlbedo, m_gbufferNormal, m_gbufferMaterial, m_gbufferEmissive, m_gbufferSpecularWorkflow;
         DescriptorHeap m_gbufferRtvHeap;
-        CpuDescriptorHandle m_gbufferAlbedoRtv{}, m_gbufferNormalRtv{}, m_gbufferMaterialRtv{}, m_gbufferEmissiveRtv{};
-        CpuDescriptorHandle m_gbufferAlbedoSrvCpu{}, m_gbufferNormalSrvCpu{}, m_gbufferMaterialSrvCpu{}, m_gbufferEmissiveSrvCpu{};
-        GpuDescriptorHandle m_gbufferAlbedoSrv{}, m_gbufferNormalSrv{}, m_gbufferMaterialSrv{}, m_gbufferEmissiveSrv{};
+        CpuDescriptorHandle m_gbufferAlbedoRtv{}, m_gbufferNormalRtv{}, m_gbufferMaterialRtv{}, m_gbufferEmissiveRtv{}, m_gbufferSpecularWorkflowRtv{};
+        CpuDescriptorHandle m_gbufferAlbedoSrvCpu{}, m_gbufferNormalSrvCpu{}, m_gbufferMaterialSrvCpu{}, m_gbufferEmissiveSrvCpu{}, m_gbufferSpecularWorkflowSrvCpu{};
+        GpuDescriptorHandle m_gbufferAlbedoSrv{}, m_gbufferNormalSrv{}, m_gbufferMaterialSrv{}, m_gbufferEmissiveSrv{}, m_gbufferSpecularWorkflowSrv{};
         UINT m_gbufferWidth = 0u, m_gbufferHeight = 0u;
 
         // SWRT shadow

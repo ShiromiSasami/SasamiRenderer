@@ -4,6 +4,31 @@
 
 namespace SasamiRenderer
 {
+    namespace
+    {
+        bool ShouldRegisterPassForPolicy(std::string_view tag, const RenderPassExecutionPolicy* policy)
+        {
+            if (!policy) {
+                return true;
+            }
+
+            if (tag == "Opaque") {
+                return policy->executeOpaqueFamilyPasses;
+            }
+            if (tag == "OpaqueGBuffer" || tag == "Lighting" || tag == "TransparentLighting" || tag == "TransparentComposite") {
+                return policy->executeLightingFamilyPasses;
+            }
+            if (tag == "Transparent") {
+                return policy->executeOpaqueFamilyPasses;
+            }
+            if (tag == "TransparentBackfaceDistance" || tag == "TransparentSceneColorCopy") {
+                return policy->executeOpaqueFamilyPasses || policy->executeLightingFamilyPasses;
+            }
+
+            return true;
+        }
+    }
+
     void RenderPassRegistry::SetBuiltinPasses(std::array<std::shared_ptr<IRenderPass>, kBuiltinPassCount> passes)
     {
         m_builtinPasses = std::move(passes);
@@ -222,6 +247,9 @@ namespace SasamiRenderer
         for (const auto& runtimePass : runtimePasses) {
             if (!runtimePass) {
                 DebugLog("RenderPassRegistry::RegisterPassesToRenderGraph: runtime pass is null.\n");
+                continue;
+            }
+            if (!ShouldRegisterPassForPolicy(runtimePass->Tag(), executeContext.executionPolicy)) {
                 continue;
             }
 
