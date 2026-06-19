@@ -23,6 +23,7 @@
 #include "Renderer/Scene/DrawCommandBuilder.h"
 #include "Renderer/Passes/Geometry/ShadowRenderPass.h"
 #include "Renderer/Passes/Geometry/OpaqueRenderPass.h"
+#include "Renderer/Passes/Geometry/OpaqueGBufferRenderPass.h"
 #include "Renderer/Passes/Lighting/LightingRenderPass.h"
 #include "Renderer/Passes/Transparency/TransparentRenderPass.h"
 #include "Renderer/Passes/Transparency/TransparentLightingRenderPass.h"
@@ -399,6 +400,7 @@ namespace SasamiRenderer
         RenderPassBuilderCatalog m_renderPassBuilderCatalog;
         std::shared_ptr<ShadowRenderPass> m_shadowRenderPass;
         std::shared_ptr<OpaqueRenderPass> m_opaqueRenderPass;
+        std::shared_ptr<OpaqueGBufferRenderPass> m_opaqueGBufferRenderPass;
         std::shared_ptr<LightingRenderPass> m_lightingRenderPass;
         std::shared_ptr<TransparentRenderPass> m_transparentRenderPass;
         std::shared_ptr<TransparentLightingRenderPass> m_transparentLightingRenderPass;

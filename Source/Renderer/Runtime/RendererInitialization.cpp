@@ -388,7 +388,8 @@ namespace SasamiRenderer
             m_transparentSceneColorCopyRenderPass,
             m_screenSpaceReflectionRenderPass,
             m_softwareReflectionRenderPass,
-            m_softwareReflectionCompositeRenderPass
+            m_softwareReflectionCompositeRenderPass,
+            m_opaqueGBufferRenderPass
         });
 
         EnsureVolumetricCloudPassInserted();

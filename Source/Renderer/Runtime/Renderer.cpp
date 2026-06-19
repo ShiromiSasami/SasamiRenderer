@@ -627,6 +627,8 @@ namespace SasamiRenderer
             builtins[static_cast<size_t>(RenderPassType::Shadow)]);
         m_opaqueRenderPass = std::dynamic_pointer_cast<OpaqueRenderPass>(
             builtins[static_cast<size_t>(RenderPassType::Opaque)]);
+        m_opaqueGBufferRenderPass = std::dynamic_pointer_cast<OpaqueGBufferRenderPass>(
+            builtins[static_cast<size_t>(RenderPassType::OpaqueGBuffer)]);
         m_lightingRenderPass = std::dynamic_pointer_cast<LightingRenderPass>(
             builtins[static_cast<size_t>(RenderPassType::Lighting)]);
         m_transparentRenderPass = std::dynamic_pointer_cast<TransparentRenderPass>(
