@@ -644,7 +644,7 @@ namespace SasamiRenderer
         // GI probe update (reuses the freshly-built BVH)
         {
             const auto bvhAddrs = m_gpuSoftwareRayTracer->GetBvhGpuAddresses();
-            if (bvhAddrs.valid && m_probeGrid->IsInitialized())
+            if (bvhAddrs.valid && m_probeGrid->IsInitialized() && !m_probeGrid->IsBaked())
             {
                 const auto dirLight = m_lightSystem->GetDirectionalLightSettings();
                 float fwd[3];

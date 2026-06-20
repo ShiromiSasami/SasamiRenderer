@@ -4,10 +4,11 @@
 #include <memory>
 #include <new>
 #include <utility>
+#include <version>
 
 // Polyfill for std::construct_at if missing in the STL used.
 // Guarded by the C++ feature-test macro when available.
-#ifndef __cpp_lib_construct_at
+#if !defined(__cpp_lib_construct_at) && !(defined(_MSC_VER) && _MSC_VER >= 1929)
 namespace std {
     template <class T, class... Args>
     constexpr T* construct_at(T* p, Args&&... args)

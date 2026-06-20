@@ -563,6 +563,11 @@ namespace SasamiRenderer
         // Advance round-robin index
         m_nextProbeIdx           += probesThisFrame;
         m_totalProbesDispatched  += probesThisFrame;
+        if (IsBaked()) {
+            // FillProbeGridCB gates giEnabled on IsBaked(); refresh the CB after
+            // the final dispatch so lighting can consume the completed probes.
+            FlushGridCB();
+        }
 
         return true;
     }
@@ -573,6 +578,12 @@ namespace SasamiRenderer
         if (total == 0) return 0.0f;
         return std::min(1.0f, static_cast<float>(m_totalProbesDispatched) /
                               static_cast<float>(total));
+    }
+
+    uint32_t IrradianceProbeGrid::GetBakedProbeCount() const
+    {
+        const uint32_t total = GetTotalProbeCount();
+        return std::min(m_totalProbesDispatched, total);
     }
 
     void IrradianceProbeGrid::ResetBakeState()

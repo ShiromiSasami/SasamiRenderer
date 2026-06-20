@@ -1204,34 +1204,57 @@ namespace SasamiRenderer
         CaptureSceneColorHistory(cmdList, backIndex);
 
         // GI probe bake in Raster mode (or explicit bake request in any mode).
-        if (m_giBakeRequested && m_probeGrid.IsInitialized()) {
-            if (m_giBakeClearPending) {
-                m_giBakeClearPending = false;
-                m_probeGrid.ReallocAndClearProbeBuffer(*m_device);
-            }
-            m_gpuSoftwareRayTracer.UpdateScene(m_rayTracingScene, *m_device, *cmdList);
-            const auto bvhAddrs = m_gpuSoftwareRayTracer.GetBvhGpuAddresses();
-            if (bvhAddrs.valid) {
-                const auto dirLight = m_lightSystem.GetDirectionalLightSettings();
-                float fwd[3];
-                Math::DirectionFromYawPitch(dirLight.yaw, dirLight.pitch, fwd);
-                IrradianceProbeGrid::UpdateDesc giDesc{};
-                giDesc.dirLightDir[0]     = -fwd[0];
-                giDesc.dirLightDir[1]     = -fwd[1];
-                giDesc.dirLightDir[2]     = -fwd[2];
-                giDesc.dirLightIntensity  = dirLight.intensity;
-                giDesc.dirLightColor[0]   = dirLight.color[0];
-                giDesc.dirLightColor[1]   = dirLight.color[1];
-                giDesc.dirLightColor[2]   = dirLight.color[2];
-                giDesc.ambientColor[0]    = 0.1f;
-                giDesc.ambientColor[1]    = 0.1f;
-                giDesc.ambientColor[2]    = 0.1f;
-                giDesc.ambientIntensity   = 1.0f;
-                giDesc.shadowBias         = 0.005f;
-                giDesc.frameIndex         = m_giBakeFrameIndex++;
-                m_probeGrid.UpdateProbes(giDesc, bvhAddrs, *m_device, *cmdList);
-                if (m_probeGrid.IsBaked()) {
-                    m_giBakeRequested = false;
+        if (m_giBakeRequested) {
+            if (!m_probeGrid.IsInitialized()) {
+                RefreshGIBakeStatus(GIBakeState::WaitingForProbeGrid);
+            } else if (m_probeGrid.IsBaked()) {
+                m_giBakeRequested = false;
+                m_probeGrid.FlushGridCB();
+                RefreshGIBakeStatus(GIBakeState::Completed);
+            } else {
+                if (m_giBakeClearPending) {
+                    m_giBakeClearPending = false;
+                }
+
+                if (m_giBakeRequested) {
+                    m_gpuSoftwareRayTracer.UpdateScene(m_rayTracingScene, *m_device, *cmdList);
+                    const auto bvhAddrs = m_gpuSoftwareRayTracer.GetBvhGpuAddresses();
+                    if (bvhAddrs.valid) {
+                        const auto dirLight = m_lightSystem.GetDirectionalLightSettings();
+                        float fwd[3];
+                        Math::DirectionFromYawPitch(dirLight.yaw, dirLight.pitch, fwd);
+                        IrradianceProbeGrid::UpdateDesc giDesc{};
+                        giDesc.dirLightDir[0]     = -fwd[0];
+                        giDesc.dirLightDir[1]     = -fwd[1];
+                        giDesc.dirLightDir[2]     = -fwd[2];
+                        giDesc.dirLightIntensity  = dirLight.intensity;
+                        giDesc.dirLightColor[0]   = dirLight.color[0];
+                        giDesc.dirLightColor[1]   = dirLight.color[1];
+                        giDesc.dirLightColor[2]   = dirLight.color[2];
+                        giDesc.ambientColor[0]    = 0.1f;
+                        giDesc.ambientColor[1]    = 0.1f;
+                        giDesc.ambientColor[2]    = 0.1f;
+                        giDesc.ambientIntensity   = 1.0f;
+                        giDesc.shadowBias         = 0.005f;
+                        giDesc.frameIndex         = m_giBakeFrameIndex++;
+
+                        if (!m_probeGrid.UpdateProbes(giDesc, bvhAddrs, *m_device, *cmdList)) {
+                            m_giBakeRequested = false;
+                            RefreshGIBakeStatus(GIBakeState::Failed);
+                        } else if (m_probeGrid.IsBaked()) {
+                            m_giBakeRequested = false;
+                            RefreshGIBakeStatus(GIBakeState::Completed);
+                        } else {
+                            RefreshGIBakeStatus(GIBakeState::Baking);
+                        }
+                    } else {
+                        if (bvhAddrs.missingMask & GI_BVH_MISSING_SWRT_NOT_INITIALIZED) {
+                            m_giBakeRequested = false;
+                            RefreshGIBakeStatus(GIBakeState::Failed);
+                        } else {
+                            RefreshGIBakeStatus(GIBakeState::WaitingForBvh, bvhAddrs.missingMask);
+                        }
+                    }
                 }
             }
         }

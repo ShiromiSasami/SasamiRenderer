@@ -16,10 +16,13 @@ namespace SasamiRenderer
     // incrementally each frame via a compute shader that traces rays
     // through the SWRT BVH.
     //
-    // Update model:
+    // Bake/update model:
     //   - Up to kProbesPerFrame probes are updated per call to UpdateProbes().
-    //   - A round-robin counter cycles through all probes so the full grid
-    //     refreshes every ceil(totalProbes / kProbesPerFrame) frames.
+    //   - A round-robin counter advances until every probe has been dispatched
+    //     at least once; IsBaked() then becomes true.
+    //   - Runtime callers must explicitly reset the bake state before starting
+    //     another pass. This keeps the current BakeGI path finite instead of
+    //     silently writing the probe buffer forever.
     //   - Per-probe SH is blended with an exponential moving average (EMA)
     //     controlled by m_emaAlpha, giving smooth temporal convergence.
     //
@@ -125,6 +128,8 @@ namespace SasamiRenderer
         bool IsInitialized() const { return m_initialized; }
         bool IsBaked()        const { return m_initialized && m_totalProbesDispatched >= GetTotalProbeCount(); }
         float GetBakeProgress() const;
+        uint32_t GetBakedProbeCount() const;
+        static constexpr uint32_t GetProbesPerBakeStep() { return kProbesPerFrame; }
         void  ResetBakeState();
         bool  ReallocAndClearProbeBuffer(IRHIDevice& device);
 

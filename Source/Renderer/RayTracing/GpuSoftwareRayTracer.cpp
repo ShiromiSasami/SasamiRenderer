@@ -51,6 +51,7 @@ namespace SasamiRenderer
                                    Resource& outBuffer)
         {
             if (byteSize == 0) { outBuffer.Reset(); return true; }
+            if (!device.GetCommandQueue().IsValid()) return false;
 
             D3D12_HEAP_PROPERTIES defHeap{};
             defHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
@@ -234,14 +235,23 @@ namespace SasamiRenderer
     GpuSoftwareRayTracer::BvhGpuAddresses GpuSoftwareRayTracer::GetBvhGpuAddresses() const
     {
         BvhGpuAddresses out{};
-        if (!m_initialized) return out;
+        if (!m_initialized) {
+            out.missingMask = BvhGpuAddresses::MISSING_SWRT_NOT_INITIALIZED;
+            return out;
+        }
         out.bvhNodes  = m_bvhNodesBuffer.IsValid() ? m_bvhNodesBuffer.GetGPUVirtualAddress() : 0u;
         out.triangles = m_triangleBuffer.IsValid()  ? m_triangleBuffer.GetGPUVirtualAddress()  : 0u;
         out.meshInfo  = m_meshInfoBuffer.IsValid()  ? m_meshInfoBuffer.GetGPUVirtualAddress()  : 0u;
         out.instances = m_instanceBuffer.IsValid()  ? m_instanceBuffer.GetGPUVirtualAddress()  : 0u;
         out.tlasNodes = m_tlasBuffer.IsValid()      ? m_tlasBuffer.GetGPUVirtualAddress()      : 0u;
         out.materials = m_materialBuffer.IsValid()  ? m_materialBuffer.GetGPUVirtualAddress()  : 0u;
-        out.valid = (out.bvhNodes != 0);
+        if (out.bvhNodes  == 0u) out.missingMask |= BvhGpuAddresses::MISSING_BVH_NODES;
+        if (out.triangles == 0u) out.missingMask |= BvhGpuAddresses::MISSING_TRIANGLES;
+        if (out.meshInfo  == 0u) out.missingMask |= BvhGpuAddresses::MISSING_MESH_INFO;
+        if (out.instances == 0u) out.missingMask |= BvhGpuAddresses::MISSING_INSTANCES;
+        if (out.tlasNodes == 0u) out.missingMask |= BvhGpuAddresses::MISSING_TLAS_NODES;
+        if (out.materials == 0u) out.missingMask |= BvhGpuAddresses::MISSING_MATERIALS;
+        out.valid = (out.missingMask == 0u);
         return out;
     }
 
@@ -546,12 +556,21 @@ namespace SasamiRenderer
         const bool geoDirty  = (scene.geometryVersion != m_bvhGeometryVersion);
         const bool matDirty  = (scene.materialVersion != m_bvhMaterialVersion);
         const bool instDirty = (scene.instanceVersion  != m_bvhInstanceVersion);
-        if (!geoDirty && !matDirty && !instDirty) return;
+        const bool bvhBuffersMissing =
+            !m_bvhNodesBuffer.IsValid() ||
+            !m_triangleBuffer.IsValid() ||
+            !m_meshInfoBuffer.IsValid() ||
+            !m_instanceBuffer.IsValid() ||
+            !m_tlasBuffer.IsValid() ||
+            !m_materialBuffer.IsValid();
+        if (!geoDirty && !matDirty && !instDirty && !bvhBuffersMissing) return;
 
-        if (geoDirty || instDirty) {
+        if (geoDirty || instDirty || m_meshAccelerations.size() != m_scene.meshes.size()) {
             RebuildAccelerationStructures();
         }
-        UploadBvhBuffers(device);
+        if (!UploadBvhBuffers(device)) {
+            OutputDebugStringA("GpuSoftwareRayTracer::UpdateScene: BVH GPU buffer upload failed.\n");
+        }
     }
 
 
@@ -562,7 +581,14 @@ namespace SasamiRenderer
     bool GpuSoftwareRayTracer::UploadBvhBuffers(IRHIDevice& device)
     {
         ID3D12Device* dev = device.GetDevice();
-        if (!dev || !m_descHeap.Get()) return false;
+        if (!dev) {
+            OutputDebugStringA("GpuSoftwareRayTracer::UploadBvhBuffers: D3D12 device is not available.\n");
+            return false;
+        }
+        if (!m_descHeap.Get()) {
+            OutputDebugStringA("GpuSoftwareRayTracer::UploadBvhBuffers: descriptor heap is not available.\n");
+            return false;
+        }
 
         // ---- Flatten BLAS nodes ----
         std::vector<BvhNode> allNodes;
@@ -632,18 +658,26 @@ namespace SasamiRenderer
         if (m_topLevelNodes.empty()) m_topLevelNodes.push_back({});
 
         // ---- Upload to GPU (stalls GPU once if dirty) ----
-        if (!CreateAndUploadBuffer(device, allNodes.data(),   allNodes.size()*sizeof(BvhNode),
-                                   D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, m_bvhNodesBuffer)) return false;
-        if (!CreateAndUploadBuffer(device, allTris.data(),    allTris.size()*sizeof(GpuTriangle),
-                                   D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, m_triangleBuffer)) return false;
-        if (!CreateAndUploadBuffer(device, meshInfos.data(),  meshInfos.size()*sizeof(GpuMeshInfo),
-                                   D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, m_meshInfoBuffer)) return false;
-        if (!CreateAndUploadBuffer(device, instBuf.data(),    instBuf.size()*sizeof(GpuInstanceInfo),
-                                   D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, m_instanceBuffer)) return false;
-        if (!CreateAndUploadBuffer(device, m_topLevelNodes.data(), m_topLevelNodes.size()*sizeof(TlasNode),
-                                   D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, m_tlasBuffer)) return false;
-        if (!CreateAndUploadBuffer(device, matBuf.data(),     matBuf.size()*sizeof(GpuMaterial),
-                                   D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, m_materialBuffer)) return false;
+        auto uploadBuffer = [&](const char* name,
+                                const void* data,
+                                size_t byteSize,
+                                Resource& outBuffer) -> bool {
+            if (!CreateAndUploadBuffer(device, data, static_cast<UINT64>(byteSize),
+                                       D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, outBuffer)) {
+                OutputDebugStringA("GpuSoftwareRayTracer::UploadBvhBuffers: failed to upload ");
+                OutputDebugStringA(name);
+                OutputDebugStringA(".\n");
+                return false;
+            }
+            return true;
+        };
+
+        if (!uploadBuffer("BVH nodes", allNodes.data(), allNodes.size() * sizeof(BvhNode), m_bvhNodesBuffer)) return false;
+        if (!uploadBuffer("triangles", allTris.data(), allTris.size() * sizeof(GpuTriangle), m_triangleBuffer)) return false;
+        if (!uploadBuffer("mesh info", meshInfos.data(), meshInfos.size() * sizeof(GpuMeshInfo), m_meshInfoBuffer)) return false;
+        if (!uploadBuffer("instances", instBuf.data(), instBuf.size() * sizeof(GpuInstanceInfo), m_instanceBuffer)) return false;
+        if (!uploadBuffer("TLAS nodes", m_topLevelNodes.data(), m_topLevelNodes.size() * sizeof(TlasNode), m_tlasBuffer)) return false;
+        if (!uploadBuffer("materials", matBuf.data(), matBuf.size() * sizeof(GpuMaterial), m_materialBuffer)) return false;
 
         // ---- Create SRVs in descriptor heap ----
         auto cpuBase = m_descHeap.GetCPUDescriptorHandleForHeapStart();

@@ -89,6 +89,37 @@ namespace SasamiRenderer
         using PassHandle = RenderPassRegistry::PassHandle;
         using NodeHandle = RenderPassRegistry::NodeHandle;
 
+        enum class GIBakeState
+        {
+            Idle,
+            Baking,
+            Completed,
+            WaitingForProbeGrid,
+            WaitingForBvh,
+            Failed
+        };
+
+        struct GIBakeStatus
+        {
+            GIBakeState state = GIBakeState::Idle;
+            bool requested = false;
+            float progress = 0.0f;
+            uint32_t completedProbes = 0u;
+            uint32_t totalProbes = 0u;
+            uint32_t probesPerStep = 0u;
+            uint32_t estimatedFramesRemaining = 0u;
+            uint32_t stalledFrames = 0u;
+            uint32_t bvhMissingMask = 0u;
+        };
+
+        static constexpr uint32_t GI_BVH_MISSING_SWRT_NOT_INITIALIZED = GpuSoftwareRayTracer::BvhGpuAddresses::MISSING_SWRT_NOT_INITIALIZED;
+        static constexpr uint32_t GI_BVH_MISSING_BVH_NODES            = GpuSoftwareRayTracer::BvhGpuAddresses::MISSING_BVH_NODES;
+        static constexpr uint32_t GI_BVH_MISSING_TRIANGLES            = GpuSoftwareRayTracer::BvhGpuAddresses::MISSING_TRIANGLES;
+        static constexpr uint32_t GI_BVH_MISSING_MESH_INFO            = GpuSoftwareRayTracer::BvhGpuAddresses::MISSING_MESH_INFO;
+        static constexpr uint32_t GI_BVH_MISSING_INSTANCES            = GpuSoftwareRayTracer::BvhGpuAddresses::MISSING_INSTANCES;
+        static constexpr uint32_t GI_BVH_MISSING_TLAS_NODES           = GpuSoftwareRayTracer::BvhGpuAddresses::MISSING_TLAS_NODES;
+        static constexpr uint32_t GI_BVH_MISSING_MATERIALS            = GpuSoftwareRayTracer::BvhGpuAddresses::MISSING_MATERIALS;
+
 #pragma endregion
 
         Renderer();
@@ -246,12 +277,13 @@ namespace SasamiRenderer
         IrradianceProbeGrid& GetProbeGrid() { return m_probeGrid; }
 
         // GI bake control (works in all render modes including Raster)
-        void  RequestGIBake()           { m_probeGrid.ResetBakeState(); m_giBakeRequested = true; }
+        void  RequestGIBake();
         void  ResetAndRebakeGI();
-        void  CancelGIBake()            { m_giBakeRequested = false; }
+        void  CancelGIBake();
         bool  IsGIBaking()        const { return m_giBakeRequested; }
         bool  IsGIBaked()         const { return m_probeGrid.IsBaked(); }
-        float GetGIBakeProgress() const { return m_probeGrid.GetBakeProgress(); }
+        float GetGIBakeProgress() const { return GetGIBakeStatus().progress; }
+        GIBakeStatus GetGIBakeStatus() const;
 
         // Fits the probe grid to the given world AABB and reallocates the buffer.
         // Safe to call after Initialize()  Euse before first rendered frame.
@@ -388,6 +420,7 @@ namespace SasamiRenderer
         void SubmitAndPresent(CommandList* cmdList, UINT frameIndex);
         Texture* CreateTextureFromRgba8Data(const CpuTextureRgba8& src, CommandList* cmdList,
                                             std::vector<Resource>& uploads);
+        void RefreshGIBakeStatus(GIBakeState state, uint32_t bvhMissingMask = 0u);
         std::unique_ptr<IRHIDevice> m_device;
         RenderPipelineStateCache m_pipelineStateCache;
         RendererFrameCoordinator m_frameCoordinator;
@@ -439,6 +472,7 @@ namespace SasamiRenderer
         bool     m_giBakeRequested    = false;
         bool     m_giBakeClearPending = false;
         uint32_t m_giBakeFrameIndex   = 0u;
+        GIBakeStatus m_giBakeStatus{};
         DxrRayTracer m_dxrRayTracer;
         DxrRayTracer::DescriptorSet m_rayTracingDescriptors{};
 

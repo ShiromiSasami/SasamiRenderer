@@ -274,7 +274,6 @@ namespace SasamiRenderer
                 m_renderer.reset();
                 return false;
             }
-
             return true;
         } catch (const std::exception& ex) {
             ReportException(L"ApplicationCore::InitializeRenderer", ex, true);

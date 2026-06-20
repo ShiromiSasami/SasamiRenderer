@@ -127,12 +127,21 @@ namespace SasamiRenderer
         // the same BVH without duplicating GPU memory.
         struct BvhGpuAddresses
         {
+            static constexpr uint32_t MISSING_SWRT_NOT_INITIALIZED = 1u << 0;
+            static constexpr uint32_t MISSING_BVH_NODES            = 1u << 1;
+            static constexpr uint32_t MISSING_TRIANGLES            = 1u << 2;
+            static constexpr uint32_t MISSING_MESH_INFO            = 1u << 3;
+            static constexpr uint32_t MISSING_INSTANCES            = 1u << 4;
+            static constexpr uint32_t MISSING_TLAS_NODES           = 1u << 5;
+            static constexpr uint32_t MISSING_MATERIALS            = 1u << 6;
+
             D3D12_GPU_VIRTUAL_ADDRESS bvhNodes  = 0;
             D3D12_GPU_VIRTUAL_ADDRESS triangles = 0;
             D3D12_GPU_VIRTUAL_ADDRESS meshInfo  = 0;
             D3D12_GPU_VIRTUAL_ADDRESS instances = 0;
             D3D12_GPU_VIRTUAL_ADDRESS tlasNodes = 0;
             D3D12_GPU_VIRTUAL_ADDRESS materials = 0;
+            uint32_t missingMask = 0u;
             bool valid = false;
         };
         BvhGpuAddresses GetBvhGpuAddresses() const;

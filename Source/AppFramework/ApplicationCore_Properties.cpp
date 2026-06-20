@@ -190,6 +190,37 @@ namespace SasamiRenderer
         m_renderer->SetDebugProbeRadius(radius);
     }
 
+    void ApplicationCore::RequestGIBake()
+    {
+        if (m_renderer) {
+            m_renderer->RequestGIBake();
+        }
+    }
+
+    void ApplicationCore::ResetAndRebakeGI()
+    {
+        if (m_renderer) {
+            m_renderer->ResetAndRebakeGI();
+        }
+    }
+
+    void ApplicationCore::CancelGIBake()
+    {
+        if (m_renderer) {
+            m_renderer->CancelGIBake();
+        }
+    }
+
+    Renderer::GIBakeStatus ApplicationCore::GetGIBakeStatus() const
+    {
+        return m_renderer ? m_renderer->GetGIBakeStatus() : Renderer::GIBakeStatus{};
+    }
+
+    float ApplicationCore::GetGIBakeProgress() const
+    {
+        return m_renderer ? m_renderer->GetGIBakeProgress() : 0.0f;
+    }
+
     void ApplicationCore::FitProbeGridToScene(float bMinX, float bMinY, float bMinZ,
                                                float bMaxX, float bMaxY, float bMaxZ,
                                                float margin)

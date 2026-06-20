@@ -61,6 +61,72 @@ namespace SasamiRenderer
             return std::find(sequence.begin(), sequence.end(), type) != sequence.end();
         }
 
+        const char* ToGIBakeStateLabel(Renderer::GIBakeState state)
+        {
+            switch (state) {
+            case Renderer::GIBakeState::Idle: return "Idle";
+            case Renderer::GIBakeState::Baking: return "Baking";
+            case Renderer::GIBakeState::Completed: return "Completed";
+            case Renderer::GIBakeState::WaitingForProbeGrid: return "Waiting for probe grid";
+            case Renderer::GIBakeState::WaitingForBvh: return "Waiting for software ray tracing BVH buffers";
+            case Renderer::GIBakeState::Failed: return "Failed";
+            default: return "Unknown";
+            }
+        }
+
+        void DrawGIBakeStatus(Renderer& renderer)
+        {
+            const Renderer::GIBakeStatus status = renderer.GetGIBakeStatus();
+            const float progress = std::clamp(status.progress, 0.0f, 1.0f);
+            char progressText[64]{};
+            std::snprintf(progressText, sizeof(progressText), "%.1f%%", progress * 100.0f);
+
+            ImGui::Text("State: %s", ToGIBakeStateLabel(status.state));
+            ImGui::ProgressBar(progress, {-1.f, 0.f}, progressText);
+            ImGui::TextDisabled("Probes: %u / %u", status.completedProbes, status.totalProbes);
+            ImGui::TextDisabled("Step: %u probes/frame, remaining: %u frame(s)",
+                                status.probesPerStep,
+                                status.estimatedFramesRemaining);
+            if (status.stalledFrames > 0u) {
+                ImGui::TextDisabled("Stalled: %u frame(s)", status.stalledFrames);
+            }
+
+            if (status.state == Renderer::GIBakeState::WaitingForBvh) {
+                ImGui::TextColored({1.f, 0.6f, 0.2f, 1.f},
+                                   "Waiting: software ray tracing BVH GPU buffers are not ready.");
+                if (status.bvhMissingMask != 0u) {
+                    ImGui::TextDisabled("Missing BVH buffers:");
+                    if ((status.bvhMissingMask & Renderer::GI_BVH_MISSING_SWRT_NOT_INITIALIZED) != 0u) {
+                        ImGui::BulletText("software ray tracer is not initialized");
+                    }
+                    if ((status.bvhMissingMask & Renderer::GI_BVH_MISSING_BVH_NODES) != 0u) {
+                        ImGui::BulletText("bvhNodes");
+                    }
+                    if ((status.bvhMissingMask & Renderer::GI_BVH_MISSING_TRIANGLES) != 0u) {
+                        ImGui::BulletText("triangles");
+                    }
+                    if ((status.bvhMissingMask & Renderer::GI_BVH_MISSING_MESH_INFO) != 0u) {
+                        ImGui::BulletText("meshInfo");
+                    }
+                    if ((status.bvhMissingMask & Renderer::GI_BVH_MISSING_INSTANCES) != 0u) {
+                        ImGui::BulletText("instances");
+                    }
+                    if ((status.bvhMissingMask & Renderer::GI_BVH_MISSING_TLAS_NODES) != 0u) {
+                        ImGui::BulletText("tlasNodes");
+                    }
+                    if ((status.bvhMissingMask & Renderer::GI_BVH_MISSING_MATERIALS) != 0u) {
+                        ImGui::BulletText("materials");
+                    }
+                }
+            } else if (status.state == Renderer::GIBakeState::WaitingForProbeGrid) {
+                ImGui::TextColored({1.f, 0.6f, 0.2f, 1.f},
+                                   "Waiting: GI probe grid is not initialized.");
+            } else if (status.state == Renderer::GIBakeState::Failed) {
+                ImGui::TextColored({1.f, 0.3f, 0.3f, 1.f},
+                                   "Failed: check the debug output for the dispatch/reallocation error.");
+            }
+        }
+
         void DrawRenderPassBuilderControls(ApplicationCore& app)
         {
             if (!ImGui::CollapsingHeader("Render Node Preset", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -1136,24 +1202,22 @@ namespace SasamiRenderer
 
             if (!grid.IsInitialized()) {
                 ImGui::TextDisabled("(GI not initialized — load a scene first)");
-            } else if (renderer.IsGIBaking()) {
-                const float p = renderer.GetGIBakeProgress();
-                ImGui::TextColored({1.f, 1.f, 0.f, 1.f}, "Baking GI...  %.0f%%", p * 100.f);
-                ImGui::ProgressBar(p, {-1.f, 0.f});
-                if (ImGui::Button("Cancel Bake"))
-                    renderer.CancelGIBake();
-            } else if (!renderer.IsGIBaked()) {
-                ImGui::TextColored({1.f, 0.5f, 0.f, 1.f}, "No GI data.  Press Bake to generate.");
-                if (ImGui::Button("Bake GI"))
-                    renderer.RequestGIBake();
             } else {
-                ImGui::TextColored({0.4f, 1.f, 0.4f, 1.f}, "GI data ready");
-                ImGui::ProgressBar(renderer.GetGIBakeProgress(), {-1.f, 0.f});
-                if (ImGui::Button("Rebuild GI"))
+                DrawGIBakeStatus(renderer);
+
+                if (renderer.IsGIBaked()) {
+                    ImGui::TextColored({0.4f, 1.f, 0.4f, 1.f}, "GI data ready");
+                } else if (!renderer.IsGIBaking()) {
+                    ImGui::TextColored({1.f, 0.5f, 0.f, 1.f}, "No GI data. Press Bake to generate.");
+                }
+
+                if (ImGui::Button(renderer.IsGIBaked() ? "Rebuild GI" : "Bake GI")) {
                     renderer.ResetAndRebakeGI();
+                }
                 ImGui::SameLine();
-                if (ImGui::Button("Update (continue)"))
-                    renderer.RequestGIBake();
+                if (ImGui::Button("Cancel Bake")) {
+                    renderer.CancelGIBake();
+                }
             }
 
             ImGui::Separator();

@@ -903,10 +903,92 @@ namespace SasamiRenderer
         m_passRegistry.ClearPasses();
     }
 
+    void Renderer::RefreshGIBakeStatus(GIBakeState state, uint32_t bvhMissingMask)
+    {
+        const uint32_t total = m_probeGrid.GetTotalProbeCount();
+        const uint32_t completed = m_probeGrid.GetBakedProbeCount();
+        const uint32_t probesPerStep = IrradianceProbeGrid::GetProbesPerBakeStep();
+        const uint32_t remaining = (total > completed) ? (total - completed) : 0u;
+
+        m_giBakeStatus.state = state;
+        m_giBakeStatus.requested = m_giBakeRequested;
+        m_giBakeStatus.progress = (total > 0u)
+            ? std::min(1.0f, static_cast<float>(completed) / static_cast<float>(total))
+            : 0.0f;
+        m_giBakeStatus.completedProbes = completed;
+        m_giBakeStatus.totalProbes = total;
+        m_giBakeStatus.probesPerStep = probesPerStep;
+        m_giBakeStatus.estimatedFramesRemaining = (probesPerStep > 0u)
+            ? ((remaining + probesPerStep - 1u) / probesPerStep)
+            : 0u;
+        m_giBakeStatus.bvhMissingMask = (state == GIBakeState::WaitingForBvh)
+            ? bvhMissingMask
+            : 0u;
+
+        if (state == GIBakeState::WaitingForProbeGrid ||
+            state == GIBakeState::WaitingForBvh) {
+            ++m_giBakeStatus.stalledFrames;
+        } else {
+            m_giBakeStatus.stalledFrames = 0u;
+        }
+    }
+
+    Renderer::GIBakeStatus Renderer::GetGIBakeStatus() const
+    {
+        GIBakeStatus status = m_giBakeStatus;
+        const uint32_t total = m_probeGrid.GetTotalProbeCount();
+        const uint32_t completed = m_probeGrid.GetBakedProbeCount();
+        const uint32_t probesPerStep = IrradianceProbeGrid::GetProbesPerBakeStep();
+        const uint32_t remaining = (total > completed) ? (total - completed) : 0u;
+
+        status.requested = m_giBakeRequested;
+        status.progress = (total > 0u)
+            ? std::min(1.0f, static_cast<float>(completed) / static_cast<float>(total))
+            : 0.0f;
+        status.completedProbes = completed;
+        status.totalProbes = total;
+        status.probesPerStep = probesPerStep;
+        status.estimatedFramesRemaining = (probesPerStep > 0u)
+            ? ((remaining + probesPerStep - 1u) / probesPerStep)
+            : 0u;
+        if (!m_giBakeRequested && m_probeGrid.IsBaked()) {
+            status.state = GIBakeState::Completed;
+        } else if (!m_giBakeRequested && status.state != GIBakeState::Failed) {
+            status.state = GIBakeState::Idle;
+        }
+
+        return status;
+    }
+
+    void Renderer::RequestGIBake()
+    {
+        m_probeGrid.ResetBakeState();
+        m_giBakeFrameIndex = 0u;
+        m_giBakeRequested = true;
+        RefreshGIBakeStatus(m_probeGrid.IsInitialized()
+            ? GIBakeState::Baking
+            : GIBakeState::WaitingForProbeGrid);
+    }
+
     void Renderer::ResetAndRebakeGI()
     {
-        m_giBakeClearPending = true;  // ClearProbeBuffer on next frame (device+cmdList available)
+        m_probeGrid.ResetBakeState();
+        m_giBakeFrameIndex   = 0u;
+        // Do not reallocate the probe buffer here. The current frame may already
+        // have recorded lighting commands that read the existing buffer.
+        m_giBakeClearPending = false;
         m_giBakeRequested    = true;
+        RefreshGIBakeStatus(m_probeGrid.IsInitialized()
+            ? GIBakeState::Baking
+            : GIBakeState::WaitingForProbeGrid);
+    }
+
+    void Renderer::CancelGIBake()
+    {
+        m_giBakeRequested = false;
+        RefreshGIBakeStatus(m_probeGrid.IsBaked()
+            ? GIBakeState::Completed
+            : GIBakeState::Idle);
     }
 
     void Renderer::FitProbeGridToScene(float bMinX, float bMinY, float bMinZ,
@@ -915,8 +997,13 @@ namespace SasamiRenderer
     {
         m_probeGrid.FitToSceneBounds(bMinX, bMinY, bMinZ, bMaxX, bMaxY, bMaxZ, margin);
         if (m_probeGrid.IsInitialized() && m_device) {
-            m_probeGrid.ReallocProbeBuffer(*m_device);
+            m_probeGrid.ReallocAndClearProbeBuffer(*m_device);
+        } else {
+            m_probeGrid.ResetBakeState();
         }
+        RefreshGIBakeStatus(m_giBakeRequested
+            ? GIBakeState::Baking
+            : GIBakeState::Idle);
     }
 
     void Renderer::SetRenderPassSequence(const std::vector<RenderPassType>& sequence)

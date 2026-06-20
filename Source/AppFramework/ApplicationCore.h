@@ -85,6 +85,11 @@ namespace SasamiRenderer
         void SetDebugProbeGridEnabled(bool enabled);
         float GetDebugProbeRadius() const;
         void SetDebugProbeRadius(float radius);
+        void RequestGIBake();
+        void ResetAndRebakeGI();
+        void CancelGIBake();
+        Renderer::GIBakeStatus GetGIBakeStatus() const;
+        float GetGIBakeProgress() const;
         void FitProbeGridToScene(float bMinX, float bMinY, float bMinZ,
                                   float bMaxX, float bMaxY, float bMaxZ,
                                   float margin = 1.0f);
