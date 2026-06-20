@@ -124,6 +124,8 @@ namespace SasamiRenderer
         int m_meshLightDirIntensityLocation = -1;
         int m_meshLightColorLocation = -1;
         int m_meshEmissiveRoughnessLocation = -1;
+        int m_meshAlbedoTextureLocation = -1;
+        int m_meshHasAlbedoTextureLocation = -1;
 
         friend class OpenGLRhiCommandEncoder;
     };

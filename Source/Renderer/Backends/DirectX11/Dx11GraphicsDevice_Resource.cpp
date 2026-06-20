@@ -130,7 +130,7 @@ namespace SasamiRenderer
                                                                      const void* pixels,
                                                                      uint32_t rowPitchBytes)
     {
-        if (!m_device || width == 0 || height == 0 || !pixels || rowPitchBytes == 0) {
+        if (!m_device || width == 0 || height == 0 || !pixels || rowPitchBytes < width * 4u) {
             return {};
         }
 

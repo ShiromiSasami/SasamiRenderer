@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
@@ -128,6 +129,7 @@ namespace SasamiRenderer
         using GlGetUniformLocationFn = GLint (APIENTRY*)(GLuint, const char*);
         using GlUniformMatrix4fvFn = void (APIENTRY*)(GLint, GLsizei, GLboolean, const GLfloat*);
         using GlUniform4fvFn = void (APIENTRY*)(GLint, GLsizei, const GLfloat*);
+        using GlUniform1iFn = void (APIENTRY*)(GLint, GLint);
         using GlEnableVertexAttribArrayFn = void (APIENTRY*)(GLuint);
         using GlDisableVertexAttribArrayFn = void (APIENTRY*)(GLuint);
         using GlVertexAttribPointerFn = void (APIENTRY*)(GLuint, GLint, GLenum, GLboolean, GLsizei, const void*);
@@ -229,11 +231,13 @@ uniform mat4 u_modelViewProjection;
 uniform vec4 u_baseColor;
 varying vec3 v_normal;
 varying vec4 v_color;
+varying vec2 v_uv;
 void main()
 {
     gl_Position = u_modelViewProjection * vec4(a_position, 1.0);
     v_normal = normalize(a_normal);
     v_color = a_color * u_baseColor;
+    v_uv = a_uv;
 }
 )GLSL";
 
@@ -242,19 +246,26 @@ void main()
 uniform vec4 u_lightDirIntensity;
 uniform vec4 u_lightColor;
 uniform vec4 u_emissiveRoughness;
+uniform sampler2D u_albedoTexture;
+uniform int u_hasAlbedoTexture;
 varying vec3 v_normal;
 varying vec4 v_color;
+varying vec2 v_uv;
 void main()
 {
     vec3 n = normalize(v_normal);
     vec3 l = normalize(-u_lightDirIntensity.xyz);
     float ndotl = max(dot(n, l), 0.0);
     float ambient = 0.16;
-    vec3 lit = v_color.rgb * u_lightColor.rgb * (ambient + ndotl * u_lightDirIntensity.w);
+    vec4 surface = v_color;
+    if (u_hasAlbedoTexture != 0) {
+        surface *= texture2D(u_albedoTexture, v_uv);
+    }
+    vec3 lit = surface.rgb * u_lightColor.rgb * (ambient + ndotl * u_lightDirIntensity.w);
     lit += u_emissiveRoughness.rgb;
     lit = lit / (lit + vec3(1.0));
     lit = pow(clamp(lit, 0.0, 1.0), vec3(1.0 / 2.2));
-    gl_FragColor = vec4(lit, v_color.a);
+    gl_FragColor = vec4(lit, surface.a);
 }
 )GLSL";
     }
@@ -765,6 +776,8 @@ void main()
         m_meshLightDirIntensityLocation = getUniformLocation(program, "u_lightDirIntensity");
         m_meshLightColorLocation = getUniformLocation(program, "u_lightColor");
         m_meshEmissiveRoughnessLocation = getUniformLocation(program, "u_emissiveRoughness");
+        m_meshAlbedoTextureLocation = getUniformLocation(program, "u_albedoTexture");
+        m_meshHasAlbedoTextureLocation = getUniformLocation(program, "u_hasAlbedoTexture");
         return true;
     }
 
@@ -781,8 +794,10 @@ void main()
         auto vertexAttribPointer = LoadGlProc<GlVertexAttribPointerFn>("glVertexAttribPointer");
         auto uniformMatrix4fv = LoadGlProc<GlUniformMatrix4fvFn>("glUniformMatrix4fv");
         auto uniform4fv = LoadGlProc<GlUniform4fvFn>("glUniform4fv");
+        auto uniform1i = LoadGlProc<GlUniform1iFn>("glUniform1i");
+        auto activeTexture = LoadGlProc<GlActiveTextureFn>("glActiveTexture");
         if (!useProgram || !bindBuffer || !enableVertexAttribArray || !disableVertexAttribArray ||
-            !vertexAttribPointer || !uniformMatrix4fv || !uniform4fv) {
+            !vertexAttribPointer || !uniformMatrix4fv || !uniform4fv || !uniform1i) {
             return false;
         }
 
@@ -792,6 +807,10 @@ void main()
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         useProgram(m_meshProgram);
+        if (activeTexture) {
+            activeTexture(GL_TEXTURE0);
+        }
+        uniform1i(m_meshAlbedoTextureLocation, 0);
 
         for (uint32_t i = 0; i < desc.drawCount; ++i) {
             const RhiBackendMeshDrawDesc& draw = desc.draws[i];
@@ -817,6 +836,14 @@ void main()
             uniform4fv(m_meshLightDirIntensityLocation, 1, lightDirIntensity);
             uniform4fv(m_meshLightColorLocation, 1, lightColor);
             uniform4fv(m_meshEmissiveRoughnessLocation, 1, emissiveRoughness);
+
+            GLuint albedoTexture = 0;
+            const auto textureIt = m_rhiTextureViews.find(draw.albedoSrv);
+            if (textureIt != m_rhiTextureViews.end()) {
+                albedoTexture = textureIt->second;
+            }
+            glBindTexture(GL_TEXTURE_2D, albedoTexture);
+            uniform1i(m_meshHasAlbedoTextureLocation, albedoTexture != 0 ? 1 : 0);
 
             bindBuffer(GL_ARRAY_BUFFER, vbIt->second);
             enableVertexAttribArray(0);
@@ -847,6 +874,7 @@ void main()
         disableVertexAttribArray(0);
         bindBuffer(GL_ARRAY_BUFFER, 0);
         bindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        glBindTexture(GL_TEXTURE_2D, 0);
         useProgram(0);
         return true;
     }
@@ -893,6 +921,20 @@ void main()
             return {};
         }
 
+        const void* uploadPixels = pixels;
+        std::vector<uint8_t> compactPixels;
+        const uint32_t tightRowPitch = width * 4u;
+        if (rowPitchBytes != tightRowPitch) {
+            compactPixels.resize(static_cast<size_t>(tightRowPitch) * static_cast<size_t>(height));
+            const auto* src = static_cast<const uint8_t*>(pixels);
+            for (uint32_t y = 0; y < height; ++y) {
+                std::memcpy(compactPixels.data() + static_cast<size_t>(tightRowPitch) * y,
+                            src + static_cast<size_t>(rowPitchBytes) * y,
+                            tightRowPitch);
+            }
+            uploadPixels = compactPixels.data();
+        }
+
         GLuint texture = 0;
         glGenTextures(1, &texture);
         glBindTexture(GL_TEXTURE_2D, texture);
@@ -908,7 +950,7 @@ void main()
                      0,
                      GL_RGBA,
                      GL_UNSIGNED_BYTE,
-                     pixels);
+                     uploadPixels);
         glBindTexture(GL_TEXTURE_2D, 0);
 
         const uint64_t id = m_nextRhiResourceHandle++;
@@ -1234,6 +1276,8 @@ void main()
                     m_meshLightDirIntensityLocation = -1;
                     m_meshLightColorLocation = -1;
                     m_meshEmissiveRoughnessLocation = -1;
+                    m_meshAlbedoTextureLocation = -1;
+                    m_meshHasAlbedoTextureLocation = -1;
                 }
                 for (const auto& entry : m_rhiPipelines) {
                     if (entry.second.program != 0) {
