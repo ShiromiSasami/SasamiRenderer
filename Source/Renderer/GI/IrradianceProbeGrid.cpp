@@ -431,7 +431,7 @@ namespace SasamiRenderer
         out.probeSpacing[0] = m_spacingX;
         out.probeSpacing[1] = m_spacingY;
         out.probeSpacing[2] = m_spacingZ;
-        out.giEnabled      = (m_enabled && m_pso) ? 1.0f : 0.0f;
+        out.giEnabled      = (m_enabled && m_pso && IsBaked()) ? 1.0f : 0.0f;
         out.probeCountX    = m_countX;
         out.probeCountY    = m_countY;
         out.probeCountZ    = m_countZ;
