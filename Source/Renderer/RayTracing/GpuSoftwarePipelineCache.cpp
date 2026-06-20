@@ -13,6 +13,7 @@
 #include <dxcapi.h>
 #include <wrl.h>
 #include "d3dx12.h"
+#include "Renderer/Resources/ShaderCompilationService.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -66,7 +67,8 @@ namespace SasamiRenderer
 
         // ---- Compile a compute shader via DXC ----
         bool CompileComputeShader(const wchar_t* relPath, const char* entry,
-                                  ComPtr<ID3DBlob>& outBlob)
+                                  ComPtr<ID3DBlob>& outBlob,
+                                  const std::wstring& targetProfile)
         {
             const std::filesystem::path srcPath = GetShaderRoot() / relPath;
             const std::filesystem::path incPath = GetShaderRoot();
@@ -91,7 +93,7 @@ namespace SasamiRenderer
             std::vector<LPCWSTR> args{
                 srcW.c_str(),
                 L"-E", entW.c_str(),
-                L"-T", L"cs_6_6",
+                L"-T", targetProfile.c_str(),
                 L"-I", incW.c_str(),
                 L"-HV", L"2021",
                 L"-WX",
@@ -133,6 +135,9 @@ namespace SasamiRenderer
     {
         ID3D12Device* dev = device.GetDevice();
         if (!dev) return false;
+
+        const std::string smStr = ShaderCompilationService::ResolveEffectiveShaderModel(dev, "6_6");
+        const std::wstring csTarget = L"cs_" + std::wstring(smStr.begin(), smStr.end());
 
         // ---- Root signature ----
         // [0]: Root CBV  (b0) inline
@@ -224,7 +229,7 @@ namespace SasamiRenderer
         // ---- Shadow PSO ----
         {
             ComPtr<ID3DBlob> cs;
-            if (!CompileComputeShader(L"RayTracing/SWRT/SWRT_Shadow_CS.hlsl", "CS_Shadow", cs)) {
+            if (!CompileComputeShader(L"RayTracing/SWRT/SWRT_Shadow_CS.hlsl", "CS_Shadow", cs, csTarget)) {
                 OutputDebugStringA("GpuSWRT: failed to compile SWRT_Shadow_CS.hlsl\n");
                 return false;
             }
@@ -239,7 +244,7 @@ namespace SasamiRenderer
         // ---- Reflection PSO ----
         {
             ComPtr<ID3DBlob> cs;
-            if (!CompileComputeShader(L"RayTracing/SWRT/SWRT_Reflection_CS.hlsl", "CS_Reflection", cs)) {
+            if (!CompileComputeShader(L"RayTracing/SWRT/SWRT_Reflection_CS.hlsl", "CS_Reflection", cs, csTarget)) {
                 OutputDebugStringA("GpuSWRT: failed to compile SWRT_Reflection_CS.hlsl\n");
                 return false;
             }
@@ -254,7 +259,7 @@ namespace SasamiRenderer
         // ---- AO PSO ----
         {
             ComPtr<ID3DBlob> cs;
-            if (!CompileComputeShader(L"RayTracing/SWRT/SWRT_AO_CS.hlsl", "CS_AO", cs)) {
+            if (!CompileComputeShader(L"RayTracing/SWRT/SWRT_AO_CS.hlsl", "CS_AO", cs, csTarget)) {
                 OutputDebugStringA("GpuSWRT: failed to compile SWRT_AO_CS.hlsl\n");
                 return false;
             }
@@ -329,7 +334,7 @@ namespace SasamiRenderer
             // ---- Temporal EMA PSO ----
             ComPtr<ID3DBlob> tcs;
             if (!CompileComputeShader(L"RayTracing/SWRT/SWRT_Reflection_Temporal_CS.hlsl",
-                                      "CS_ReflectionTemporal", tcs)) {
+                                      "CS_ReflectionTemporal", tcs, csTarget)) {
                 OutputDebugStringA("GpuSWRT: failed to compile SWRT_Reflection_Temporal_CS.hlsl\n");
                 return false;
             }
@@ -398,7 +403,7 @@ namespace SasamiRenderer
 
             ComPtr<ID3DBlob> acs;
             if (!CompileComputeShader(L"RayTracing/SWRT/SWRT_Reflection_ATrous_CS.hlsl",
-                                      "CS_ReflectionATrous", acs)) {
+                                      "CS_ReflectionATrous", acs, csTarget)) {
                 OutputDebugStringA("GpuSWRT: failed to compile SWRT_Reflection_ATrous_CS.hlsl\n");
                 return false;
             }
@@ -512,7 +517,7 @@ namespace SasamiRenderer
         auto MakePso = [&](const wchar_t* path, const char* entry,
                            ComPtr<ID3D12PipelineState>& out) -> bool {
             ComPtr<ID3DBlob> cs;
-            if (!CompileComputeShader(path, entry, cs)) {
+            if (!CompileComputeShader(path, entry, cs, csTarget)) {
                 OutputDebugStringA(("GpuSWRT ReSTIR: failed to compile " + std::string(entry) + "\n").c_str());
                 return false;
             }
