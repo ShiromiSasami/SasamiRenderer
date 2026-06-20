@@ -14,7 +14,7 @@ namespace SasamiRenderer
 
     struct RenderSettings
     {
-        float    iblIntensity                                       = 0.25f;
+        float    iblIntensity                                       = 0.0f;
         bool     useTessellation                                    = false;
         bool     tessWireframeEnabled                               = false;
         bool     tessDebugColorsEnabled                             = false;  // flat-shade by per-patch hash color
