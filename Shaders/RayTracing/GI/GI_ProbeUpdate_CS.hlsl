@@ -103,10 +103,9 @@ void CS_ProbeUpdate(
     );
     float3 dir = FibonacciSphereDir(threadId, kRaysPerProbe, jitter);
 
-    float3 radiance;
+    float3 radiance = (float3)0;
     bool hasSceneBvh = (g_tlasNodes[0].leftChild != 0 || g_tlasNodes[0].rightOrCount != 0);
-    HitResult hit;
-    hit.hit = false;
+    HitResult hit = (HitResult)0;
     if (hasSceneBvh)
     {
         hit = TraceClosestHit(probePos, dir, 0.01f, g_maxTraceDistance);
