@@ -127,6 +127,7 @@ namespace SasamiRenderer
 
         bool IsInitialized() const { return m_initialized; }
         bool IsBaked()        const { return m_initialized && m_totalProbesDispatched >= GetTotalProbeCount(); }
+        const std::string& GetLastPipelineError() const { return m_lastPipelineError; }
         float GetBakeProgress() const;
         uint32_t GetBakedProbeCount() const;
         static constexpr uint32_t GetProbesPerBakeStep() { return kProbesPerFrame; }
@@ -196,6 +197,7 @@ namespace SasamiRenderer
         bool     m_initialized           = false;
         uint32_t m_totalProbesDispatched = 0u;
         bool     m_psoMissingLogged      = false;
+        std::string m_lastPipelineError;
     };
 
 } // namespace SasamiRenderer

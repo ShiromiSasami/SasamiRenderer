@@ -1316,6 +1316,11 @@ namespace SasamiRenderer
                                              afterProbes,
                                              m_probeGrid.GetTotalProbeCount());
                                 m_giBakeLastLoggedCompletedProbes = afterProbes;
+
+                                if (afterProbes == 0u && !m_probeGrid.GetLastPipelineError().empty()) {
+                                    AddGIBakeLog("PipelineError", "%s",
+                                                 m_probeGrid.GetLastPipelineError().c_str());
+                                }
                             }
                             RefreshGIBakeStatus(GIBakeState::Baking);
                         }

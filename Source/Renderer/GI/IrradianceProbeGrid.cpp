@@ -71,19 +71,27 @@ namespace SasamiRenderer
             return root;
         }
 
-        bool CompileCS(ID3D12Device* dev, const wchar_t* relPath, const char* entry, ComPtr<ID3DBlob>& outBlob)
+        bool CompileCS(ID3D12Device* dev, const wchar_t* relPath, const char* entry, ComPtr<ID3DBlob>& outBlob,
+                       std::string& outError)
         {
             const std::filesystem::path srcPath = GetShaderRoot() / relPath;
             const std::filesystem::path incPath = GetShaderRoot();
 
             ComPtr<IDxcUtils> utils;
             ComPtr<IDxcCompiler3> compiler;
-            if (FAILED(CreateDxcInstance(CLSID_DxcUtils, IID_PPV_ARGS(&utils)))) return false;
-            if (FAILED(CreateDxcInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&compiler)))) return false;
+            if (FAILED(CreateDxcInstance(CLSID_DxcUtils, IID_PPV_ARGS(&utils)))) {
+                outError = "DXC: failed to create IDxcUtils";
+                return false;
+            }
+            if (FAILED(CreateDxcInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&compiler)))) {
+                outError = "DXC: failed to create IDxcCompiler3";
+                return false;
+            }
 
             ComPtr<IDxcBlobEncoding> src;
             if (FAILED(utils->LoadFile(srcPath.c_str(), nullptr, &src))) {
-                OutputDebugStringA(("GI: failed to load shader: " + srcPath.string() + "\n").c_str());
+                outError = "DXC: failed to load shader file: " + srcPath.string();
+                OutputDebugStringA(("GI: " + outError + "\n").c_str());
                 return false;
             }
 
@@ -115,18 +123,22 @@ namespace SasamiRenderer
             DxcBuffer buf{ src->GetBufferPointer(), src->GetBufferSize(), DXC_CP_ACP };
             ComPtr<IDxcResult> result;
             if (FAILED(compiler->Compile(&buf, args.data(), (UINT32)args.size(), incHandler.Get(), IID_PPV_ARGS(&result)))) {
+                outError = "DXC: Compile() call itself failed (DXC internal error)";
                 return false;
             }
 
             ComPtr<IDxcBlobUtf8> errors;
             if (SUCCEEDED(result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&errors), nullptr)) &&
                 errors && errors->GetStringLength() > 0) {
+                outError = std::string(errors->GetStringPointer(), errors->GetStringLength());
                 OutputDebugStringA(errors->GetStringPointer());
             }
 
             HRESULT hr = S_OK;
             result->GetStatus(&hr);
             if (FAILED(hr)) {
+                if (outError.empty())
+                    outError = "DXC: compilation failed with no error message (HRESULT=" + std::to_string(static_cast<int>(hr)) + ")";
                 OutputDebugStringA(("GI: shader compilation failed: " + srcPath.string() + "\n").c_str());
                 return false;
             }
@@ -385,22 +397,29 @@ namespace SasamiRenderer
                                                rsBlob.ReleaseAndGetAddressOf(),
                                                rsError.ReleaseAndGetAddressOf()))) {
             if (rsError) OutputDebugStringA((char*)rsError->GetBufferPointer());
+            m_lastPipelineError = "RootSignature: serialize failed";
+            if (rsError && rsError->GetBufferSize() > 0)
+                m_lastPipelineError += " - " + std::string((char*)rsError->GetBufferPointer());
             return false;
         }
         if (FAILED(dev->CreateRootSignature(0, rsBlob->GetBufferPointer(), rsBlob->GetBufferSize(),
                                             IID_PPV_ARGS(m_rootSig.ReleaseAndGetAddressOf())))) {
+            m_lastPipelineError = "RootSignature: CreateRootSignature failed";
             return false;
         }
 
         // Compile and create PSO
         ComPtr<ID3DBlob> cs;
-        if (!CompileCS(dev, L"RayTracing/GI/GI_ProbeUpdate_CS.hlsl", "CS_ProbeUpdate", cs)) {
+        std::string compileError;
+        if (!CompileCS(dev, L"RayTracing/GI/GI_ProbeUpdate_CS.hlsl", "CS_ProbeUpdate", cs, compileError)) {
+            m_lastPipelineError = "ShaderCompile: " + compileError;
             return false;
         }
         D3D12_COMPUTE_PIPELINE_STATE_DESC pso{};
         pso.pRootSignature = m_rootSig.Get();
         pso.CS             = { cs->GetBufferPointer(), cs->GetBufferSize() };
         if (FAILED(dev->CreateComputePipelineState(&pso, IID_PPV_ARGS(m_pso.ReleaseAndGetAddressOf())))) {
+            m_lastPipelineError = "PSO: CreateComputePipelineState failed";
             return false;
         }
 
