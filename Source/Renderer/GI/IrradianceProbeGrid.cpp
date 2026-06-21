@@ -47,8 +47,11 @@ namespace SasamiRenderer
         std::filesystem::path FindProjectRoot(std::filesystem::path dir)
         {
             for (int depth = 0; depth < 16; ++depth) {
-                if (std::filesystem::exists(dir / "Shaders") ||
-                    std::filesystem::exists(dir / "Source" / "Renderer" / "Shaders")) return dir;
+                // Require both Shaders and Source to distinguish project root from build output
+                if (std::filesystem::exists(dir / "Shaders") && std::filesystem::exists(dir / "Source"))
+                    return dir;
+                if (std::filesystem::exists(dir / "Source" / "Renderer" / "Shaders"))
+                    return dir;
                 auto p = dir.parent_path();
                 if (p.empty() || p == dir) break;
                 dir = p;
