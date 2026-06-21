@@ -3,6 +3,7 @@
 
 #include "Foundation/Math/MathUtil.h"
 #include "Renderer/Utilities/ResourceUploadUtility.h"
+#include "Renderer/Resources/ShaderCompilationService.h"
 
 #include <algorithm>
 #include <cassert>
@@ -70,7 +71,7 @@ namespace SasamiRenderer
             return root;
         }
 
-        bool CompileCS(const wchar_t* relPath, const char* entry, ComPtr<ID3DBlob>& outBlob)
+        bool CompileCS(ID3D12Device* dev, const wchar_t* relPath, const char* entry, ComPtr<ID3DBlob>& outBlob)
         {
             const std::filesystem::path srcPath = GetShaderRoot() / relPath;
             const std::filesystem::path incPath = GetShaderRoot();
@@ -95,9 +96,12 @@ namespace SasamiRenderer
             }();
             const std::wstring incW = incPath.native();
 
+            const std::string smStr = ShaderCompilationService::ResolveEffectiveShaderModel(dev, "6_6");
+            const std::wstring csTarget = L"cs_" + std::wstring(smStr.begin(), smStr.end());
+
             std::vector<LPCWSTR> args{
                 srcW.c_str(), L"-E", entW.c_str(),
-                L"-T", L"cs_6_6",
+                L"-T", csTarget.c_str(),
                 L"-I", incW.c_str(),
                 L"-HV", L"2021",
                 L"-WX",
@@ -390,7 +394,7 @@ namespace SasamiRenderer
 
         // Compile and create PSO
         ComPtr<ID3DBlob> cs;
-        if (!CompileCS(L"RayTracing/GI/GI_ProbeUpdate_CS.hlsl", "CS_ProbeUpdate", cs)) {
+        if (!CompileCS(dev, L"RayTracing/GI/GI_ProbeUpdate_CS.hlsl", "CS_ProbeUpdate", cs)) {
             return false;
         }
         D3D12_COMPUTE_PIPELINE_STATE_DESC pso{};
@@ -486,6 +490,10 @@ namespace SasamiRenderer
                                             CommandList& cmdList)
     {
         if (!m_initialized || !m_pso || !m_enabled) {
+            if (m_initialized && !m_pso && !m_psoMissingLogged) {
+                m_psoMissingLogged = true;
+                OutputDebugStringA("IrradianceProbeGrid::UpdateProbes: PSO is null (GI shader compile failed). GI bake will not proceed.\n");
+            }
             // Even when disabled, update the probe grid CB so the shader knows GI is off
             if (m_cbMapped) {
                 GIProbeGridCBData gridCB{};

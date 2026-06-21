@@ -13,6 +13,7 @@
 #include <cfloat>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -552,6 +553,14 @@ namespace SasamiRenderer
         if (!m_initialized) return;
 
         m_scene = scene;
+        m_bvhDiagnostics.sceneMeshes = static_cast<uint32_t>(scene.meshes.size());
+        m_bvhDiagnostics.sceneInstances = static_cast<uint32_t>(scene.instances.size());
+        m_bvhDiagnostics.sceneMaterials = static_cast<uint32_t>(scene.materials.size());
+        m_bvhDiagnostics.sceneTriangles = scene.TriangleCount();
+        m_bvhDiagnostics.geometryVersion = scene.geometryVersion;
+        m_bvhDiagnostics.materialVersion = scene.materialVersion;
+        m_bvhDiagnostics.instanceVersion = scene.instanceVersion;
+        std::snprintf(m_bvhDiagnostics.lastPhase, sizeof(m_bvhDiagnostics.lastPhase), "UpdateScene");
 
         const bool geoDirty  = (scene.geometryVersion != m_bvhGeometryVersion);
         const bool matDirty  = (scene.materialVersion != m_bvhMaterialVersion);
@@ -566,8 +575,12 @@ namespace SasamiRenderer
         if (!geoDirty && !matDirty && !instDirty && !bvhBuffersMissing) return;
 
         if (geoDirty || instDirty || m_meshAccelerations.size() != m_scene.meshes.size()) {
+            std::snprintf(m_bvhDiagnostics.lastPhase, sizeof(m_bvhDiagnostics.lastPhase), "RebuildAccelerationStructures");
             RebuildAccelerationStructures();
+            m_bvhDiagnostics.meshBvhCount = static_cast<uint32_t>(m_meshAccelerations.size());
+            m_bvhDiagnostics.tlasNodeCount = static_cast<uint32_t>(m_topLevelNodes.size());
         }
+        std::snprintf(m_bvhDiagnostics.lastPhase, sizeof(m_bvhDiagnostics.lastPhase), "UploadBvhBuffers");
         if (!UploadBvhBuffers(device)) {
             OutputDebugStringA("GpuSoftwareRayTracer::UpdateScene: BVH GPU buffer upload failed.\n");
         }
@@ -581,11 +594,16 @@ namespace SasamiRenderer
     bool GpuSoftwareRayTracer::UploadBvhBuffers(IRHIDevice& device)
     {
         ID3D12Device* dev = device.GetDevice();
+        m_bvhDiagnostics.lastUploadSucceeded = false;
+        m_bvhDiagnostics.lastFailure[0] = '\0';
+        std::snprintf(m_bvhDiagnostics.lastPhase, sizeof(m_bvhDiagnostics.lastPhase), "UploadBvhBuffers");
         if (!dev) {
+            std::snprintf(m_bvhDiagnostics.lastFailure, sizeof(m_bvhDiagnostics.lastFailure), "D3D12 device unavailable");
             OutputDebugStringA("GpuSoftwareRayTracer::UploadBvhBuffers: D3D12 device is not available.\n");
             return false;
         }
         if (!m_descHeap.Get()) {
+            std::snprintf(m_bvhDiagnostics.lastFailure, sizeof(m_bvhDiagnostics.lastFailure), "descriptor heap unavailable");
             OutputDebugStringA("GpuSoftwareRayTracer::UploadBvhBuffers: descriptor heap is not available.\n");
             return false;
         }
@@ -656,14 +674,22 @@ namespace SasamiRenderer
         if (instBuf.empty())    instBuf.push_back({});
         if (matBuf.empty())     matBuf.push_back({});
         if (m_topLevelNodes.empty()) m_topLevelNodes.push_back({});
+        m_bvhDiagnostics.meshBvhCount = static_cast<uint32_t>(m_meshAccelerations.size());
+        m_bvhDiagnostics.tlasNodeCount = static_cast<uint32_t>(m_topLevelNodes.size());
 
         // ---- Upload to GPU (stalls GPU once if dirty) ----
         auto uploadBuffer = [&](const char* name,
                                 const void* data,
                                 size_t byteSize,
                                 Resource& outBuffer) -> bool {
+            std::snprintf(m_bvhDiagnostics.lastPhase, sizeof(m_bvhDiagnostics.lastPhase), "Upload %s", name);
             if (!CreateAndUploadBuffer(device, data, static_cast<UINT64>(byteSize),
                                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, outBuffer)) {
+                std::snprintf(m_bvhDiagnostics.lastFailure,
+                              sizeof(m_bvhDiagnostics.lastFailure),
+                              "failed to upload %s (%llu bytes)",
+                              name,
+                              static_cast<unsigned long long>(byteSize));
                 OutputDebugStringA("GpuSoftwareRayTracer::UploadBvhBuffers: failed to upload ");
                 OutputDebugStringA(name);
                 OutputDebugStringA(".\n");
@@ -696,6 +722,9 @@ namespace SasamiRenderer
         m_uploadedMaterialVersion = m_scene.materialVersion;
         m_uploadedInstanceVersion = m_scene.instanceVersion;
         m_bvhMaterialVersion      = m_scene.materialVersion;
+        m_bvhDiagnostics.lastUploadSucceeded = true;
+        m_bvhDiagnostics.lastFailure[0] = '\0';
+        std::snprintf(m_bvhDiagnostics.lastPhase, sizeof(m_bvhDiagnostics.lastPhase), "Upload complete");
         return true;
     }
 

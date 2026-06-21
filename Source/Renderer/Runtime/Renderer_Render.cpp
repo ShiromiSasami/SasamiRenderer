@@ -74,6 +74,30 @@ namespace SasamiRenderer
             }
         }
 
+        std::string FormatGIBvhMissingMask(uint32_t mask)
+        {
+            if (mask == 0u) {
+                return "none";
+            }
+
+            std::string result;
+            auto append = [&result](const char* name) {
+                if (!result.empty()) {
+                    result += ", ";
+                }
+                result += name;
+            };
+
+            if ((mask & Renderer::GI_BVH_MISSING_SWRT_NOT_INITIALIZED) != 0u) append("SWRT not initialized");
+            if ((mask & Renderer::GI_BVH_MISSING_BVH_NODES) != 0u) append("bvhNodes");
+            if ((mask & Renderer::GI_BVH_MISSING_TRIANGLES) != 0u) append("triangles");
+            if ((mask & Renderer::GI_BVH_MISSING_MESH_INFO) != 0u) append("meshInfo");
+            if ((mask & Renderer::GI_BVH_MISSING_INSTANCES) != 0u) append("instances");
+            if ((mask & Renderer::GI_BVH_MISSING_TLAS_NODES) != 0u) append("tlasNodes");
+            if ((mask & Renderer::GI_BVH_MISSING_MATERIALS) != 0u) append("materials");
+            return result;
+        }
+
         class D3D12CommandListRhiEncoder final : public IRhiCommandEncoder
         {
         public:
@@ -1206,20 +1230,50 @@ namespace SasamiRenderer
         // GI probe bake in Raster mode (or explicit bake request in any mode).
         if (m_giBakeRequested) {
             if (!m_probeGrid.IsInitialized()) {
+                SetGIBakePhase("Render tail: waiting for probe grid");
+                if (m_giBakeStatus.stalledFrames == 0u ||
+                    ((m_giBakeStatus.stalledFrames + 1u) % 60u) == 0u) {
+                    AddGIBakeLog("ProbeGrid", "Waiting for GI probe grid initialization. stalledFrames=%u",
+                                 m_giBakeStatus.stalledFrames + 1u);
+                }
                 RefreshGIBakeStatus(GIBakeState::WaitingForProbeGrid);
             } else if (m_probeGrid.IsBaked()) {
                 m_giBakeRequested = false;
+                SetGIBakePhase("Render tail: completed");
                 m_probeGrid.FlushGridCB();
                 RefreshGIBakeStatus(GIBakeState::Completed);
+                AddGIBakeLog("Completed", "Bake already completed before dispatch. probes=%u/%u",
+                             m_probeGrid.GetBakedProbeCount(),
+                             m_probeGrid.GetTotalProbeCount());
             } else {
                 if (m_giBakeClearPending) {
                     m_giBakeClearPending = false;
                 }
 
                 if (m_giBakeRequested) {
+                    SetGIBakePhase("Render tail: updating SWRT BVH");
+                    if (m_giBakeFrameIndex == 0u && m_probeGrid.GetBakedProbeCount() == 0u) {
+                        AddGIBakeLog("BVH Update", "Begin SWRT BVH update. scene=%u instances / %u triangles, versions=%llu/%llu/%llu",
+                                     static_cast<uint32_t>(m_rayTracingScene.instances.size()),
+                                     m_rayTracingScene.TriangleCount(),
+                                     static_cast<unsigned long long>(m_rayTracingScene.geometryVersion),
+                                     static_cast<unsigned long long>(m_rayTracingScene.materialVersion),
+                                     static_cast<unsigned long long>(m_rayTracingScene.instanceVersion));
+                    }
                     m_gpuSoftwareRayTracer.UpdateScene(m_rayTracingScene, *m_device, *cmdList);
                     const auto bvhAddrs = m_gpuSoftwareRayTracer.GetBvhGpuAddresses();
                     if (bvhAddrs.valid) {
+                        SetGIBakePhase("Render tail: dispatching GI probes");
+                        const auto& bvhDiag = m_gpuSoftwareRayTracer.GetBvhBuildDiagnostics();
+                        if (m_giBakeLastLoggedMissingMask != 0u) {
+                            AddGIBakeLog("BVH Ready", "SWRT BVH buffers ready. phase=%s, scene=%u instances / %u triangles, meshBVH=%u, tlasNodes=%u",
+                                         bvhDiag.lastPhase,
+                                         static_cast<uint32_t>(m_rayTracingScene.instances.size()),
+                                         m_rayTracingScene.TriangleCount(),
+                                         bvhDiag.meshBvhCount,
+                                         bvhDiag.tlasNodeCount);
+                        }
+                        m_giBakeLastLoggedMissingMask = 0u;
                         const auto dirLight = m_lightSystem.GetDirectionalLightSettings();
                         float fwd[3];
                         Math::DirectionFromYawPitch(dirLight.yaw, dirLight.pitch, fwd);
@@ -1238,20 +1292,57 @@ namespace SasamiRenderer
                         giDesc.shadowBias         = 0.005f;
                         giDesc.frameIndex         = m_giBakeFrameIndex++;
 
+                        const uint32_t beforeProbes = m_probeGrid.GetBakedProbeCount();
                         if (!m_probeGrid.UpdateProbes(giDesc, bvhAddrs, *m_device, *cmdList)) {
                             m_giBakeRequested = false;
+                            SetGIBakePhase("Render tail: probe dispatch failed");
                             RefreshGIBakeStatus(GIBakeState::Failed);
+                            AddGIBakeLog("ProbeDispatch", "UpdateProbes failed after BVH was ready. probes=%u/%u",
+                                         beforeProbes,
+                                         m_probeGrid.GetTotalProbeCount());
                         } else if (m_probeGrid.IsBaked()) {
                             m_giBakeRequested = false;
+                            SetGIBakePhase("Render tail: completed");
                             RefreshGIBakeStatus(GIBakeState::Completed);
+                            AddGIBakeLog("Completed", "Final probe dispatch succeeded. probes=%u/%u",
+                                         m_probeGrid.GetBakedProbeCount(),
+                                         m_probeGrid.GetTotalProbeCount());
                         } else {
+                            const uint32_t afterProbes = m_probeGrid.GetBakedProbeCount();
+                            if (afterProbes != m_giBakeLastLoggedCompletedProbes) {
+                                AddGIBakeLog("ProbeDispatch", "Dispatched probes %u-%u. progress=%u/%u",
+                                             beforeProbes,
+                                             afterProbes > 0u ? afterProbes - 1u : 0u,
+                                             afterProbes,
+                                             m_probeGrid.GetTotalProbeCount());
+                                m_giBakeLastLoggedCompletedProbes = afterProbes;
+                            }
                             RefreshGIBakeStatus(GIBakeState::Baking);
                         }
                     } else {
+                        SetGIBakePhase("Render tail: waiting for SWRT BVH");
+                        const auto& bvhDiag = m_gpuSoftwareRayTracer.GetBvhBuildDiagnostics();
+                        const std::string missing = FormatGIBvhMissingMask(bvhAddrs.missingMask);
                         if (bvhAddrs.missingMask & GI_BVH_MISSING_SWRT_NOT_INITIALIZED) {
                             m_giBakeRequested = false;
+                            SetGIBakePhase("Render tail: SWRT unavailable");
                             RefreshGIBakeStatus(GIBakeState::Failed);
+                            AddGIBakeLog("BVH Failed", "SWRT is not initialized; BakeGI cannot build BVH.");
                         } else {
+                            const bool shouldLogWait =
+                                bvhAddrs.missingMask != m_giBakeLastLoggedMissingMask ||
+                                m_giBakeStatus.stalledFrames == 0u ||
+                                ((m_giBakeStatus.stalledFrames + 1u) % 60u) == 0u;
+                            if (shouldLogWait) {
+                                AddGIBakeLog("WaitingForBvh", "Retrying SWRT BVH upload; missing=%s, phase=%s, lastFailure=%s, stalledFrames=%u, scene=%u instances / %u triangles",
+                                             missing.c_str(),
+                                             bvhDiag.lastPhase,
+                                             bvhDiag.lastFailure[0] ? bvhDiag.lastFailure : "none",
+                                             m_giBakeStatus.stalledFrames + 1u,
+                                             static_cast<uint32_t>(m_rayTracingScene.instances.size()),
+                                             m_rayTracingScene.TriangleCount());
+                                m_giBakeLastLoggedMissingMask = bvhAddrs.missingMask;
+                            }
                             RefreshGIBakeStatus(GIBakeState::WaitingForBvh, bvhAddrs.missingMask);
                         }
                     }

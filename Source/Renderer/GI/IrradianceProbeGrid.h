@@ -195,6 +195,7 @@ namespace SasamiRenderer
 
         bool     m_initialized           = false;
         uint32_t m_totalProbesDispatched = 0u;
+        bool     m_psoMissingLogged      = false;
     };
 
 } // namespace SasamiRenderer

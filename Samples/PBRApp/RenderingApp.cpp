@@ -82,6 +82,13 @@ namespace SasamiRenderer
             std::snprintf(progressText, sizeof(progressText), "%.1f%%", progress * 100.0f);
 
             ImGui::Text("State: %s", ToGIBakeStateLabel(status.state));
+            ImGui::TextDisabled("Phase: %s", status.currentPhase[0] ? status.currentPhase : "(none)");
+            ImGui::TextDisabled("Scene: %u instances / %u triangles, versions %llu/%llu/%llu",
+                                status.sceneInstances,
+                                status.sceneTriangles,
+                                static_cast<unsigned long long>(status.sceneGeometryVersion),
+                                static_cast<unsigned long long>(status.sceneMaterialVersion),
+                                static_cast<unsigned long long>(status.sceneInstanceVersion));
             ImGui::ProgressBar(progress, {-1.f, 0.f}, progressText);
             ImGui::TextDisabled("Probes: %u / %u", status.completedProbes, status.totalProbes);
             ImGui::TextDisabled("Step: %u probes/frame, remaining: %u frame(s)",
@@ -124,6 +131,26 @@ namespace SasamiRenderer
             } else if (status.state == Renderer::GIBakeState::Failed) {
                 ImGui::TextColored({1.f, 0.3f, 0.3f, 1.f},
                                    "Failed: check the debug output for the dispatch/reallocation error.");
+            }
+
+            ImGui::SeparatorText("Bake log");
+            if (status.logCount == 0u) {
+                ImGui::TextDisabled("(no bake events)");
+            } else {
+                ImGui::BeginChild("GIBakeLog", ImVec2(0.0f, 150.0f), ImGuiChildFlags_Borders);
+                const uint32_t first = status.logCount > Renderer::GIBakeStatus::kLogCapacity
+                    ? status.logCount - Renderer::GIBakeStatus::kLogCapacity
+                    : 0u;
+                for (uint32_t i = first; i < status.logCount; ++i) {
+                    const auto& entry = status.logEntries[i];
+                    ImGui::TextDisabled("#%u frame=%u %s", entry.sequence, entry.bakeFrame, ToGIBakeStateLabel(entry.state));
+                    ImGui::SameLine();
+                    ImGui::Text("[%s] %s", entry.phase, entry.message);
+                }
+                if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f) {
+                    ImGui::SetScrollHereY(1.0f);
+                }
+                ImGui::EndChild();
             }
         }
 

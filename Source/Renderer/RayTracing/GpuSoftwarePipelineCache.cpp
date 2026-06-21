@@ -41,7 +41,7 @@ namespace SasamiRenderer
         std::filesystem::path FindProjectRoot(std::filesystem::path dir)
         {
             for (int depth=0; depth<16; ++depth) {
-                if (std::filesystem::exists(dir/"Shaders") ||
+                if ((std::filesystem::exists(dir/"Shaders") && std::filesystem::exists(dir/"Source")) ||
                     std::filesystem::exists(dir/"Source"/"Renderer"/"Shaders")) return dir;
                 auto p = dir.parent_path();
                 if (p.empty()||p==dir) break;
@@ -427,6 +427,9 @@ namespace SasamiRenderer
     {
         ID3D12Device* dev = device.GetDevice();
         if (!dev) return false;
+
+        const std::string smStr = ShaderCompilationService::ResolveEffectiveShaderModel(dev, "6_6");
+        const std::wstring csTarget = L"cs_" + std::wstring(smStr.begin(), smStr.end());
 
         // ---- ReSTIR root signature ----
         // [0]: Root CBV  (b0) – ReSTIRFrameConstants

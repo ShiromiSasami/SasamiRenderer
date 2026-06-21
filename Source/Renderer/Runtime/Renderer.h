@@ -48,6 +48,7 @@
 #include "Renderer/Scene/Skybox.h"
 #include "Renderer/Scene/LightSystem.h"
 #include "Renderer/Structures/RendererEnums.h"
+#include <array>
 #include <functional>
 #include <cstdint>
 #include <memory>
@@ -101,6 +102,17 @@ namespace SasamiRenderer
 
         struct GIBakeStatus
         {
+            struct LogEntry
+            {
+                uint32_t sequence = 0u;
+                uint32_t bakeFrame = 0u;
+                GIBakeState state = GIBakeState::Idle;
+                char phase[40] = {};
+                char message[176] = {};
+            };
+
+            static constexpr uint32_t kLogCapacity = 24u;
+
             GIBakeState state = GIBakeState::Idle;
             bool requested = false;
             float progress = 0.0f;
@@ -110,6 +122,14 @@ namespace SasamiRenderer
             uint32_t estimatedFramesRemaining = 0u;
             uint32_t stalledFrames = 0u;
             uint32_t bvhMissingMask = 0u;
+            uint32_t sceneInstances = 0u;
+            uint32_t sceneTriangles = 0u;
+            uint64_t sceneGeometryVersion = 0u;
+            uint64_t sceneMaterialVersion = 0u;
+            uint64_t sceneInstanceVersion = 0u;
+            char currentPhase[80] = {};
+            std::array<LogEntry, kLogCapacity> logEntries{};
+            uint32_t logCount = 0u;
         };
 
         static constexpr uint32_t GI_BVH_MISSING_SWRT_NOT_INITIALIZED = GpuSoftwareRayTracer::BvhGpuAddresses::MISSING_SWRT_NOT_INITIALIZED;
@@ -421,6 +441,8 @@ namespace SasamiRenderer
         Texture* CreateTextureFromRgba8Data(const CpuTextureRgba8& src, CommandList* cmdList,
                                             std::vector<Resource>& uploads);
         void RefreshGIBakeStatus(GIBakeState state, uint32_t bvhMissingMask = 0u);
+        void SetGIBakePhase(const char* phase);
+        void AddGIBakeLog(const char* phase, const char* format, ...);
         std::unique_ptr<IRHIDevice> m_device;
         RenderPipelineStateCache m_pipelineStateCache;
         RendererFrameCoordinator m_frameCoordinator;
@@ -473,6 +495,9 @@ namespace SasamiRenderer
         bool     m_giBakeClearPending = false;
         uint32_t m_giBakeFrameIndex   = 0u;
         GIBakeStatus m_giBakeStatus{};
+        uint32_t m_giBakeLogSequence = 0u;
+        uint32_t m_giBakeLastLoggedMissingMask = 0xFFFFFFFFu;
+        uint32_t m_giBakeLastLoggedCompletedProbes = 0xFFFFFFFFu;
         DxrRayTracer m_dxrRayTracer;
         DxrRayTracer::DescriptorSet m_rayTracingDescriptors{};
 

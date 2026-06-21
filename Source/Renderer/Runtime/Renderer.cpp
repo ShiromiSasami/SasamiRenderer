@@ -7,6 +7,8 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <cstdarg>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -924,6 +926,11 @@ namespace SasamiRenderer
         m_giBakeStatus.bvhMissingMask = (state == GIBakeState::WaitingForBvh)
             ? bvhMissingMask
             : 0u;
+        m_giBakeStatus.sceneInstances = static_cast<uint32_t>(m_rayTracingScene.instances.size());
+        m_giBakeStatus.sceneTriangles = m_rayTracingScene.TriangleCount();
+        m_giBakeStatus.sceneGeometryVersion = m_rayTracingScene.geometryVersion;
+        m_giBakeStatus.sceneMaterialVersion = m_rayTracingScene.materialVersion;
+        m_giBakeStatus.sceneInstanceVersion = m_rayTracingScene.instanceVersion;
 
         if (state == GIBakeState::WaitingForProbeGrid ||
             state == GIBakeState::WaitingForBvh) {
@@ -931,6 +938,38 @@ namespace SasamiRenderer
         } else {
             m_giBakeStatus.stalledFrames = 0u;
         }
+    }
+
+    void Renderer::SetGIBakePhase(const char* phase)
+    {
+        std::snprintf(m_giBakeStatus.currentPhase,
+                      sizeof(m_giBakeStatus.currentPhase),
+                      "%s",
+                      phase ? phase : "");
+    }
+
+    void Renderer::AddGIBakeLog(const char* phase, const char* format, ...)
+    {
+        GIBakeStatus::LogEntry entry{};
+        entry.sequence = ++m_giBakeLogSequence;
+        entry.bakeFrame = m_giBakeFrameIndex;
+        entry.state = m_giBakeStatus.state;
+        std::snprintf(entry.phase, sizeof(entry.phase), "%s", phase ? phase : "");
+
+        va_list args;
+        va_start(args, format);
+        std::vsnprintf(entry.message, sizeof(entry.message), format ? format : "", args);
+        va_end(args);
+
+        if (m_giBakeStatus.logCount < GIBakeStatus::kLogCapacity) {
+            m_giBakeStatus.logEntries[m_giBakeStatus.logCount++] = entry;
+            return;
+        }
+
+        for (uint32_t i = 1u; i < GIBakeStatus::kLogCapacity; ++i) {
+            m_giBakeStatus.logEntries[i - 1u] = m_giBakeStatus.logEntries[i];
+        }
+        m_giBakeStatus.logEntries[GIBakeStatus::kLogCapacity - 1u] = entry;
     }
 
     Renderer::GIBakeStatus Renderer::GetGIBakeStatus() const
@@ -951,6 +990,11 @@ namespace SasamiRenderer
         status.estimatedFramesRemaining = (probesPerStep > 0u)
             ? ((remaining + probesPerStep - 1u) / probesPerStep)
             : 0u;
+        status.sceneInstances = static_cast<uint32_t>(m_rayTracingScene.instances.size());
+        status.sceneTriangles = m_rayTracingScene.TriangleCount();
+        status.sceneGeometryVersion = m_rayTracingScene.geometryVersion;
+        status.sceneMaterialVersion = m_rayTracingScene.materialVersion;
+        status.sceneInstanceVersion = m_rayTracingScene.instanceVersion;
         if (!m_giBakeRequested && m_probeGrid.IsBaked()) {
             status.state = GIBakeState::Completed;
         } else if (!m_giBakeRequested && status.state != GIBakeState::Failed) {
@@ -964,7 +1008,13 @@ namespace SasamiRenderer
     {
         m_probeGrid.ResetBakeState();
         m_giBakeFrameIndex = 0u;
+        m_giBakeLastLoggedMissingMask = 0xFFFFFFFFu;
+        m_giBakeLastLoggedCompletedProbes = 0xFFFFFFFFu;
+        SetGIBakePhase("Request queued");
         m_giBakeRequested = true;
+        AddGIBakeLog("Request", "Bake requested. scene=%u instances / %u triangles",
+                     static_cast<uint32_t>(m_rayTracingScene.instances.size()),
+                     m_rayTracingScene.TriangleCount());
         RefreshGIBakeStatus(m_probeGrid.IsInitialized()
             ? GIBakeState::Baking
             : GIBakeState::WaitingForProbeGrid);
@@ -974,10 +1024,19 @@ namespace SasamiRenderer
     {
         m_probeGrid.ResetBakeState();
         m_giBakeFrameIndex   = 0u;
+        m_giBakeLastLoggedMissingMask = 0xFFFFFFFFu;
+        m_giBakeLastLoggedCompletedProbes = 0xFFFFFFFFu;
         // Do not reallocate the probe buffer here. The current frame may already
         // have recorded lighting commands that read the existing buffer.
         m_giBakeClearPending = false;
         m_giBakeRequested    = true;
+        SetGIBakePhase("Rebuild queued");
+        AddGIBakeLog("Request", "Rebuild queued. scene=%u instances / %u triangles, versions=%llu/%llu/%llu",
+                     static_cast<uint32_t>(m_rayTracingScene.instances.size()),
+                     m_rayTracingScene.TriangleCount(),
+                     static_cast<unsigned long long>(m_rayTracingScene.geometryVersion),
+                     static_cast<unsigned long long>(m_rayTracingScene.materialVersion),
+                     static_cast<unsigned long long>(m_rayTracingScene.instanceVersion));
         RefreshGIBakeStatus(m_probeGrid.IsInitialized()
             ? GIBakeState::Baking
             : GIBakeState::WaitingForProbeGrid);
@@ -986,6 +1045,10 @@ namespace SasamiRenderer
     void Renderer::CancelGIBake()
     {
         m_giBakeRequested = false;
+        SetGIBakePhase("Canceled");
+        AddGIBakeLog("Cancel", "Bake canceled at %u/%u probes.",
+                     m_probeGrid.GetBakedProbeCount(),
+                     m_probeGrid.GetTotalProbeCount());
         RefreshGIBakeStatus(m_probeGrid.IsBaked()
             ? GIBakeState::Completed
             : GIBakeState::Idle);

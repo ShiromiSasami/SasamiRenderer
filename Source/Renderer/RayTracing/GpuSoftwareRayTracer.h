@@ -146,6 +146,23 @@ namespace SasamiRenderer
         };
         BvhGpuAddresses GetBvhGpuAddresses() const;
 
+        struct BvhBuildDiagnostics
+        {
+            bool lastUploadSucceeded = false;
+            uint32_t sceneMeshes = 0u;
+            uint32_t sceneInstances = 0u;
+            uint32_t sceneMaterials = 0u;
+            uint32_t sceneTriangles = 0u;
+            uint32_t meshBvhCount = 0u;
+            uint32_t tlasNodeCount = 0u;
+            uint64_t geometryVersion = 0u;
+            uint64_t materialVersion = 0u;
+            uint64_t instanceVersion = 0u;
+            char lastPhase[64] = {};
+            char lastFailure[128] = {};
+        };
+        const BvhBuildDiagnostics& GetBvhBuildDiagnostics() const { return m_bvhDiagnostics; }
+
         GpuSoftwareRayTracer();
         ~GpuSoftwareRayTracer();
 
@@ -454,6 +471,7 @@ namespace SasamiRenderer
         Resource m_materialBuffer;      // SRV t5
         Resource m_frameConstantsBuffer;
         uint8_t* m_frameConstantsMapped = nullptr;
+        BvhBuildDiagnostics m_bvhDiagnostics{};
 
         uint64_t m_uploadedGeometryVersion = UINT64_MAX;
         uint64_t m_uploadedMaterialVersion = UINT64_MAX;
