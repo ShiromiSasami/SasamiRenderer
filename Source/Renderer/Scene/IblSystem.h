@@ -43,7 +43,10 @@ namespace SasamiRenderer
         bool IsEnabled() const { return m_iblEnabled; }
         float GetPrefilterMaxMip() const { return m_iblPrefilterMaxMip; }
         GpuDescriptorHandle GetSrvTable() const { return m_iblSrv; }
-        ID3D12Resource* GetPrefilterResource() const { return m_iblPrefilterTexture.Get(); }
+        ID3D12Resource* GetPrefilterResource() const {
+            if (m_iblPrefilterCompat) return m_iblPrefilterCompat->Get();
+            return m_iblPrefilterTexture.Get();
+        }
         bool HasDiffuseShCoefficients() const { return m_diffuseShValid; }
         const float (*GetDiffuseShCoefficients() const)[3] { return m_diffuseSh; }
 
@@ -87,6 +90,13 @@ namespace SasamiRenderer
         Resource m_iblPrefilterUpload;
         Resource m_iblBrdfLutTexture;
         Resource m_iblBrdfLutUpload;
+
+        RhiTextureHandle m_iblIrradianceHandle{};
+        Resource*        m_iblIrradianceCompat = nullptr;
+        RhiTextureHandle m_iblPrefilterHandle{};
+        Resource*        m_iblPrefilterCompat  = nullptr;
+        RhiTextureHandle m_iblBrdfLutHandle{};
+        Resource*        m_iblBrdfLutCompat    = nullptr;
 
         bool  m_iblUploaded        = false;
         bool  m_iblUploadAttempted = false;

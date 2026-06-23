@@ -264,36 +264,10 @@ namespace SasamiRenderer
         m_skyboxSrvCpu = skyboxCpu;
         m_skyboxSrv = skyboxGpu;
 
-        CpuDescriptorHandle iblCpu{};
-        GpuDescriptorHandle iblGpu{};
-        if (!allocateSrvRange(3, iblCpu, iblGpu)) {
-            DebugLogDialog("Skybox::Initialize: SRV allocation failed for IBL textures.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+        if (!m_iblSystem.Initialize(device, allocateSrvRange)) {
+            DebugLogDialog("Skybox::Initialize: IBL system initialization failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
-        m_iblSrvCpu = iblCpu;
-        m_iblSrv = iblGpu;
-
-        const UINT inc = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-        CpuDescriptorHandle preCpu = { iblCpu.ptr + static_cast<SIZE_T>(inc) };
-        CpuDescriptorHandle brdfCpu = { iblCpu.ptr + static_cast<SIZE_T>(inc) * 2 };
-        Resource nullResource;
-
-        D3D12_SHADER_RESOURCE_VIEW_DESC cubeSrvDesc = {};
-        cubeSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        cubeSrvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        cubeSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
-        cubeSrvDesc.TextureCube.MipLevels = 1;
-        cubeSrvDesc.TextureCube.MostDetailedMip = 0;
-        cubeSrvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
-        m_device->CreateShaderResourceView(nullResource, &cubeSrvDesc, iblCpu);
-        m_device->CreateShaderResourceView(nullResource, &cubeSrvDesc, preCpu);
-
-        D3D12_SHADER_RESOURCE_VIEW_DESC lutSrvDesc = {};
-        lutSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        lutSrvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        lutSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-        lutSrvDesc.Texture2D.MipLevels = 1;
-        m_device->CreateShaderResourceView(nullResource, &lutSrvDesc, brdfCpu);
 
         if (!InitializeGeometry()) {
             DebugLogDialog("Skybox::Initialize: geometry initialization failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
@@ -398,24 +372,7 @@ namespace SasamiRenderer
 
     void Skybox::ResetIblResources()
     {
-        m_iblIrradianceTexture.Reset();
-        m_iblIrradianceUpload.Reset();
-        m_iblPrefilterTexture.Reset();
-        m_iblPrefilterUpload.Reset();
-        m_iblBrdfLutTexture.Reset();
-        m_iblBrdfLutUpload.Reset();
-        m_iblUploaded = false;
-        m_iblUploadAttempted = false;
-        m_iblEnabled = false;
-        m_iblPrefilterMaxMip = 0.0f;
-        m_diffuseShValid = false;
-        std::memset(m_diffuseSh, 0, sizeof(m_diffuseSh));
-        m_cpuPrefilterSubresources.clear();
-        m_cpuBrdfLutPixels.clear();
-        m_cpuPrefilterBaseSize = 0;
-        m_cpuPrefilterMipLevels = 0;
-        m_cpuBrdfLutWidth = 0;
-        m_cpuBrdfLutHeight = 0;
+        m_iblSystem.Reset();
     }
 
     void Skybox::RefreshEnvironmentAssets()

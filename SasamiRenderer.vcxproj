@@ -138,6 +138,7 @@
     <ClInclude Include="Source\Renderer\Scene\RenderCameraProxy.h" />
     <ClInclude Include="Source\Renderer\Scene\RenderLightProxy.h" />
     <ClInclude Include="Source\Renderer\Scene\RenderProxy.h" />
+    <ClInclude Include="Source\Renderer\Scene\IblSystem.h" />
     <ClInclude Include="Source\Renderer\Scene\Skybox.h" />
     <ClInclude Include="Source\Renderer\Structures\Float3.h" />
     <ClInclude Include="Source\Renderer\Structures\Mesh.h" />
@@ -189,6 +190,7 @@
     <ClCompile Include="Source\Renderer\Passes\Sky\VolumetricCloudRenderPass.cpp" />
     <ClCompile Include="Source\Renderer\Scene\LightSystem.cpp" />
     <ClCompile Include="Source\Renderer\Scene\ShadowMapManager.cpp" />
+    <ClCompile Include="Source\Renderer\Scene\IblSystem.cpp" />
     <ClCompile Include="Source\Renderer\Scene\Skybox.cpp" />
     <ClCompile Include="Source\Renderer\Scene\LightSystem_Shadow.cpp" />
     <ClCompile Include="Source\Renderer\Scene\Skybox_IBL.cpp" />

@@ -2,6 +2,7 @@
 
 #include "Renderer/RHI/GraphicsDevice.h"
 #include "Renderer/Resources/RenderPipelineStateCache.h"
+#include "Renderer/Scene/IblSystem.h"
 #include "Renderer/Scene/RenderLightProxy.h"
 #include "Renderer/Structures/RendererEnums.h"
 
@@ -53,22 +54,22 @@ namespace SasamiRenderer
         bool IsSkyboxVBValid() const { return m_skyboxVbBinding.buffer.IsValid() || m_skyboxVB.IsValid(); }
         const RhiVertexBufferBinding& GetSkyboxVBBinding() const { return m_skyboxVbBinding; }
         VertexBufferView GetSkyboxVBV() const { return m_skyboxVBV; }
-        bool IsIblUploaded() const { return m_iblUploaded; }
-        bool HasIblUploadAttempted() const { return m_iblUploadAttempted; }
+        bool IsIblUploaded() const { return m_iblSystem.IsUploaded(); }
+        bool HasIblUploadAttempted() const { return m_iblSystem.HasUploadAttempted(); }
 
-        bool IsIblEnabled() const { return m_iblEnabled; }
-        float GetIblPrefilterMaxMip() const { return m_iblPrefilterMaxMip; }
-        GpuDescriptorHandle GetIblSrvTable() const { return m_iblSrv; }
-        ID3D12Resource* GetIblPrefilterResource() const { return m_iblPrefilterTexture.Get(); }
-        bool HasDiffuseShCoefficients() const { return m_diffuseShValid; }
-        const float (*GetDiffuseShCoefficients() const)[3] { return m_diffuseSh; }
-        bool HasCpuPrefilterData() const { return !m_cpuPrefilterSubresources.empty(); }
-        const std::vector<std::vector<float>>& GetCpuPrefilterSubresources() const { return m_cpuPrefilterSubresources; }
-        UINT GetCpuPrefilterBaseSize() const { return m_cpuPrefilterBaseSize; }
-        UINT GetCpuPrefilterMipLevels() const { return m_cpuPrefilterMipLevels; }
-        const std::vector<float>& GetCpuBrdfLutPixels() const { return m_cpuBrdfLutPixels; }
-        UINT GetCpuBrdfLutWidth() const { return m_cpuBrdfLutWidth; }
-        UINT GetCpuBrdfLutHeight() const { return m_cpuBrdfLutHeight; }
+        bool IsIblEnabled() const { return m_iblSystem.IsEnabled(); }
+        float GetIblPrefilterMaxMip() const { return m_iblSystem.GetPrefilterMaxMip(); }
+        GpuDescriptorHandle GetIblSrvTable() const { return m_iblSystem.GetSrvTable(); }
+        ID3D12Resource* GetIblPrefilterResource() const { return m_iblSystem.GetPrefilterResource(); }
+        bool HasDiffuseShCoefficients() const { return m_iblSystem.HasDiffuseShCoefficients(); }
+        const float (*GetDiffuseShCoefficients() const)[3] { return m_iblSystem.GetDiffuseShCoefficients(); }
+        bool HasCpuPrefilterData() const { return m_iblSystem.HasCpuPrefilterData(); }
+        const std::vector<std::vector<float>>& GetCpuPrefilterSubresources() const { return m_iblSystem.GetCpuPrefilterSubresources(); }
+        UINT GetCpuPrefilterBaseSize() const { return m_iblSystem.GetCpuPrefilterBaseSize(); }
+        UINT GetCpuPrefilterMipLevels() const { return m_iblSystem.GetCpuPrefilterMipLevels(); }
+        const std::vector<float>& GetCpuBrdfLutPixels() const { return m_iblSystem.GetCpuBrdfLutPixels(); }
+        UINT GetCpuBrdfLutWidth() const { return m_iblSystem.GetCpuBrdfLutWidth(); }
+        UINT GetCpuBrdfLutHeight() const { return m_iblSystem.GetCpuBrdfLutHeight(); }
         bool IsDirectionalLightMarkerEnabled() const { return m_directionalLightMarkerEnabled; }
         void SetDirectionalLightMarkerEnabled(bool enabled) { m_directionalLightMarkerEnabled = enabled; }
         float GetDirectionalLightMarkerAngularRadius() const { return m_directionalLightMarkerAngularRadius; }
@@ -77,15 +78,6 @@ namespace SasamiRenderer
         void SetDirectionalLightMarkerAngularRadius(float radians);
 
     private:
-        struct GeneratedIblData
-        {
-            std::vector<std::vector<float>> irradianceFaces;
-            std::vector<std::vector<float>> prefilterSubresources;
-            std::vector<float> brdfLutPixels;
-            float diffuseShCoefficients[9][3] = {};
-            UINT prefilterMipLevels = 0;
-        };
-
         enum class SourceType
         {
             None = 0,
@@ -102,18 +94,12 @@ namespace SasamiRenderer
         bool UploadLdrCubemapTexture(CommandList* cmdList);
         bool UploadFallbackSkyboxTexture(CommandList* cmdList);
         void PublishSkyboxSrv(DXGI_FORMAT format);
-        bool GenerateHdrIblData(GeneratedIblData& outData) const;
-        bool UploadGeneratedIblTextures(CommandList* cmdList, const GeneratedIblData& data);
-        bool UploadFallbackIblTextures(CommandList* cmdList);
-        void PublishIblSrvs(DXGI_FORMAT cubeFormat, DXGI_FORMAT brdfFormat, UINT prefilterMipLevels);
-        void ApplyIblMetadata(bool enabled, float prefilterMaxMip, bool shValid, const float (*diffuseSh)[3]);
 
         IRHIDevice* m_device = nullptr;
 
         CpuDescriptorHandle m_skyboxSrvCpu{};
         GpuDescriptorHandle m_skyboxSrv{};
-        CpuDescriptorHandle m_iblSrvCpu{};
-        GpuDescriptorHandle m_iblSrv{};
+        IblSystem m_iblSystem;
 
         SourceType m_sourceType = SourceType::None;
         UINT m_sourceWidth = 0;
@@ -127,25 +113,6 @@ namespace SasamiRenderer
         bool m_skyboxTextureUploaded = false;
         bool m_skyboxUploadAttempted = false;
         bool m_skyboxTextureIsHdr = false;
-
-        Resource m_iblIrradianceTexture;
-        Resource m_iblIrradianceUpload;
-        Resource m_iblPrefilterTexture;
-        Resource m_iblPrefilterUpload;
-        Resource m_iblBrdfLutTexture;
-        Resource m_iblBrdfLutUpload;
-        bool m_iblUploaded = false;
-        bool m_iblUploadAttempted = false;
-        bool m_iblEnabled = false;
-        float m_iblPrefilterMaxMip = 0.0f;
-        bool m_diffuseShValid = false;
-        float m_diffuseSh[9][3] = {};
-        std::vector<std::vector<float>> m_cpuPrefilterSubresources;
-        std::vector<float> m_cpuBrdfLutPixels;
-        UINT m_cpuPrefilterBaseSize = 0;
-        UINT m_cpuPrefilterMipLevels = 0;
-        UINT m_cpuBrdfLutWidth = 0;
-        UINT m_cpuBrdfLutHeight = 0;
 
         bool m_hdrEquirectLoaded = false;
         bool m_hdrEquirectTried = false;
