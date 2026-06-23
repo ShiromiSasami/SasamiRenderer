@@ -156,6 +156,8 @@ namespace SasamiRenderer
     private:
         bool CreatePipeline(IRHIDevice& device);
         bool AllocateProbeBuffer(IRHIDevice& device);
+        Resource* GetProbeBufferResource() const;
+        Resource* GetConstantBufferResource() const;
         void FillProbeGridCB(GIProbeGridCBData& out) const;
         void FillUpdateCB(const UpdateDesc& desc, uint32_t baseIdx,
                           uint32_t count, GIUpdateCBData& out) const;
@@ -172,6 +174,8 @@ namespace SasamiRenderer
 
         // Probe data GPU buffer  (RWStructuredBuffer<float4>, 9 float4 per probe)
         Resource m_probeBuffer;
+        RhiBufferHandle m_probeBufferHandle{};
+        Resource* m_probeBufferCompat = nullptr;
         uint32_t m_probeBufferCapacity = 0u;  // allocated probe count
 
         // Descriptor heap: [0] SRV (probe data, for PBR_PS), [1] UAV (for update CS)
@@ -184,6 +188,8 @@ namespace SasamiRenderer
         //   [0]: GIProbeGridCBData (48 bytes, padded to 256)
         //   [1]: GIUpdateCBData    (96 bytes, padded to 256)
         Resource m_cbBuffer;
+        RhiBufferHandle m_cbBufferHandle{};
+        Resource* m_cbBufferCompat = nullptr;
         mutable uint8_t* m_cbMapped = nullptr;
 
         // Compute pipeline

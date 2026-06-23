@@ -268,8 +268,12 @@ float4 PSMain(PSInput input) : SV_TARGET
             case RhiFormat::R16G16B16A16Float: return DXGI_FORMAT_R16G16B16A16_FLOAT;
             case RhiFormat::R32G32B32Float: return DXGI_FORMAT_R32G32B32_FLOAT;
             case RhiFormat::R32G32Float: return DXGI_FORMAT_R32G32_FLOAT;
+            case RhiFormat::R16Typeless: return DXGI_FORMAT_R16_TYPELESS;
+            case RhiFormat::R16UNorm: return DXGI_FORMAT_R16_UNORM;
             case RhiFormat::R32Float: return DXGI_FORMAT_R32_FLOAT;
             case RhiFormat::R32UInt: return DXGI_FORMAT_R32_UINT;
+            case RhiFormat::R32Typeless: return DXGI_FORMAT_R32_TYPELESS;
+            case RhiFormat::D16UNorm: return DXGI_FORMAT_D16_UNORM;
             case RhiFormat::D32Float: return DXGI_FORMAT_D32_FLOAT;
             case RhiFormat::D24UNormS8UInt: return DXGI_FORMAT_D24_UNORM_S8_UINT;
             default: return DXGI_FORMAT_UNKNOWN;

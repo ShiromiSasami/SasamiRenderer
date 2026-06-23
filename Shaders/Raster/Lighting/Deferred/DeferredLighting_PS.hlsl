@@ -172,15 +172,16 @@ float4 PSMain(PSInput input) : SV_TARGET
     }
 
     float3 indirectDiffuse = 0.0;
-    if (u_iblParams.x > 0.5) {
-        float3 Fibl = FresnelSchlick(NdotV, F0);
-        float3 kdIbl = (1.0 - Fibl);
+    float3 Fibl = FresnelSchlick(NdotV, F0);
+    float3 kdIbl = (1.0 - Fibl);
+    if (g_giEnabled > 0.5) {
         float3 probeIrradiance = GI_SampleProbeGrid(worldPos, N);
+        indirectDiffuse = kdIbl * probeIrradiance * diffuseReflectance * iblVisibility;
+    } else if (u_iblParams.x > 0.5) {
         float3 iblIrradiance = (u_iblParams.w > 0.5)
             ? EvaluateDiffuseIrradianceFromSh(N)
             : IrradianceTex.Sample(LinearWrap, N).rgb;
-        float3 irradiance = (g_giEnabled > 0.5) ? probeIrradiance : iblIrradiance;
-        indirectDiffuse = kdIbl * irradiance * diffuseReflectance * iblVisibility * u_iblParams.y;
+        indirectDiffuse = kdIbl * iblIrradiance * diffuseReflectance * iblVisibility * u_iblParams.y;
     }
 
     float3 color = indirectDiffuse + Lo + emissiveColor + 0.01 * albedo * ao;

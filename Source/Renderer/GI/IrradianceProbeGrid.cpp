@@ -168,8 +168,10 @@ namespace SasamiRenderer
 
     IrradianceProbeGrid::~IrradianceProbeGrid()
     {
-        if (m_cbMapped && m_cbBuffer.IsValid()) {
-            m_cbBuffer.Unmap(0, nullptr);
+        if (m_cbMapped) {
+            if (Resource* cb = GetConstantBufferResource()) {
+                cb->Unmap(0, nullptr);
+            }
         }
         m_cbMapped = nullptr;
     }
@@ -227,10 +229,31 @@ namespace SasamiRenderer
         // Slot 1 (256 bytes): GIUpdateCBData       → bound to b0 in GI_ProbeUpdate_CS
         constexpr UINT64 kCbSlotSize = 256u;
         constexpr UINT64 kCbTotalSize = kCbSlotSize * 2u;
-        if (!ResourceUploadUtility::CreateUploadBuffer(device, kCbTotalSize,
-                                                        m_cbBuffer,
-                                                        reinterpret_cast<void**>(&m_cbMapped))) {
-            return false;
+        if (device.GetCapabilities().supportsRhiResourceCreation) {
+            RhiBufferDesc cbDesc{};
+            cbDesc.sizeInBytes = kCbTotalSize;
+            cbDesc.strideInBytes = 0u;
+            cbDesc.usage = RhiBufferUsageFlags::Constant;
+            cbDesc.memoryUsage = RhiMemoryUsage::CpuToGpu;
+            cbDesc.initialState = RhiResourceState::Common;
+            m_cbBufferHandle = device.CreateRhiBuffer(cbDesc);
+            m_cbBufferCompat = device.GetD3D12CompatibilityResource(m_cbBufferHandle);
+            if (m_cbBufferCompat) {
+                const D3D12_RANGE emptyRange{ 0, 0 };
+                if (FAILED(m_cbBufferCompat->Map(0, &emptyRange, reinterpret_cast<void**>(&m_cbMapped)))) {
+                    m_cbMapped = nullptr;
+                    return false;
+                }
+            }
+        }
+        if (!m_cbMapped) {
+            if (!ResourceUploadUtility::CreateUploadBuffer(device, kCbTotalSize,
+                                                           m_cbBuffer,
+                                                           reinterpret_cast<void**>(&m_cbMapped))) {
+                return false;
+            }
+            m_cbBufferHandle = {};
+            m_cbBufferCompat = nullptr;
         }
         // Zero-initialise (giEnabled = 0.0f → GI disabled until first update writes it)
         memset(m_cbMapped, 0, kCbTotalSize);
@@ -268,8 +291,12 @@ namespace SasamiRenderer
     bool IrradianceProbeGrid::AllocateProbeBuffer(IRHIDevice& device)
     {
         const uint32_t totalProbes = m_countX * m_countY * m_countZ;
-        if (totalProbes == m_probeBufferCapacity && m_probeBuffer.IsValid())
-            return true;
+        if (totalProbes == m_probeBufferCapacity) {
+            Resource* currentProbeBuffer = GetProbeBufferResource();
+            if (currentProbeBuffer && currentProbeBuffer->IsValid()) {
+                return true;
+            }
+        }
 
         ID3D12Device* dev = device.GetDevice();
         if (!dev) return false;
@@ -277,22 +304,43 @@ namespace SasamiRenderer
         // float4[9] per probe
         const UINT64 bufSize = static_cast<UINT64>(totalProbes) * 9u * sizeof(float) * 4u;
 
-        // Allocate default-heap buffer with UAV flag; initial state = PIXEL_SHADER_RESOURCE
-        D3D12_HEAP_PROPERTIES heap{}; heap.Type = D3D12_HEAP_TYPE_DEFAULT;
-        D3D12_RESOURCE_DESC desc{};
-        desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-        desc.Width     = bufSize;
-        desc.Height    = desc.DepthOrArraySize = desc.MipLevels = 1;
-        desc.SampleDesc.Count = 1;
-        desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-        desc.Flags  = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-        if (FAILED(device.CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc,
-                                                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                   nullptr, m_probeBuffer))) {
-            return false;
+        m_probeBufferCompat = nullptr;
+        m_probeBufferHandle = {};
+        if (device.GetCapabilities().supportsRhiResourceCreation) {
+            RhiBufferDesc rhiDesc{};
+            rhiDesc.sizeInBytes = bufSize;
+            rhiDesc.strideInBytes = sizeof(float) * 4u;
+            rhiDesc.usage = RhiBufferUsageFlags::Structured |
+                            RhiBufferUsageFlags::ShaderResource |
+                            RhiBufferUsageFlags::UnorderedAccess;
+            rhiDesc.memoryUsage = RhiMemoryUsage::GpuOnly;
+            rhiDesc.initialState = RhiResourceState::ShaderResource;
+            m_probeBufferHandle = device.CreateRhiBuffer(rhiDesc);
+            m_probeBufferCompat = device.GetD3D12CompatibilityResource(m_probeBufferHandle);
+        }
+
+        if (!m_probeBufferCompat) {
+            // Allocate default-heap buffer with UAV flag; initial state = PIXEL_SHADER_RESOURCE
+            D3D12_HEAP_PROPERTIES heap{}; heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+            D3D12_RESOURCE_DESC desc{};
+            desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+            desc.Width     = bufSize;
+            desc.Height    = desc.DepthOrArraySize = desc.MipLevels = 1;
+            desc.SampleDesc.Count = 1;
+            desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+            desc.Flags  = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+            if (FAILED(device.CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc,
+                                                       D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                                       nullptr, m_probeBuffer))) {
+                return false;
+            }
         }
 
         m_probeBufferCapacity = totalProbes;
+        Resource* probeBuffer = GetProbeBufferResource();
+        if (!probeBuffer || !probeBuffer->IsValid()) {
+            return false;
+        }
 
         // ---- SRV (slot 0) ----
         D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = m_descHeap.GetCPUDescriptorHandleForHeapStart();
@@ -303,7 +351,7 @@ namespace SasamiRenderer
         srvDesc.Buffer.FirstElement     = 0;
         srvDesc.Buffer.NumElements      = totalProbes * 9u;
         srvDesc.Buffer.StructureByteStride = sizeof(float) * 4u;
-        dev->CreateShaderResourceView(m_probeBuffer.Get(), &srvDesc, srvCpu);
+        dev->CreateShaderResourceView(probeBuffer->Get(), &srvDesc, srvCpu);
 
         // ---- UAV (slot 1) ----
         D3D12_CPU_DESCRIPTOR_HANDLE uavCpu = m_descHeap.GetCPUDescriptorHandleForHeapStart();
@@ -314,7 +362,7 @@ namespace SasamiRenderer
         uavDesc.Buffer.FirstElement = 0;
         uavDesc.Buffer.NumElements  = totalProbes * 9u;
         uavDesc.Buffer.StructureByteStride = sizeof(float) * 4u;
-        dev->CreateUnorderedAccessView(m_probeBuffer.Get(), nullptr, &uavDesc, uavCpu);
+        dev->CreateUnorderedAccessView(probeBuffer->Get(), nullptr, &uavDesc, uavCpu);
 
         // ---- GPU-visible SRV/UAV handles for root descriptors ----
         // Note: we use root SRV/UAV (inline) so no GPU-visible descriptor heap needed.
@@ -337,7 +385,8 @@ namespace SasamiRenderer
 
     D3D12_GPU_VIRTUAL_ADDRESS IrradianceProbeGrid::GetProbeGridCbGpuAddress() const
     {
-        return m_cbBuffer.IsValid() ? m_cbBuffer.GetGPUVirtualAddress() : 0u;
+        Resource* cb = GetConstantBufferResource();
+        return (cb && cb->IsValid()) ? cb->GetGPUVirtualAddress() : 0u;
     }
 
     // =========================================================================
@@ -346,7 +395,18 @@ namespace SasamiRenderer
 
     D3D12_GPU_VIRTUAL_ADDRESS IrradianceProbeGrid::GetProbeDataGpuVA() const
     {
-        return m_probeBuffer.IsValid() ? m_probeBuffer.GetGPUVirtualAddress() : 0u;
+        Resource* probeBuffer = GetProbeBufferResource();
+        return (probeBuffer && probeBuffer->IsValid()) ? probeBuffer->GetGPUVirtualAddress() : 0u;
+    }
+
+    Resource* IrradianceProbeGrid::GetProbeBufferResource() const
+    {
+        return m_probeBufferCompat ? m_probeBufferCompat : const_cast<Resource*>(&m_probeBuffer);
+    }
+
+    Resource* IrradianceProbeGrid::GetConstantBufferResource() const
+    {
+        return m_cbBufferCompat ? m_cbBufferCompat : const_cast<Resource*>(&m_cbBuffer);
     }
 
     // =========================================================================
@@ -556,8 +616,14 @@ namespace SasamiRenderer
         if (!cl) return false;
 
         // ---- Transition probe buffer: PIXEL_SHADER_RESOURCE → UNORDERED_ACCESS ----
+        Resource* probeBuffer = GetProbeBufferResource();
+        Resource* cbBuffer = GetConstantBufferResource();
+        if (!probeBuffer || !probeBuffer->IsValid() || !cbBuffer || !cbBuffer->IsValid()) {
+            return false;
+        }
+
         auto barToUAV = CD3DX12_RESOURCE_BARRIER::Transition(
-            m_probeBuffer.Get(),
+            probeBuffer->Get(),
             D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
             D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         cl->ResourceBarrier(1, &barToUAV);
@@ -566,7 +632,7 @@ namespace SasamiRenderer
         cl->SetPipelineState(m_pso.Get());
         cl->SetComputeRootSignature(m_rootSig.Get());
 
-        const D3D12_GPU_VIRTUAL_ADDRESS updateCbGpu = m_cbBuffer.GetGPUVirtualAddress() + 256u;
+        const D3D12_GPU_VIRTUAL_ADDRESS updateCbGpu = cbBuffer->GetGPUVirtualAddress() + 256u;
         cl->SetComputeRootConstantBufferView(0, updateCbGpu);
         cl->SetComputeRootShaderResourceView (1, bvhAddrs.bvhNodes);
         cl->SetComputeRootShaderResourceView (2, bvhAddrs.triangles);
@@ -574,18 +640,18 @@ namespace SasamiRenderer
         cl->SetComputeRootShaderResourceView (4, bvhAddrs.instances);
         cl->SetComputeRootShaderResourceView (5, bvhAddrs.tlasNodes);
         cl->SetComputeRootShaderResourceView (6, bvhAddrs.materials);
-        cl->SetComputeRootUnorderedAccessView(7, m_probeBuffer.GetGPUVirtualAddress());
+        cl->SetComputeRootUnorderedAccessView(7, probeBuffer->GetGPUVirtualAddress());
 
         // One thread group per probe, 64 threads per group
         cl->Dispatch(probesThisFrame, 1, 1);
 
         // ---- UAV barrier (ensure writes are visible) ----
-        auto uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_probeBuffer.Get());
+        auto uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(probeBuffer->Get());
         cl->ResourceBarrier(1, &uavBarrier);
 
         // ---- Transition back: UNORDERED_ACCESS → PIXEL_SHADER_RESOURCE ----
         auto barToSRV = CD3DX12_RESOURCE_BARRIER::Transition(
-            m_probeBuffer.Get(),
+            probeBuffer->Get(),
             D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
             D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
         cl->ResourceBarrier(1, &barToSRV);

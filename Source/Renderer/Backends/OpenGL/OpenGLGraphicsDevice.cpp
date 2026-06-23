@@ -145,7 +145,11 @@ namespace SasamiRenderer
             case RhiFormat::R16G16B16A16Float: return GL_RGBA16F;
             case RhiFormat::R32G32B32Float: return GL_RGB32F;
             case RhiFormat::R32G32Float: return GL_RG32F;
+            case RhiFormat::R16UNorm: return GL_R16;
             case RhiFormat::R32Float: return GL_R32F;
+            case RhiFormat::R16Typeless:
+            case RhiFormat::D16UNorm: return GL_DEPTH_COMPONENT16;
+            case RhiFormat::R32Typeless:
             case RhiFormat::D32Float: return GL_DEPTH_COMPONENT32F;
             case RhiFormat::R8G8B8A8UNorm:
             case RhiFormat::B8G8R8A8UNorm:
@@ -157,12 +161,16 @@ namespace SasamiRenderer
         {
             switch (format) {
             case RhiFormat::R8UNorm:
+            case RhiFormat::R16UNorm:
             case RhiFormat::R32Float:
                 return GL_RED;
             case RhiFormat::R32G32B32Float:
                 return GL_RGB;
             case RhiFormat::R32G32Float:
                 return GL_RG;
+            case RhiFormat::R16Typeless:
+            case RhiFormat::R32Typeless:
+            case RhiFormat::D16UNorm:
             case RhiFormat::D32Float:
                 return GL_DEPTH_COMPONENT;
             default:
@@ -177,8 +185,13 @@ namespace SasamiRenderer
             case RhiFormat::R32G32B32Float:
             case RhiFormat::R32G32Float:
             case RhiFormat::R32Float:
+            case RhiFormat::R32Typeless:
             case RhiFormat::D32Float:
                 return GL_FLOAT;
+            case RhiFormat::R16UNorm:
+            case RhiFormat::R16Typeless:
+            case RhiFormat::D16UNorm:
+                return GL_UNSIGNED_SHORT;
             default:
                 return GL_UNSIGNED_BYTE;
             }

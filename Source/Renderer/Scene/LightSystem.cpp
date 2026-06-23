@@ -128,7 +128,25 @@ namespace SasamiRenderer
         // --- 定数バッファ（LightCBData）確保 ---
         // D3D12 の定数バッファは 256 バイトアラインが必須。
         const UINT lightCbSize = (sizeof(LightCBLayout::LightCBData) + 255u) & ~255u;
-        if (!ResourceUploadUtility::CreateUploadBuffer(*m_device, lightCbSize, frame.lightCB, &frame.lightCBPtr)) {
+        if (m_device->GetCapabilities().supportsRhiResourceCreation) {
+            RhiBufferDesc cbDesc{};
+            cbDesc.sizeInBytes = lightCbSize;
+            cbDesc.usage = RhiBufferUsageFlags::Constant;
+            cbDesc.memoryUsage = RhiMemoryUsage::CpuToGpu;
+            cbDesc.initialState = RhiResourceState::Common;
+            frame.lightCBHandle = m_device->CreateRhiBuffer(cbDesc);
+            frame.lightCBCompat = m_device->GetD3D12CompatibilityResource(frame.lightCBHandle);
+            if (frame.lightCBCompat) {
+                const D3D12_RANGE emptyRange{ 0, 0 };
+                if (FAILED(frame.lightCBCompat->Map(0, &emptyRange, &frame.lightCBPtr))) {
+                    frame.lightCBPtr = nullptr;
+                    frame.lightCBCompat = nullptr;
+                    frame.lightCBHandle = {};
+                }
+            }
+        }
+        if (!frame.lightCBPtr &&
+            !ResourceUploadUtility::CreateUploadBuffer(*m_device, lightCbSize, frame.lightCB, &frame.lightCBPtr)) {
             DebugLogDialog("LightSystem::InitializeFrameResources: Light CB creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
@@ -156,24 +174,36 @@ namespace SasamiRenderer
     // =========================================================================
     void LightSystem::ShutdownFrameResources(FrameResources& frame)
     {
-        if (frame.lightCB.IsValid() && frame.lightCBPtr) {
-            frame.lightCB->Unmap(0, nullptr);
+        if (frame.lightCBPtr) {
+            if (Resource* lightCB = frame.GetLightCBResource(); lightCB && lightCB->IsValid()) {
+                lightCB->Unmap(0, nullptr);
+            }
             frame.lightCBPtr = nullptr;
         }
 
-        if (frame.pointLightBuffer.IsValid() && frame.pointLightBufferPtr) {
-            frame.pointLightBuffer->Unmap(0, nullptr);
+        if (frame.pointLightBufferPtr) {
+            if (Resource* pointBuffer = frame.GetPointLightResource(); pointBuffer && pointBuffer->IsValid()) {
+                pointBuffer->Unmap(0, nullptr);
+            }
             frame.pointLightBufferPtr = nullptr;
         }
 
-        if (frame.spotLightBuffer.IsValid() && frame.spotLightBufferPtr) {
-            frame.spotLightBuffer->Unmap(0, nullptr);
+        if (frame.spotLightBufferPtr) {
+            if (Resource* spotBuffer = frame.GetSpotLightResource(); spotBuffer && spotBuffer->IsValid()) {
+                spotBuffer->Unmap(0, nullptr);
+            }
             frame.spotLightBufferPtr = nullptr;
         }
 
         frame.lightCB.Reset();
         frame.pointLightBuffer.Reset();
         frame.spotLightBuffer.Reset();
+        frame.lightCBHandle = {};
+        frame.pointLightBufferHandle = {};
+        frame.spotLightBufferHandle = {};
+        frame.lightCBCompat = nullptr;
+        frame.pointLightBufferCompat = nullptr;
+        frame.spotLightBufferCompat = nullptr;
         frame.pointLightCapacity = 0;
         frame.spotLightCapacity  = 0;
         frame.pointSrvCpu  = {};
@@ -208,14 +238,37 @@ namespace SasamiRenderer
         // --- ポイントライトバッファ拡張 ---
         if (requiredPoint > frame.pointLightCapacity) {
             frame.pointLightCapacity = growCapacity(frame.pointLightCapacity, requiredPoint);
-            if (frame.pointLightBuffer.IsValid() && frame.pointLightBufferPtr) {
-                frame.pointLightBuffer->Unmap(0, nullptr);
+            if (frame.pointLightBufferPtr) {
+                if (Resource* pointBuffer = frame.GetPointLightResource(); pointBuffer && pointBuffer->IsValid()) {
+                    pointBuffer->Unmap(0, nullptr);
+                }
             }
             frame.pointLightBuffer.Reset();
+            frame.pointLightBufferHandle = {};
+            frame.pointLightBufferCompat = nullptr;
             frame.pointLightBufferPtr = nullptr;
 
             const UINT64 byteSize = static_cast<UINT64>(frame.pointLightCapacity) * sizeof(PointLightGPU);
-            if (!ResourceUploadUtility::CreateUploadBuffer(*m_device, byteSize, frame.pointLightBuffer, &frame.pointLightBufferPtr)) {
+            if (m_device->GetCapabilities().supportsRhiResourceCreation) {
+                RhiBufferDesc bufferDesc{};
+                bufferDesc.sizeInBytes = byteSize;
+                bufferDesc.strideInBytes = sizeof(PointLightGPU);
+                bufferDesc.usage = RhiBufferUsageFlags::Structured | RhiBufferUsageFlags::ShaderResource;
+                bufferDesc.memoryUsage = RhiMemoryUsage::CpuToGpu;
+                bufferDesc.initialState = RhiResourceState::ShaderResource;
+                frame.pointLightBufferHandle = m_device->CreateRhiBuffer(bufferDesc);
+                frame.pointLightBufferCompat = m_device->GetD3D12CompatibilityResource(frame.pointLightBufferHandle);
+                if (frame.pointLightBufferCompat) {
+                    const D3D12_RANGE emptyRange{ 0, 0 };
+                    if (FAILED(frame.pointLightBufferCompat->Map(0, &emptyRange, &frame.pointLightBufferPtr))) {
+                        frame.pointLightBufferPtr = nullptr;
+                        frame.pointLightBufferCompat = nullptr;
+                        frame.pointLightBufferHandle = {};
+                    }
+                }
+            }
+            if (!frame.pointLightBufferPtr &&
+                !ResourceUploadUtility::CreateUploadBuffer(*m_device, byteSize, frame.pointLightBuffer, &frame.pointLightBufferPtr)) {
                 frame.pointLightCapacity = 0;
             }
         }
@@ -223,20 +276,43 @@ namespace SasamiRenderer
         // --- スポットライトバッファ拡張 ---
         if (requiredSpot > frame.spotLightCapacity) {
             frame.spotLightCapacity = growCapacity(frame.spotLightCapacity, requiredSpot);
-            if (frame.spotLightBuffer.IsValid() && frame.spotLightBufferPtr) {
-                frame.spotLightBuffer->Unmap(0, nullptr);
+            if (frame.spotLightBufferPtr) {
+                if (Resource* spotBuffer = frame.GetSpotLightResource(); spotBuffer && spotBuffer->IsValid()) {
+                    spotBuffer->Unmap(0, nullptr);
+                }
             }
             frame.spotLightBuffer.Reset();
+            frame.spotLightBufferHandle = {};
+            frame.spotLightBufferCompat = nullptr;
             frame.spotLightBufferPtr = nullptr;
 
             const UINT64 byteSize = static_cast<UINT64>(frame.spotLightCapacity) * sizeof(SpotLightGPU);
-            if (!ResourceUploadUtility::CreateUploadBuffer(*m_device, byteSize, frame.spotLightBuffer, &frame.spotLightBufferPtr)) {
+            if (m_device->GetCapabilities().supportsRhiResourceCreation) {
+                RhiBufferDesc bufferDesc{};
+                bufferDesc.sizeInBytes = byteSize;
+                bufferDesc.strideInBytes = sizeof(SpotLightGPU);
+                bufferDesc.usage = RhiBufferUsageFlags::Structured | RhiBufferUsageFlags::ShaderResource;
+                bufferDesc.memoryUsage = RhiMemoryUsage::CpuToGpu;
+                bufferDesc.initialState = RhiResourceState::ShaderResource;
+                frame.spotLightBufferHandle = m_device->CreateRhiBuffer(bufferDesc);
+                frame.spotLightBufferCompat = m_device->GetD3D12CompatibilityResource(frame.spotLightBufferHandle);
+                if (frame.spotLightBufferCompat) {
+                    const D3D12_RANGE emptyRange{ 0, 0 };
+                    if (FAILED(frame.spotLightBufferCompat->Map(0, &emptyRange, &frame.spotLightBufferPtr))) {
+                        frame.spotLightBufferPtr = nullptr;
+                        frame.spotLightBufferCompat = nullptr;
+                        frame.spotLightBufferHandle = {};
+                    }
+                }
+            }
+            if (!frame.spotLightBufferPtr &&
+                !ResourceUploadUtility::CreateUploadBuffer(*m_device, byteSize, frame.spotLightBuffer, &frame.spotLightBufferPtr)) {
                 frame.spotLightCapacity = 0;
             }
         }
 
         // --- ポイントライト SRV を作成（バッファが有効な場合）---
-        if (frame.pointLightBuffer.IsValid()) {
+        if (Resource* pointBuffer = frame.GetPointLightResource(); pointBuffer && pointBuffer->IsValid()) {
             D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
             srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
             srvDesc.Format = DXGI_FORMAT_UNKNOWN; // 構造化バッファは UNKNOWN
@@ -245,11 +321,11 @@ namespace SasamiRenderer
             srvDesc.Buffer.NumElements = frame.pointLightCapacity;
             srvDesc.Buffer.StructureByteStride = sizeof(PointLightGPU);
             srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
-            m_device->CreateShaderResourceView(frame.pointLightBuffer, &srvDesc, frame.pointSrvCpu);
+            m_device->CreateShaderResourceView(*pointBuffer, &srvDesc, frame.pointSrvCpu);
         }
 
         // --- スポットライト SRV を作成 ---
-        if (frame.spotLightBuffer.IsValid()) {
+        if (Resource* spotBuffer = frame.GetSpotLightResource(); spotBuffer && spotBuffer->IsValid()) {
             D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
             srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
             srvDesc.Format = DXGI_FORMAT_UNKNOWN;
@@ -258,7 +334,7 @@ namespace SasamiRenderer
             srvDesc.Buffer.NumElements = frame.spotLightCapacity;
             srvDesc.Buffer.StructureByteStride = sizeof(SpotLightGPU);
             srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
-            m_device->CreateShaderResourceView(frame.spotLightBuffer, &srvDesc, frame.spotSrvCpu);
+            m_device->CreateShaderResourceView(*spotBuffer, &srvDesc, frame.spotSrvCpu);
         }
     }
 

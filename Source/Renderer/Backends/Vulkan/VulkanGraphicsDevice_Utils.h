@@ -38,8 +38,12 @@ namespace SasamiRenderer
         case RhiFormat::R16G16B16A16Float: return VK_FORMAT_R16G16B16A16_SFLOAT;
         case RhiFormat::R32G32B32Float: return VK_FORMAT_R32G32B32_SFLOAT;
         case RhiFormat::R32G32Float: return VK_FORMAT_R32G32_SFLOAT;
+        case RhiFormat::R16Typeless: return VK_FORMAT_D16_UNORM;
+        case RhiFormat::R16UNorm: return VK_FORMAT_R16_UNORM;
         case RhiFormat::R32Float: return VK_FORMAT_R32_SFLOAT;
         case RhiFormat::R32UInt: return VK_FORMAT_R32_UINT;
+        case RhiFormat::R32Typeless: return VK_FORMAT_D32_SFLOAT;
+        case RhiFormat::D16UNorm: return VK_FORMAT_D16_UNORM;
         case RhiFormat::D32Float: return VK_FORMAT_D32_SFLOAT;
         case RhiFormat::D24UNormS8UInt: return VK_FORMAT_D24_UNORM_S8_UINT;
         default: return VK_FORMAT_UNDEFINED;
@@ -109,6 +113,9 @@ namespace SasamiRenderer
     inline VkImageAspectFlags ToVkAspectMask(RhiFormat format)
     {
         switch (format) {
+        case RhiFormat::R16Typeless:
+        case RhiFormat::R32Typeless:
+        case RhiFormat::D16UNorm:
         case RhiFormat::D32Float:
             return VK_IMAGE_ASPECT_DEPTH_BIT;
         case RhiFormat::D24UNormS8UInt:

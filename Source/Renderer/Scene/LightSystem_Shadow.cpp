@@ -391,7 +391,8 @@ namespace SasamiRenderer
                                           uint32_t renderHeight,
                                           bool useStableDirectionalShadowProjection)
     {
-        if (!frame.lightCB.IsValid() || frame.lightCBPtr == nullptr) {
+        Resource* lightCB = frame.GetLightCBResource();
+        if (!lightCB || !lightCB->IsValid() || frame.lightCBPtr == nullptr) {
             return;
         }
 
@@ -614,7 +615,8 @@ namespace SasamiRenderer
                                         const DrawShadowCallback& drawCallback,
                                         bool vsmBlurEnabled)
     {
-        if (!cmdList || !frame.lightCB.IsValid()) {
+        Resource* lightCB = frame.GetLightCBResource();
+        if (!cmdList || !lightCB || !lightCB->IsValid()) {
             return;
         }
 
@@ -676,7 +678,7 @@ namespace SasamiRenderer
         BuildShadowPassContext(shadowContext, cameraPos, cameraPV, shadowMapWidth, shadowMapHeight);
 
         // 定数バッファを b3 に設定
-        cmdList->SetGraphicsRootConstantBufferView(3, frame.lightCB->GetGPUVirtualAddress());
+        cmdList->SetGraphicsRootConstantBufferView(3, lightCB->GetGPUVirtualAddress());
 
         if (drawCallback) {
             for (uint32_t cascadeIndex = 0; cascadeIndex < shadowContext.cascadeCount; ++cascadeIndex) {
@@ -725,7 +727,7 @@ namespace SasamiRenderer
             cmdList->SetPipelineState(pipelineStateCache.GetShadowVsmPipelineState());
             DescriptorHeap* heapsVsm[] = { &srvHeap };
             cmdList->SetDescriptorHeaps(1, heapsVsm);
-            cmdList->SetGraphicsRootConstantBufferView(3, frame.lightCB->GetGPUVirtualAddress());
+            cmdList->SetGraphicsRootConstantBufferView(3, lightCB->GetGPUVirtualAddress());
             cmdList->RSSetViewports(1, &m_shadowMapManager.GetShadowViewport());
             cmdList->RSSetScissorRects(1, &m_shadowMapManager.GetShadowScissor());
             cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);

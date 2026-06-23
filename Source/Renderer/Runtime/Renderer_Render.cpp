@@ -869,8 +869,9 @@ namespace SasamiRenderer
             }
         };
 
-        const D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu = frame->light.lightCB.IsValid()
-            ? frame->light.lightCB->GetGPUVirtualAddress()
+        const Resource* lightCB = frame->light.GetLightCBResource();
+        const D3D12_GPU_VIRTUAL_ADDRESS lightCbGpu = (lightCB && lightCB->IsValid())
+            ? lightCB->GetGPUVirtualAddress()
             : 0;
         const GpuDescriptorHandle defaultAoSrv =
             (m_defaultOcclusionTexture != nullptr) ? m_defaultOcclusionTexture->srv : m_nullTextureSrv;

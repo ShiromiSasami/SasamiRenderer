@@ -25,8 +25,12 @@ namespace SasamiRenderer
         R16G16B16A16Float,
         R32G32B32Float,
         R32G32Float,
+        R16Typeless,
+        R16UNorm,
         R32Float,
         R32UInt,
+        R32Typeless,
+        D16UNorm,
         D32Float,
         D24UNormS8UInt,
     };

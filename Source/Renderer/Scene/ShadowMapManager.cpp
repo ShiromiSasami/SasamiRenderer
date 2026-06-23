@@ -18,6 +18,26 @@
 
 namespace SasamiRenderer
 {
+    Resource* ShadowMapManager::GetShadowMapResource() const
+    {
+        return m_shadowMapCompat ? m_shadowMapCompat : const_cast<Resource*>(&m_shadowMap);
+    }
+
+    Resource* ShadowMapManager::GetSpotShadowMapResource() const
+    {
+        return m_spotShadowMapCompat ? m_spotShadowMapCompat : const_cast<Resource*>(&m_spotShadowMap);
+    }
+
+    Resource* ShadowMapManager::GetVsmMapResource() const
+    {
+        return m_vsmMapCompat ? m_vsmMapCompat : const_cast<Resource*>(&m_vsmMap);
+    }
+
+    Resource* ShadowMapManager::GetVsmMapTempResource() const
+    {
+        return m_vsmMapTempCompat ? m_vsmMapTempCompat : const_cast<Resource*>(&m_vsmMapTemp);
+    }
+
     // =========================================================================
     // Initialize
     // アプリ起動時に 1 回だけ呼ぶ。
@@ -110,7 +130,8 @@ namespace SasamiRenderer
         }
 
         // 既に有効なリソースがあればスキップ
-        if (m_shadowMap.IsValid() && m_dsvHeapShadow.Get()) {
+        Resource* existingShadowMap = GetShadowMapResource();
+        if (existingShadowMap && existingShadowMap->IsValid() && m_dsvHeapShadow.Get()) {
             return true;
         }
 
@@ -136,15 +157,43 @@ namespace SasamiRenderer
         clear.DepthStencil.Depth = 1.0f; // 遠方（未書き込み）は深度 1.0
         clear.DepthStencil.Stencil = 0;
 
+        m_shadowMapHandle = {};
+        m_shadowMapCompat = nullptr;
+        if (m_device->GetCapabilities().supportsRhiResourceCreation) {
+            RhiTextureDesc rhiDesc{};
+            rhiDesc.dimension = RhiResourceDimension::Texture2D;
+            rhiDesc.extent = { m_shadowMapSize, m_shadowMapSize, 1u };
+            rhiDesc.mipLevels = 1u;
+            rhiDesc.arrayLayers = kDirectionalCascadeCount;
+            rhiDesc.format = RhiFormat::R32Typeless;
+            rhiDesc.usage = RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::DepthStencil;
+            rhiDesc.memoryUsage = RhiMemoryUsage::GpuOnly;
+            rhiDesc.initialState = RhiResourceState::ShaderResource;
+            m_shadowMapHandle = m_device->CreateRhiTexture(rhiDesc);
+            m_shadowMapCompat = m_device->GetD3D12CompatibilityResource(m_shadowMapHandle);
+        }
+
         CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_DEFAULT);
-        HRESULT hr = m_device->CreateCommittedResource(&heap,
+        HRESULT hr = S_OK;
+        if (!m_shadowMapCompat) {
+            hr = m_device->CreateCommittedResource(&heap,
                                                        D3D12_HEAP_FLAG_NONE,
                                                        &smDesc,
                                                        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, // 初期状態は SRV として読める状態
                                                        &clear,
                                                        m_shadowMap);
-        if (FAILED(hr)) {
-            DebugLogDialog("ShadowMapManager::EnsureShadowResources: Shadow map resource creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            if (FAILED(hr)) {
+                DebugLogDialog("ShadowMapManager::EnsureShadowResources: Shadow map resource creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+                return false;
+            }
+        }
+
+        Resource* shadowMap = GetShadowMapResource();
+        if (!shadowMap || !shadowMap->IsValid()) {
+            DebugLogDialog("ShadowMapManager::EnsureShadowResources: Shadow map compatibility resource lookup failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            m_shadowMap.Reset();
+            m_shadowMapHandle = {};
+            m_shadowMapCompat = nullptr;
             return false;
         }
 
@@ -156,6 +205,8 @@ namespace SasamiRenderer
         hr = m_device->CreateDescriptorHeap(dsvDesc, m_dsvHeapShadow);
         if (FAILED(hr)) {
             m_shadowMap.Reset();
+            m_shadowMapHandle = {};
+            m_shadowMapCompat = nullptr;
             DebugLogDialog("ShadowMapManager::EnsureShadowResources: Shadow DSV heap creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
@@ -170,7 +221,7 @@ namespace SasamiRenderer
         auto dsvHandle = m_dsvHeapShadow->GetCPUDescriptorHandleForHeapStart();
         for (uint32_t cascadeIndex = 0; cascadeIndex < kDirectionalCascadeCount; ++cascadeIndex) {
             dsv.Texture2DArray.FirstArraySlice = cascadeIndex;
-            m_device->CreateDepthStencilView(m_shadowMap, &dsv, dsvHandle);
+            m_device->CreateDepthStencilView(*shadowMap, &dsv, dsvHandle);
             dsvHandle.ptr += dsvInc;
         }
 
@@ -182,7 +233,7 @@ namespace SasamiRenderer
         srvDesc.Texture2DArray.MipLevels = 1;
         srvDesc.Texture2DArray.ArraySize = kDirectionalCascadeCount;
         srvDesc.Texture2DArray.FirstArraySlice = 0;
-        m_device->CreateShaderResourceView(m_shadowMap, &srvDesc, m_shadowSrvCpu);
+        m_device->CreateShaderResourceView(*shadowMap, &srvDesc, m_shadowSrvCpu);
 
         return true;
     }
@@ -230,14 +281,41 @@ namespace SasamiRenderer
         clear.DepthStencil.Depth = 1.0f;
 
         CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_DEFAULT);
-        HRESULT hr = m_device->CreateCommittedResource(&heap,
-                                                       D3D12_HEAP_FLAG_NONE,
-                                                       &smDesc,
-                                                       D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                       &clear,
-                                                       m_spotShadowMap);
-        if (FAILED(hr)) {
-            DebugLogDialog("ShadowMapManager::EnsureSpotShadowResources: texture creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+        HRESULT hr = S_OK;
+        m_spotShadowMapHandle = {};
+        m_spotShadowMapCompat = nullptr;
+        if (m_device->GetCapabilities().supportsRhiResourceCreation) {
+            RhiTextureDesc rhiDesc{};
+            rhiDesc.dimension = RhiResourceDimension::Texture2D;
+            rhiDesc.extent = { m_spotShadowMapSize, m_spotShadowMapSize, 1u };
+            rhiDesc.mipLevels = 1u;
+            rhiDesc.arrayLayers = 1u;
+            rhiDesc.format = RhiFormat::R16Typeless;
+            rhiDesc.usage = RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::DepthStencil;
+            rhiDesc.memoryUsage = RhiMemoryUsage::GpuOnly;
+            rhiDesc.initialState = RhiResourceState::ShaderResource;
+            m_spotShadowMapHandle = m_device->CreateRhiTexture(rhiDesc);
+            m_spotShadowMapCompat = m_device->GetD3D12CompatibilityResource(m_spotShadowMapHandle);
+        }
+        if (!m_spotShadowMapCompat) {
+            hr = m_device->CreateCommittedResource(&heap,
+                                                   D3D12_HEAP_FLAG_NONE,
+                                                   &smDesc,
+                                                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                                   &clear,
+                                                   m_spotShadowMap);
+            if (FAILED(hr)) {
+                DebugLogDialog("ShadowMapManager::EnsureSpotShadowResources: texture creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+                return false;
+            }
+        }
+
+        Resource* spotShadowMap = GetSpotShadowMapResource();
+        if (!spotShadowMap || !spotShadowMap->IsValid()) {
+            DebugLogDialog("ShadowMapManager::EnsureSpotShadowResources: texture compatibility resource lookup failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            m_spotShadowMap.Reset();
+            m_spotShadowMapHandle = {};
+            m_spotShadowMapCompat = nullptr;
             return false;
         }
 
@@ -248,6 +326,8 @@ namespace SasamiRenderer
         hr = m_device->CreateDescriptorHeap(dsvDesc, m_spotDsvHeap);
         if (FAILED(hr)) {
             m_spotShadowMap.Reset();
+            m_spotShadowMapHandle = {};
+            m_spotShadowMapCompat = nullptr;
             DebugLogDialog("ShadowMapManager::EnsureSpotShadowResources: DSV heap creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
@@ -256,14 +336,14 @@ namespace SasamiRenderer
         dsv.Format = DXGI_FORMAT_D16_UNORM;
         dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
         dsv.Flags = D3D12_DSV_FLAG_NONE;
-        m_device->CreateDepthStencilView(m_spotShadowMap, &dsv, m_spotDsvHeap->GetCPUDescriptorHandleForHeapStart());
+        m_device->CreateDepthStencilView(*spotShadowMap, &dsv, m_spotDsvHeap->GetCPUDescriptorHandleForHeapStart());
 
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srvDesc.Format = DXGI_FORMAT_R16_UNORM;
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
         srvDesc.Texture2D.MipLevels = 1;
-        m_device->CreateShaderResourceView(m_spotShadowMap, &srvDesc, m_spotShadowSrvCpu);
+        m_device->CreateShaderResourceView(*spotShadowMap, &srvDesc, m_spotShadowSrvCpu);
 
         m_spotShadowResourcesReady = true;
         return true;
@@ -308,24 +388,65 @@ namespace SasamiRenderer
         vsmClear.Color[3]   = 1.0f;
 
         CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_DEFAULT);
-        HRESULT hr = m_device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &vsmDesc,
-            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &vsmClear, m_vsmMap);
-        if (FAILED(hr)) {
-            DebugLogDialog("ShadowMapManager::EnsureVsmResources: vsmMap creation failed.\n",
-                           L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
-            return false;
+        HRESULT hr = S_OK;
+        m_vsmMapHandle = {};
+        m_vsmMapCompat = nullptr;
+        if (m_device->GetCapabilities().supportsRhiResourceCreation) {
+            RhiTextureDesc rhiDesc{};
+            rhiDesc.dimension = RhiResourceDimension::Texture2D;
+            rhiDesc.extent = { m_shadowMapSize, m_shadowMapSize, 1u };
+            rhiDesc.mipLevels = 1u;
+            rhiDesc.arrayLayers = kDirectionalCascadeCount;
+            rhiDesc.format = RhiFormat::R32G32Float;
+            rhiDesc.usage = RhiTextureUsageFlags::ShaderResource |
+                            RhiTextureUsageFlags::RenderTarget |
+                            RhiTextureUsageFlags::UnorderedAccess;
+            rhiDesc.memoryUsage = RhiMemoryUsage::GpuOnly;
+            rhiDesc.initialState = RhiResourceState::ShaderResource;
+            m_vsmMapHandle = m_device->CreateRhiTexture(rhiDesc);
+            m_vsmMapCompat = m_device->GetD3D12CompatibilityResource(m_vsmMapHandle);
+        }
+        if (!m_vsmMapCompat) {
+            hr = m_device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &vsmDesc,
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &vsmClear, m_vsmMap);
+            if (FAILED(hr)) {
+                DebugLogDialog("ShadowMapManager::EnsureVsmResources: vsmMap creation failed.\n",
+                               L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+                return false;
+            }
         }
 
         // --- vsmMapTemp: 同フォーマット, UAV のみ (ブラーのピンポンバッファ) ---
         D3D12_RESOURCE_DESC vsmTempDesc = vsmDesc;
         vsmTempDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-        hr = m_device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &vsmTempDesc,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, m_vsmMapTemp);
-        if (FAILED(hr)) {
-            DebugLogDialog("ShadowMapManager::EnsureVsmResources: vsmMapTemp creation failed.\n",
-                           L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
-            m_vsmMap.Reset();
-            return false;
+        m_vsmMapTempHandle = {};
+        m_vsmMapTempCompat = nullptr;
+        if (m_device->GetCapabilities().supportsRhiResourceCreation) {
+            RhiTextureDesc rhiTempDesc{};
+            rhiTempDesc.dimension = RhiResourceDimension::Texture2D;
+            rhiTempDesc.extent = { m_shadowMapSize, m_shadowMapSize, 1u };
+            rhiTempDesc.mipLevels = 1u;
+            rhiTempDesc.arrayLayers = kDirectionalCascadeCount;
+            rhiTempDesc.format = RhiFormat::R32G32Float;
+            rhiTempDesc.usage = RhiTextureUsageFlags::ShaderResource |
+                                RhiTextureUsageFlags::UnorderedAccess;
+            rhiTempDesc.memoryUsage = RhiMemoryUsage::GpuOnly;
+            rhiTempDesc.initialState = RhiResourceState::UnorderedAccess;
+            m_vsmMapTempHandle = m_device->CreateRhiTexture(rhiTempDesc);
+            m_vsmMapTempCompat = m_device->GetD3D12CompatibilityResource(m_vsmMapTempHandle);
+        }
+        if (!m_vsmMapTempCompat) {
+            hr = m_device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &vsmTempDesc,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, m_vsmMapTemp);
+            if (FAILED(hr)) {
+                DebugLogDialog("ShadowMapManager::EnsureVsmResources: vsmMapTemp creation failed.\n",
+                               L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+                m_vsmMap.Reset();
+                m_vsmMapTemp.Reset();
+                m_vsmMapHandle = {}; m_vsmMapTempHandle = {};
+                m_vsmMapCompat = nullptr; m_vsmMapTempCompat = nullptr;
+                return false;
+            }
         }
 
         // --- RTV ヒープ (kDirectionalCascadeCount 個) ---
@@ -338,6 +459,8 @@ namespace SasamiRenderer
             DebugLogDialog("ShadowMapManager::EnsureVsmResources: RTV heap creation failed.\n",
                            L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             m_vsmMap.Reset(); m_vsmMapTemp.Reset();
+            m_vsmMapHandle = {}; m_vsmMapTempHandle = {};
+            m_vsmMapCompat = nullptr; m_vsmMapTempCompat = nullptr;
             return false;
         }
 
@@ -348,9 +471,19 @@ namespace SasamiRenderer
         rtvDesc.Texture2DArray.ArraySize   = 1;
         const UINT rtvInc = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
         CpuDescriptorHandle rtvHandle = m_vsmRtvHeap->GetCPUDescriptorHandleForHeapStart();
+        Resource* vsmMap = GetVsmMapResource();
+        Resource* vsmMapTemp = GetVsmMapTempResource();
+        if (!vsmMap || !vsmMap->IsValid() || !vsmMapTemp || !vsmMapTemp->IsValid()) {
+            DebugLogDialog("ShadowMapManager::EnsureVsmResources: VSM compatibility resource lookup failed.\n",
+                           L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            m_vsmMap.Reset(); m_vsmMapTemp.Reset(); m_vsmRtvHeap = {};
+            m_vsmMapHandle = {}; m_vsmMapTempHandle = {};
+            m_vsmMapCompat = nullptr; m_vsmMapTempCompat = nullptr;
+            return false;
+        }
         for (uint32_t ci = 0; ci < kDirectionalCascadeCount; ++ci) {
             rtvDesc.Texture2DArray.FirstArraySlice = ci;
-            m_device->CreateRenderTargetView(m_vsmMap, &rtvDesc, rtvHandle);
+            m_device->CreateRenderTargetView(*vsmMap, &rtvDesc, rtvHandle);
             rtvHandle.ptr += rtvInc;
         }
 
@@ -368,6 +501,8 @@ namespace SasamiRenderer
             DebugLogDialog("ShadowMapManager::EnsureVsmResources: blur descriptor heap creation failed.\n",
                            L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             m_vsmMap.Reset(); m_vsmMapTemp.Reset(); m_vsmRtvHeap = {};
+            m_vsmMapHandle = {}; m_vsmMapTempHandle = {};
+            m_vsmMapCompat = nullptr; m_vsmMapTempCompat = nullptr;
             return false;
         }
 
@@ -387,22 +522,22 @@ namespace SasamiRenderer
         uavDesc.Texture2DArray.ArraySize          = kDirectionalCascadeCount;
 
         // slot 0: SRV of vsmMap
-        m_device->CreateShaderResourceView(m_vsmMap, &srvDesc, blurCpu);
+        m_device->CreateShaderResourceView(*vsmMap, &srvDesc, blurCpu);
         blurCpu.ptr += srvUavInc;
 
         // slot 1: UAV of vsmMapTemp
-        dev->CreateUnorderedAccessView(m_vsmMapTemp.Get(), nullptr, &uavDesc, blurCpu);
+        dev->CreateUnorderedAccessView(vsmMapTemp->Get(), nullptr, &uavDesc, blurCpu);
         blurCpu.ptr += srvUavInc;
 
         // slot 2: SRV of vsmMapTemp
-        m_device->CreateShaderResourceView(m_vsmMapTemp, &srvDesc, blurCpu);
+        m_device->CreateShaderResourceView(*vsmMapTemp, &srvDesc, blurCpu);
         blurCpu.ptr += srvUavInc;
 
         // slot 3: UAV of vsmMap
-        dev->CreateUnorderedAccessView(m_vsmMap.Get(), nullptr, &uavDesc, blurCpu);
+        dev->CreateUnorderedAccessView(vsmMap->Get(), nullptr, &uavDesc, blurCpu);
 
         // --- メイン SRV (t13 ライティングパス用) ---
-        m_device->CreateShaderResourceView(m_vsmMap, &srvDesc, m_vsmSrvCpu);
+        m_device->CreateShaderResourceView(*vsmMap, &srvDesc, m_vsmSrvCpu);
 
         m_vsmResourcesReady = true;
         return true;

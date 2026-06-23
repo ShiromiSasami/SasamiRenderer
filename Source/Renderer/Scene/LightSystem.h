@@ -22,10 +22,16 @@ namespace SasamiRenderer
         struct FrameResources
         {
             Resource lightCB;
+            RhiBufferHandle lightCBHandle{};
+            Resource* lightCBCompat = nullptr;
             void* lightCBPtr = nullptr;
 
             Resource pointLightBuffer;
             Resource spotLightBuffer;
+            RhiBufferHandle pointLightBufferHandle{};
+            RhiBufferHandle spotLightBufferHandle{};
+            Resource* pointLightBufferCompat = nullptr;
+            Resource* spotLightBufferCompat = nullptr;
             void* pointLightBufferPtr = nullptr;
             void* spotLightBufferPtr = nullptr;
             UINT pointLightCapacity = 0;
@@ -34,6 +40,26 @@ namespace SasamiRenderer
             CpuDescriptorHandle pointSrvCpu{};
             CpuDescriptorHandle spotSrvCpu{};
             GpuDescriptorHandle lightSrvTable{};
+
+            Resource* GetLightCBResource()
+            {
+                return lightCBCompat ? lightCBCompat : &lightCB;
+            }
+
+            const Resource* GetLightCBResource() const
+            {
+                return lightCBCompat ? lightCBCompat : &lightCB;
+            }
+
+            Resource* GetPointLightResource()
+            {
+                return pointLightBufferCompat ? pointLightBufferCompat : &pointLightBuffer;
+            }
+
+            Resource* GetSpotLightResource()
+            {
+                return spotLightBufferCompat ? spotLightBufferCompat : &spotLightBuffer;
+            }
         };
 
         struct ShadowPassContext

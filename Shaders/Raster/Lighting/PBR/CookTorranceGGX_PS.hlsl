@@ -260,18 +260,19 @@ PSOutput PSMain(PSInput i)
     }
     float3 indirectDiffuse = 0.0;
     float3 fallbackSpecular = 0.0;
-    if (u_iblParams.x > 0.5) {
-        // IBL contributes only diffuse/environment lighting here. Specular
-        // reflections come from SSR/SWRT on materials that explicitly opt in.
-        float3 Fibl = FresnelSchlick(saturate(dot(N, V)), F0);
-        float3 kdIbl = (1.0 - Fibl);
-        // Probe GI irradiance (replaces IBL diffuse when GI is enabled)
+    // IBL contributes only diffuse/environment lighting here. Specular
+    // reflections come from SSR/SWRT on materials that explicitly opt in.
+    float3 Fibl = FresnelSchlick(saturate(dot(N, V)), F0);
+    float3 kdIbl = (1.0 - Fibl);
+    if (g_giEnabled > 0.5) {
         float3 probeIrradiance = GI_SampleProbeGrid(i.worldPos, N);
+        float3 diffuseGI = probeIrradiance * diffuseReflectance;
+        indirectDiffuse = kdIbl * diffuseGI * iblVisibility;
+    } else if (u_iblParams.x > 0.5) {
         float3 iblIrradiance = (u_iblParams.w > 0.5)
             ? EvaluateDiffuseIrradianceFromSh(N)
             : IrradianceTex.Sample(LinearWrap, N).rgb;
-        float3 irradiance = (g_giEnabled > 0.5) ? probeIrradiance : iblIrradiance;
-        float3 diffuseIBL = irradiance * diffuseReflectance;
+        float3 diffuseIBL = iblIrradiance * diffuseReflectance;
 
         // AO-driven occlusion for indirect light:
         // - Diffuse IBL uses linear AO.

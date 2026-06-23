@@ -12,6 +12,23 @@
 
 namespace SasamiRenderer
 {
+    Resource* MeshletBuffer::GetDescBufferResource() const
+    {
+        return m_descBufferCompat ? m_descBufferCompat : const_cast<Resource*>(&m_descBuffer);
+    }
+
+    Resource* MeshletBuffer::GetIndexBufferResource() const
+    {
+        return m_indexBufferCompat ? m_indexBufferCompat : const_cast<Resource*>(&m_indexBuffer);
+    }
+
+    bool MeshletBuffer::IsValid() const
+    {
+        Resource* descBuffer = GetDescBufferResource();
+        Resource* indexBuffer = GetIndexBufferResource();
+        return descBuffer && descBuffer->IsValid() && indexBuffer && indexBuffer->IsValid();
+    }
+
     void MeshletBuffer::Build(const std::vector<Mesh>& meshes)
     {
         m_meshletDescs.clear();
@@ -94,10 +111,54 @@ namespace SasamiRenderer
     {
         m_descBuffer.Reset();
         m_indexBuffer.Reset();
+        m_descBufferHandle = {};
+        m_indexBufferHandle = {};
+        m_descBufferCompat = nullptr;
+        m_indexBufferCompat = nullptr;
 
         if (m_meshletDescs.empty())
         {
             return true;
+        }
+
+        const size_t descBytes = m_meshletDescs.size() * sizeof(MeshletDesc);
+        const size_t idxBytes = m_meshletIndices.size() * sizeof(uint32_t);
+
+        if (device.GetCapabilities().supportsRhiResourceCreation)
+        {
+            RhiBufferDesc descBufferDesc{};
+            descBufferDesc.sizeInBytes = static_cast<uint64_t>(descBytes);
+            descBufferDesc.strideInBytes = sizeof(MeshletDesc);
+            descBufferDesc.usage = RhiBufferUsageFlags::Structured | RhiBufferUsageFlags::ShaderResource;
+            descBufferDesc.memoryUsage = RhiMemoryUsage::CpuToGpu;
+            descBufferDesc.initialState = RhiResourceState::ShaderResource;
+            m_descBufferHandle = device.CreateRhiBuffer(descBufferDesc, m_meshletDescs.data());
+            m_descBufferCompat = device.GetD3D12CompatibilityResource(m_descBufferHandle);
+
+            RhiBufferDesc indexBufferDesc{};
+            indexBufferDesc.sizeInBytes = static_cast<uint64_t>(idxBytes);
+            indexBufferDesc.strideInBytes = sizeof(uint32_t);
+            indexBufferDesc.usage = RhiBufferUsageFlags::Structured | RhiBufferUsageFlags::ShaderResource;
+            indexBufferDesc.memoryUsage = RhiMemoryUsage::CpuToGpu;
+            indexBufferDesc.initialState = RhiResourceState::ShaderResource;
+            m_indexBufferHandle = device.CreateRhiBuffer(indexBufferDesc, m_meshletIndices.data());
+            m_indexBufferCompat = device.GetD3D12CompatibilityResource(m_indexBufferHandle);
+
+            if (m_descBufferCompat && m_descBufferCompat->IsValid() &&
+                m_indexBufferCompat && m_indexBufferCompat->IsValid())
+            {
+                return true;
+            }
+
+            m_descBufferHandle = {};
+            m_indexBufferHandle = {};
+            m_descBufferCompat = nullptr;
+            m_indexBufferCompat = nullptr;
+        }
+
+        if (!device.GetCapabilities().supportsD3D12CompatibilitySurface)
+        {
+            return false;
         }
 
         // Helper: create a default GPU buffer and upload data via an upload heap
@@ -149,14 +210,12 @@ namespace SasamiRenderer
         };
 
         // Upload meshlet descriptor buffer
-        const size_t descBytes = m_meshletDescs.size() * sizeof(MeshletDesc);
         if (!uploadBuffer(m_meshletDescs.data(), descBytes, m_descBuffer))
         {
             return false;
         }
 
         // Upload meshlet index buffer
-        const size_t idxBytes = m_meshletIndices.size() * sizeof(uint32_t);
         if (!uploadBuffer(m_meshletIndices.data(), idxBytes, m_indexBuffer))
         {
             return false;
@@ -167,11 +226,13 @@ namespace SasamiRenderer
 
     D3D12_GPU_VIRTUAL_ADDRESS MeshletBuffer::GetMeshletDescGpuVA() const
     {
-        return m_descBuffer.IsValid() ? m_descBuffer.GetGPUVirtualAddress() : 0u;
+        Resource* descBuffer = GetDescBufferResource();
+        return descBuffer && descBuffer->IsValid() ? descBuffer->GetGPUVirtualAddress() : 0u;
     }
 
     D3D12_GPU_VIRTUAL_ADDRESS MeshletBuffer::GetMeshletIndexGpuVA() const
     {
-        return m_indexBuffer.IsValid() ? m_indexBuffer.GetGPUVirtualAddress() : 0u;
+        Resource* indexBuffer = GetIndexBufferResource();
+        return indexBuffer && indexBuffer->IsValid() ? indexBuffer->GetGPUVirtualAddress() : 0u;
     }
 }

@@ -43,14 +43,21 @@ namespace SasamiRenderer
         const MeshRange& GetMeshRange(size_t meshIndex) const { return m_meshRanges[meshIndex]; }
         size_t GetMeshRangeCount() const { return m_meshRanges.size(); }
 
-        bool IsValid() const { return m_descBuffer.IsValid() && m_indexBuffer.IsValid(); }
+        bool IsValid() const;
 
     private:
+        Resource* GetDescBufferResource() const;
+        Resource* GetIndexBufferResource() const;
+
         std::vector<MeshletDesc> m_meshletDescs;
         std::vector<uint32_t>    m_meshletIndices; // flat: 3 indices per triangle per meshlet
         std::vector<MeshRange>   m_meshRanges;
 
         Resource m_descBuffer;   // StructuredBuffer<MeshletDesc>
         Resource m_indexBuffer;  // Buffer<uint>
+        RhiBufferHandle m_descBufferHandle{};
+        RhiBufferHandle m_indexBufferHandle{};
+        Resource* m_descBufferCompat = nullptr;
+        Resource* m_indexBufferCompat = nullptr;
     };
 }

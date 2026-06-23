@@ -34,16 +34,23 @@ namespace SasamiRenderer
         bool IsSpotShadowReady() const { return m_spotShadowResourcesReady; }
 
         // Raw resource access (needed by LightSystem::ExecuteShadowPass for barriers)
-        Resource& GetShadowMap()     { return m_shadowMap; }
-        Resource& GetSpotShadowMap() { return m_spotShadowMap; }
-        Resource& GetVsmMap()        { return m_vsmMap; }
-        Resource& GetVsmMapTemp()    { return m_vsmMapTemp; }
+        Resource& GetShadowMap()     { return *GetShadowMapResource(); }
+        Resource& GetSpotShadowMap() { return *GetSpotShadowMapResource(); }
+        Resource& GetVsmMap()        { return *GetVsmMapResource(); }
+        Resource& GetVsmMapTemp()    { return *GetVsmMapTempResource(); }
         DescriptorHeap& GetVsmBlurDescHeap() { return m_vsmBlurDescHeap; }
 
     private:
+        Resource* GetShadowMapResource() const;
+        Resource* GetSpotShadowMapResource() const;
+        Resource* GetVsmMapResource() const;
+        Resource* GetVsmMapTempResource() const;
+
         IRHIDevice* m_device = nullptr;
 
         Resource m_shadowMap;
+        RhiTextureHandle m_shadowMapHandle{};
+        Resource* m_shadowMapCompat = nullptr;
         DescriptorHeap m_dsvHeapShadow;
         CpuDescriptorHandle m_shadowSrvCpu{};
         GpuDescriptorHandle m_shadowSrv{};
@@ -52,6 +59,8 @@ namespace SasamiRenderer
         Rect m_shadowScissor{};
 
         Resource m_spotShadowMap;
+        RhiTextureHandle m_spotShadowMapHandle{};
+        Resource* m_spotShadowMapCompat = nullptr;
         DescriptorHeap m_spotDsvHeap;
         CpuDescriptorHandle m_spotShadowSrvCpu{};
         GpuDescriptorHandle m_spotShadowSrv{};
@@ -60,6 +69,10 @@ namespace SasamiRenderer
 
         Resource m_vsmMap;          // R32G32_FLOAT, kShadowMapSize x kShadowMapSize, kDirectionalCascadeCount slices
         Resource m_vsmMapTemp;      // same format, ping-pong for blur
+        RhiTextureHandle m_vsmMapHandle{};
+        RhiTextureHandle m_vsmMapTempHandle{};
+        Resource* m_vsmMapCompat = nullptr;
+        Resource* m_vsmMapTempCompat = nullptr;
         DescriptorHeap m_vsmRtvHeap;       // RTV heap: kDirectionalCascadeCount RTVs for vsmMap
         DescriptorHeap m_vsmBlurDescHeap;  // shader-visible: 4 slots (SRV+UAV for H-pass, SRV+UAV for V-pass)
         CpuDescriptorHandle m_vsmSrvCpu{};  // CPU handle in main SRV heap (for lighting pass t13)
