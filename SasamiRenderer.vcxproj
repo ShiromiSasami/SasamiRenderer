@@ -203,6 +203,7 @@
     <ClCompile Include="Source\Renderer\Resources\RenderTargetPool.cpp" />
     <ClCompile Include="Source\Renderer\Backends\DirectX12\Dx12GraphicsDevice_Init.cpp" />
     <ClCompile Include="Source\Renderer\Backends\DirectX12\Dx12GraphicsDevice_Resource.cpp" />
+    <ClCompile Include="Source\Renderer\Backends\DirectX12\Dx12GraphicsDevice_RayTracing.cpp" />
     <ClCompile Include="Source\Renderer\Resources\RenderTargetPool_Swrt.cpp" />
     <ClCompile Include="Source\Renderer\Runtime\Renderer.cpp" />
     <ClCompile Include="Source\Renderer\Runtime\Renderer_Render.cpp" />
@@ -227,6 +228,7 @@
     <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDevice.cpp" />
     <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDevice_Backend.cpp" />
     <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDevice_Pipeline.cpp" />
+    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDevice_RayTracing.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>15.0</VCProjectVersion>

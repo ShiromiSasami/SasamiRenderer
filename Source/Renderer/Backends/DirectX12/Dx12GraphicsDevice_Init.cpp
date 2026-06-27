@@ -371,7 +371,8 @@ namespace SasamiRenderer
         m_capabilities.supportsRhiDescriptorCreation = true;
         m_capabilities.supportsRhiPipelineCreation = true;
         m_capabilities.supportsRhiCommandEncoding = true;
-        m_capabilities.supportsHardwareRayTracing = m_supportsHardwareRayTracing;
+        m_capabilities.supportsHardwareRayTracing    = m_supportsHardwareRayTracing;
+        m_capabilities.supportsRayTracingPipeline    = m_supportsHardwareRayTracing;
 
         return true;
     }

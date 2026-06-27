@@ -516,162 +516,77 @@ namespace SasamiRenderer
         }
 
         if (m_scene.instances.empty() || m_meshRecords.empty()) {
-            m_tlas.Reset();
+            m_tlasHandle = {};
             return true;
         }
 
-        ID3D12Device5* dxrDevice = device.GetRayTracingDevice();
-        if (!dxrDevice || !m_vertexBuffer.IsValid() || !m_indexBuffer.IsValid()) {
+        if (!m_vertexBuffer.IsValid() || !m_indexBuffer.IsValid()) {
             return false;
         }
 
-        CommandAllocator allocator;
-        CommandList commandList;
-        if (FAILED(device.CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, allocator)) ||
-            FAILED(device.CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nullptr, commandList))) {
+        // Build one BLAS per mesh
+        std::vector<RhiRayTracingGeometryDesc> geomDescs(m_meshRecords.size());
+        std::vector<RhiBlasDesc>               blasDescs(m_meshRecords.size());
+        for (size_t i = 0; i < m_meshRecords.size(); ++i) {
+            const MeshRecord& mesh = m_meshRecords[i];
+            RhiRayTracingGeometryDesc& gd = geomDescs[i];
+            gd.vertexBufferAddress = m_vertexBuffer->GetGPUVirtualAddress()
+                                   + static_cast<UINT64>(mesh.vertexOffset) * sizeof(GpuVertex);
+            gd.vertexFormat        = RhiFormat::R32G32B32Float;
+            gd.vertexCount         = mesh.vertexCount;
+            gd.vertexStrideInBytes = sizeof(GpuVertex);
+            gd.indexBufferAddress  = m_indexBuffer->GetGPUVirtualAddress()
+                                   + static_cast<UINT64>(mesh.indexOffset) * sizeof(uint32_t);
+            gd.indexCount          = mesh.indexCount;
+            gd.index32Bit          = true;
+            gd.opaque              = true;
+
+            blasDescs[i].geometries     = &geomDescs[i];
+            blasDescs[i].geometryCount  = 1u;
+            blasDescs[i].preferFastTrace = true;
+        }
+
+        std::vector<RhiAccelerationStructureHandle> blasHandles(m_meshRecords.size());
+        if (!device.BuildRhiBlases(blasDescs.data(),
+                                   static_cast<uint32_t>(m_meshRecords.size()),
+                                   blasHandles.data())) {
             return false;
         }
-
-        ComPtr<ID3D12GraphicsCommandList4> dxrCommandList;
-        if (FAILED(commandList.Get()->QueryInterface(IID_PPV_ARGS(&dxrCommandList)))) {
-            return false;
+        for (size_t i = 0; i < m_meshRecords.size(); ++i) {
+            m_meshRecords[i].blasHandle = blasHandles[i];
         }
 
-        std::vector<Resource> scratchBuffers;
-        scratchBuffers.reserve(m_meshRecords.size() + 1u);
-
-        for (MeshRecord& mesh : m_meshRecords) {
-            D3D12_RAYTRACING_GEOMETRY_DESC geometryDesc{};
-            geometryDesc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-            geometryDesc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
-            geometryDesc.Triangles.Transform3x4 = 0u;
-            geometryDesc.Triangles.IndexFormat = DXGI_FORMAT_R32_UINT;
-            geometryDesc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
-            geometryDesc.Triangles.IndexCount = mesh.indexCount;
-            geometryDesc.Triangles.VertexCount = mesh.vertexCount;
-            geometryDesc.Triangles.IndexBuffer = m_indexBuffer->GetGPUVirtualAddress() + static_cast<UINT64>(mesh.indexOffset) * sizeof(uint32_t);
-            geometryDesc.Triangles.VertexBuffer.StartAddress = m_vertexBuffer->GetGPUVirtualAddress() + static_cast<UINT64>(mesh.vertexOffset) * sizeof(GpuVertex);
-            geometryDesc.Triangles.VertexBuffer.StrideInBytes = sizeof(GpuVertex);
-
-            D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs{};
-            inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
-            inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-            inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
-            inputs.NumDescs = 1u;
-            inputs.pGeometryDescs = &geometryDesc;
-
-            D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO prebuildInfo{};
-            dxrDevice->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &prebuildInfo);
-            if (prebuildInfo.ResultDataMaxSizeInBytes == 0u) {
-                return false;
-            }
-
-            Resource scratchBuffer;
-            if (!CreateBuffer(device,
-                              prebuildInfo.ScratchDataSizeInBytes,
-                              D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
-                              D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                              scratchBuffer) ||
-                !CreateBuffer(device,
-                              prebuildInfo.ResultDataMaxSizeInBytes,
-                              D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
-                              D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
-                              mesh.blas)) {
-                return false;
-            }
-
-            D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC buildDesc{};
-            buildDesc.Inputs = inputs;
-            buildDesc.ScratchAccelerationStructureData = scratchBuffer->GetGPUVirtualAddress();
-            buildDesc.DestAccelerationStructureData = mesh.blas->GetGPUVirtualAddress();
-            dxrCommandList->BuildRaytracingAccelerationStructure(&buildDesc, 0u, nullptr);
-
-            const D3D12_RESOURCE_BARRIER barrier =
-                CD3DX12_RESOURCE_BARRIER::UAV(mesh.blas.Get());
-            dxrCommandList->ResourceBarrier(1u, &barrier);
-
-            scratchBuffers.push_back(std::move(scratchBuffer));
-        }
-
-        std::vector<D3D12_RAYTRACING_INSTANCE_DESC> instanceDescs(m_scene.instances.size());
+        // Build TLAS from instance list
+        std::vector<RhiTlasInstanceDesc> tlasInstances(m_scene.instances.size());
         for (size_t instanceIndex = 0; instanceIndex < m_scene.instances.size(); ++instanceIndex) {
-            const RayTracingInstance& sceneInstance = m_scene.instances[instanceIndex];
-            if (sceneInstance.meshIndex >= m_meshRecords.size()) {
+            const RayTracingInstance& src = m_scene.instances[instanceIndex];
+            if (src.meshIndex >= m_meshRecords.size()) {
                 continue;
             }
-
-            D3D12_RAYTRACING_INSTANCE_DESC& instanceDesc = instanceDescs[instanceIndex];
-            std::memset(&instanceDesc, 0, sizeof(instanceDesc));
-            ConvertToDxrTransform(sceneInstance.model, instanceDesc.Transform);
-            instanceDesc.InstanceID = static_cast<UINT>(instanceIndex);
-            instanceDesc.InstanceContributionToHitGroupIndex = 0u;
-            instanceDesc.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_FORCE_OPAQUE;
-            instanceDesc.AccelerationStructure = m_meshRecords[sceneInstance.meshIndex].blas->GetGPUVirtualAddress();
-            instanceDesc.InstanceMask = sceneInstance.transparent ? 0x01u : 0xFFu;
+            RhiTlasInstanceDesc& tid = tlasInstances[instanceIndex];
+            ConvertToDxrTransform(src.model,
+                reinterpret_cast<float(*)[4]>(tid.transform));
+            tid.blasHandle    = m_meshRecords[src.meshIndex].blasHandle;
+            tid.instanceID    = static_cast<uint32_t>(instanceIndex);
+            tid.instanceMask  = src.transparent ? 0x01u : 0xFFu;
+            tid.hitGroupIndex = 0u;
+            tid.forceOpaque   = true;
         }
 
-        Resource instanceDescBuffer;
-        void* mappedInstanceData = nullptr;
-        if (!ResourceUploadUtility::CreateUploadBuffer(device,
-                                                       static_cast<UINT64>(instanceDescs.size()) * sizeof(D3D12_RAYTRACING_INSTANCE_DESC),
-                                                       instanceDescBuffer,
-                                                       &mappedInstanceData)) {
-            return false;
-        }
-        if (!instanceDescs.empty()) {
-            std::memcpy(mappedInstanceData,
-                        instanceDescs.data(),
-                        static_cast<size_t>(instanceDescs.size()) * sizeof(D3D12_RAYTRACING_INSTANCE_DESC));
-            instanceDescBuffer->Unmap(0, nullptr);
-        }
-
-        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS topLevelInputs{};
-        topLevelInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
-        topLevelInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-        topLevelInputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
-        topLevelInputs.NumDescs = static_cast<UINT>(instanceDescs.size());
-        topLevelInputs.InstanceDescs = instanceDescBuffer->GetGPUVirtualAddress();
-
-        D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO topLevelPrebuildInfo{};
-        dxrDevice->GetRaytracingAccelerationStructurePrebuildInfo(&topLevelInputs, &topLevelPrebuildInfo);
-
-        Resource topLevelScratch;
-        if (!CreateBuffer(device,
-                          topLevelPrebuildInfo.ScratchDataSizeInBytes,
-                          D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
-                          D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                          topLevelScratch) ||
-            !CreateBuffer(device,
-                          topLevelPrebuildInfo.ResultDataMaxSizeInBytes,
-                          D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
-                          D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
-                          m_tlas)) {
+        RhiTlasDesc tlasDesc{};
+        tlasDesc.instances     = tlasInstances.data();
+        tlasDesc.instanceCount = static_cast<uint32_t>(tlasInstances.size());
+        tlasDesc.preferFastTrace = true;
+        m_tlasHandle = device.BuildRhiTlas(tlasDesc);
+        if (m_tlasHandle.id == 0) {
             return false;
         }
 
-        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC topLevelBuildDesc{};
-        topLevelBuildDesc.Inputs = topLevelInputs;
-        topLevelBuildDesc.ScratchAccelerationStructureData = topLevelScratch->GetGPUVirtualAddress();
-        topLevelBuildDesc.DestAccelerationStructureData = m_tlas->GetGPUVirtualAddress();
-        dxrCommandList->BuildRaytracingAccelerationStructure(&topLevelBuildDesc, 0u, nullptr);
+        // Register TLAS SRV in the descriptor set
+        RhiCpuDescriptorHandle tlasDest{};
+        tlasDest.ptr = static_cast<uint64_t>(m_descriptors.tlasSrvCpu.ptr);
+        device.CreateRhiAccelerationStructureSrv(m_tlasHandle, tlasDest);
 
-        const D3D12_RESOURCE_BARRIER tlasBarrier =
-            CD3DX12_RESOURCE_BARRIER::UAV(m_tlas.Get());
-        dxrCommandList->ResourceBarrier(1u, &tlasBarrier);
-
-        if (FAILED(commandList.Close())) {
-            return false;
-        }
-
-        ID3D12CommandList* commandLists[] = { commandList.Get() };
-        device.GetCommandQueue()->ExecuteCommandLists(1u, commandLists);
-        device.WaitForGPU();
-
-        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
-        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srvDesc.RaytracingAccelerationStructure.Location = m_tlas->GetGPUVirtualAddress();
-        device.GetDevice()->CreateShaderResourceView(nullptr, &srvDesc, m_descriptors.tlasSrvCpu);
         return true;
     }
 
@@ -682,12 +597,18 @@ namespace SasamiRenderer
                               const RayTracingFrameDesc& frameDesc,
                               RayTracingRuntimeStats& outStats)
     {
-        if (!m_supported || !m_pipelineReady || m_sceneDirty || !m_tlas.IsValid()) {
+        if (!m_supported || !m_pipelineReady || m_sceneDirty || m_tlasHandle.id == 0) {
             return false;
         }
 
         ID3D12Device* nativeDevice = device.GetDevice();
         if (!nativeDevice || !CreateTextureUav(nativeDevice, outputTexture, m_descriptors.outputUavCpu)) {
+            return false;
+        }
+
+        ID3D12StateObject*   stateObject   = device.GetDx12RayTracingStateObject(m_rtPipelineHandle);
+        ID3D12RootSignature* rootSignature = device.GetDx12RayTracingRootSignature(m_rtPipelineHandle);
+        if (!stateObject || !rootSignature) {
             return false;
         }
 
@@ -709,10 +630,12 @@ namespace SasamiRenderer
         DescriptorHeap* heaps[] = { &srvHeap };
         cmdList.SetDescriptorHeaps(1u, heaps);
 
-        dxrCommandList->SetComputeRootSignature(m_globalRootSignature.Get());
-        dxrCommandList->SetPipelineState1(m_stateObject.Get());
+        dxrCommandList->SetComputeRootSignature(rootSignature);
+        dxrCommandList->SetPipelineState1(stateObject);
         dxrCommandList->SetComputeRootConstantBufferView(0u, m_frameConstantsBuffer->GetGPUVirtualAddress());
-        dxrCommandList->SetComputeRootShaderResourceView(1u, m_tlas->GetGPUVirtualAddress());
+        dxrCommandList->SetComputeRootShaderResourceView(
+            1u, static_cast<D3D12_GPU_VIRTUAL_ADDRESS>(
+                    device.GetRhiAccelerationStructureGpuAddress(m_tlasHandle)));
 
         const auto outputToUavBarrier = CD3DX12_RESOURCE_BARRIER::Transition(outputTexture.Get(),
                                                                              D3D12_RESOURCE_STATE_COPY_SOURCE,
@@ -720,17 +643,12 @@ namespace SasamiRenderer
         dxrCommandList->ResourceBarrier(1u, &outputToUavBarrier);
 
         D3D12_DISPATCH_RAYS_DESC dispatchDesc{};
-        dispatchDesc.RayGenerationShaderRecord.StartAddress = m_rayGenShaderTable->GetGPUVirtualAddress();
-        dispatchDesc.RayGenerationShaderRecord.SizeInBytes = m_rayGenShaderRecordSize;
-        dispatchDesc.MissShaderTable.StartAddress = m_missShaderTable->GetGPUVirtualAddress();
-        dispatchDesc.MissShaderTable.SizeInBytes = m_missShaderRecordSize * 2u;
-        dispatchDesc.MissShaderTable.StrideInBytes = m_missShaderRecordSize;
-        dispatchDesc.HitGroupTable.StartAddress = m_hitGroupShaderTable->GetGPUVirtualAddress();
-        dispatchDesc.HitGroupTable.SizeInBytes = m_hitGroupShaderRecordSize;
-        dispatchDesc.HitGroupTable.StrideInBytes = m_hitGroupShaderRecordSize;
-        dispatchDesc.Width = std::max(1u, frameDesc.renderWidth);
+        if (!device.FillDx12DispatchRaysDesc(m_sbtHandle, dispatchDesc)) {
+            return false;
+        }
+        dispatchDesc.Width  = std::max(1u, frameDesc.renderWidth);
         dispatchDesc.Height = std::max(1u, frameDesc.renderHeight);
-        dispatchDesc.Depth = 1u;
+        dispatchDesc.Depth  = 1u;
         dxrCommandList->DispatchRays(&dispatchDesc);
 
         const D3D12_RESOURCE_BARRIER outputToCopySource =

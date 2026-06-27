@@ -61,6 +61,22 @@ namespace SasamiRenderer
         std::unique_ptr<IRhiCommandEncoder> CreateCommandEncoder(RhiQueueType queueType) override;
         bool SubmitCommandEncoder(IRhiCommandEncoder& encoder, RhiQueueType queueType) override;
         Resource* GetD3D12CompatibilityResource(RhiResourceHandle handle) override;
+
+        // Ray tracing
+        bool BuildRhiBlases(const RhiBlasDesc* descs, uint32_t count,
+                             RhiAccelerationStructureHandle* outHandles) override;
+        RhiAccelerationStructureHandle BuildRhiTlas(const RhiTlasDesc& desc) override;
+        bool DestroyRhiAccelerationStructure(RhiAccelerationStructureHandle handle) override;
+        RhiGpuAddress GetRhiAccelerationStructureGpuAddress(RhiAccelerationStructureHandle handle) override;
+        bool CreateRhiAccelerationStructureSrv(
+            RhiAccelerationStructureHandle handle, RhiCpuDescriptorHandle dest) override;
+        RhiRayTracingPipelineHandle CreateRhiRayTracingPipeline(
+            const RhiRayTracingPipelineDesc& desc) override;
+        RhiShaderBindingTableHandle CreateRhiShaderBindingTable(
+            const RhiShaderBindingTableDesc& desc) override;
+        ID3D12StateObject*   GetDx12RayTracingStateObject(RhiRayTracingPipelineHandle handle) override;
+        ID3D12RootSignature* GetDx12RayTracingRootSignature(RhiRayTracingPipelineHandle handle) override;
+        bool FillDx12DispatchRaysDesc(RhiShaderBindingTableHandle handle, D3D12_DISPATCH_RAYS_DESC& outDesc) override;
         PipelineState* GetD3D12CompatibilityPipelineState(RhiPipelineHandle handle) override;
 
         HRESULT CreateDescriptorHeap(const DescriptorHeapDesc& desc, DescriptorHeap& out) override;
@@ -114,11 +130,38 @@ namespace SasamiRenderer
         uint64_t m_nextRhiShaderHandle = 1;
         uint64_t m_nextRhiPipelineLayoutHandle = 1;
         uint64_t m_nextRhiPipelineHandle = 1;
+        uint64_t m_nextRhiAccelStructHandle = 1;
+        uint64_t m_nextRhiRTPipelineHandle = 1;
+        uint64_t m_nextRhiSBTHandle = 1;
         std::unordered_map<uint64_t, Resource> m_rhiResources;
         std::unordered_map<uint64_t, RhiShaderModule> m_rhiShaders;
         std::unordered_map<uint64_t, RootSignature> m_rhiPipelineLayouts;
         std::unordered_map<uint64_t, PipelineState> m_rhiPipelines;
         std::vector<DescriptorHeap> m_rhiDescriptorHeaps;
+
+        // Ray tracing
+        struct Dx12AccelStruct { Resource buffer; };
+        struct Dx12RTPipeline {
+            ComPtr<ID3D12StateObject>           stateObject;
+            ComPtr<ID3D12StateObjectProperties> props;
+            ComPtr<ID3D12RootSignature>         rootSignature;
+            // Per-group export name (for SBT identifier lookup via GetShaderIdentifier)
+            std::vector<std::wstring>           groupExportNames;
+            uint32_t shaderGroupCount = 0;
+        };
+        struct Dx12SBT {
+            Resource rayGenTable;
+            Resource missTable;
+            Resource hitGroupTable;
+            UINT     rayGenRecordSize   = 0;
+            UINT     missRecordSize     = 0;
+            UINT     hitGroupRecordSize = 0;
+            UINT     missCount          = 0;
+            UINT     hitGroupCount      = 0;
+        };
+        std::unordered_map<uint64_t, Dx12AccelStruct> m_dx12AccelStructures;
+        std::unordered_map<uint64_t, Dx12RTPipeline>  m_dx12RTPipelines;
+        std::unordered_map<uint64_t, Dx12SBT>         m_dx12SBTs;
     };
 #endif
 }

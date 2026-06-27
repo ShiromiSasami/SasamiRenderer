@@ -478,6 +478,22 @@ namespace SasamiRenderer
             (void)handle;
             return nullptr;
         }
+        virtual ID3D12StateObject* GetDx12RayTracingStateObject(RhiRayTracingPipelineHandle handle)
+        {
+            (void)handle;
+            return nullptr;
+        }
+        virtual ID3D12RootSignature* GetDx12RayTracingRootSignature(RhiRayTracingPipelineHandle handle)
+        {
+            (void)handle;
+            return nullptr;
+        }
+        virtual bool FillDx12DispatchRaysDesc(RhiShaderBindingTableHandle handle, D3D12_DISPATCH_RAYS_DESC& outDesc)
+        {
+            (void)handle;
+            (void)outDesc;
+            return false;
+        }
         std::unique_ptr<IRhiCommandEncoder> CreateCommandEncoder(RhiQueueType queueType) override
         {
             (void)queueType;

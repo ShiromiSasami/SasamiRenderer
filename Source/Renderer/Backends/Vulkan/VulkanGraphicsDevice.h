@@ -68,6 +68,19 @@ namespace SasamiRenderer
         std::unique_ptr<IRhiCommandEncoder> CreateCommandEncoder(RhiQueueType queueType) override;
         bool SubmitCommandEncoder(IRhiCommandEncoder& encoder, RhiQueueType queueType) override;
 
+        // Ray tracing (Vulkan stubs — VK_KHR_ray_tracing_pipeline not yet implemented)
+        bool BuildRhiBlases(const RhiBlasDesc* descs, uint32_t count,
+                             RhiAccelerationStructureHandle* outHandles) override;
+        RhiAccelerationStructureHandle BuildRhiTlas(const RhiTlasDesc& desc) override;
+        bool DestroyRhiAccelerationStructure(RhiAccelerationStructureHandle handle) override;
+        RhiGpuAddress GetRhiAccelerationStructureGpuAddress(RhiAccelerationStructureHandle handle) override;
+        bool CreateRhiAccelerationStructureSrv(
+            RhiAccelerationStructureHandle handle, RhiCpuDescriptorHandle dest) override;
+        RhiRayTracingPipelineHandle CreateRhiRayTracingPipeline(
+            const RhiRayTracingPipelineDesc& desc) override;
+        RhiShaderBindingTableHandle CreateRhiShaderBindingTable(
+            const RhiShaderBindingTableDesc& desc) override;
+
         HRESULT CreateDescriptorHeap(const DescriptorHeapDesc& desc, DescriptorHeap& out) override;
         HRESULT CreateCommittedResource(const HeapProperties* heapProps,
                                         HeapFlags heapFlags,

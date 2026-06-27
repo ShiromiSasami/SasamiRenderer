@@ -318,11 +318,11 @@ namespace SasamiRenderer
             return true;
         }
 
-        if (!CompileShadersAndCreateStateObject(device)) {
+        if (!CompileShadersAndCreatePipeline(device)) {
             m_supported = false;
             return false;
         }
-        if (!CreateShaderTables(device)) {
+        if (!CreateShaderBindingTable(device)) {
             m_supported = false;
             return false;
         }
@@ -354,13 +354,25 @@ namespace SasamiRenderer
             return;
         }
 
+        // Destroy stale acceleration structures before rebuilding
+        if (m_tlasHandle.id != 0) {
+            device.DestroyRhiAccelerationStructure(m_tlasHandle);
+            m_tlasHandle = {};
+        }
+        for (MeshRecord& mesh : m_meshRecords) {
+            if (mesh.blasHandle.id != 0) {
+                device.DestroyRhiAccelerationStructure(mesh.blasHandle);
+                mesh.blasHandle = {};
+            }
+        }
+
         const auto buildStartTime = std::chrono::high_resolution_clock::now();
         if (!UploadSceneBuffers(device)) {
             DebugLog("DxrRayTracer::UpdateScene: failed to upload scene buffers.\n");
             return;
         }
         if (m_scene.instances.empty() || m_scene.meshes.empty()) {
-            m_tlas.Reset();
+            m_tlasHandle = {};
         } else if (!BuildAccelerationStructures(device)) {
             DebugLog("DxrRayTracer::UpdateScene: failed to build acceleration structures.\n");
             return;
@@ -471,14 +483,9 @@ namespace SasamiRenderer
         }
     }
 
-    bool DxrRayTracer::CompileShadersAndCreateStateObject(IRHIDevice& device)
+    bool DxrRayTracer::CompileShadersAndCreatePipeline(IRHIDevice& device)
     {
         if (!m_supported) {
-            return false;
-        }
-
-        ID3D12Device5* dxrDevice = device.GetRayTracingDevice();
-        if (!dxrDevice) {
             return false;
         }
 
@@ -487,109 +494,33 @@ namespace SasamiRenderer
             return false;
         }
 
-        D3D12_ROOT_PARAMETER rootParameters[2] = {};
-        rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-        rootParameters[0].Descriptor.ShaderRegister = 0;
-        rootParameters[0].Descriptor.RegisterSpace = 0;
-        rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        RhiRayTracingShaderGroupDesc shaderGroups[4] = {};
+        // Group 0: RayGen (General)
+        shaderGroups[0].type       = RhiRayTracingShaderGroupDesc::Type::General;
+        shaderGroups[0].exportName = "RayGenShader";
+        // Group 1: Miss (General)
+        shaderGroups[1].type       = RhiRayTracingShaderGroupDesc::Type::General;
+        shaderGroups[1].exportName = "MissShader";
+        // Group 2: Shadow Miss (General)
+        shaderGroups[2].type       = RhiRayTracingShaderGroupDesc::Type::General;
+        shaderGroups[2].exportName = "ShadowMissShader";
+        // Group 3: TrianglesHit group
+        shaderGroups[3].type             = RhiRayTracingShaderGroupDesc::Type::TrianglesHit;
+        shaderGroups[3].hitGroupExport   = "SceneHitGroup";
+        shaderGroups[3].closestHitExport = "ClosestHitShader";
 
-        rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
-        rootParameters[1].Descriptor.ShaderRegister = 0;
-        rootParameters[1].Descriptor.RegisterSpace = 0;
-        rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        RhiRayTracingPipelineDesc pipelineDesc{};
+        pipelineDesc.libraryBytecode            = static_cast<const uint8_t*>(shaderLibrary->GetBufferPointer());
+        pipelineDesc.libraryBytecodeSizeInBytes = shaderLibrary->GetBufferSize();
+        pipelineDesc.shaderGroups               = shaderGroups;
+        pipelineDesc.shaderGroupCount           = 4u;
+        pipelineDesc.maxRecursionDepth          = kMaxRayTracingBounceCount + 1u;
+        pipelineDesc.maxPayloadSizeBytes        = 32u;
+        pipelineDesc.maxAttributeSizeBytes      = D3D12_RAYTRACING_MAX_ATTRIBUTE_SIZE_IN_BYTES;
 
-        D3D12_STATIC_SAMPLER_DESC samplerDesc{};
-        samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-        samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        samplerDesc.ShaderRegister = 0;
-        samplerDesc.RegisterSpace = 0;
-        samplerDesc.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-        D3D12_ROOT_SIGNATURE_DESC rootSignatureDesc{};
-        rootSignatureDesc.NumParameters = _countof(rootParameters);
-        rootSignatureDesc.pParameters = rootParameters;
-        rootSignatureDesc.NumStaticSamplers = 1;
-        rootSignatureDesc.pStaticSamplers = &samplerDesc;
-        rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
-
-        ComPtr<ID3DBlob> serializedRootSignature;
-        ComPtr<ID3DBlob> rootSignatureErrors;
-        if (FAILED(D3D12SerializeRootSignature(&rootSignatureDesc,
-                                               D3D_ROOT_SIGNATURE_VERSION_1,
-                                               &serializedRootSignature,
-                                               &rootSignatureErrors))) {
-            if (rootSignatureErrors && rootSignatureErrors->GetBufferPointer()) {
-                DebugLog(static_cast<const char*>(rootSignatureErrors->GetBufferPointer()));
-                DebugLog("\n");
-            }
-            return false;
-        }
-
-        if (FAILED(dxrDevice->CreateRootSignature(0,
-                                                  serializedRootSignature->GetBufferPointer(),
-                                                  serializedRootSignature->GetBufferSize(),
-                                                  IID_PPV_ARGS(&m_globalRootSignature)))) {
-            DebugLog("DxrRayTracer: failed to create global root signature.\n");
-            return false;
-        }
-
-        D3D12_DXIL_LIBRARY_DESC dxilLibraryDesc{};
-        D3D12_SHADER_BYTECODE shaderBytecode{};
-        shaderBytecode.pShaderBytecode = shaderLibrary->GetBufferPointer();
-        shaderBytecode.BytecodeLength = shaderLibrary->GetBufferSize();
-        dxilLibraryDesc.DXILLibrary = shaderBytecode;
-
-        D3D12_HIT_GROUP_DESC hitGroupDesc{};
-        hitGroupDesc.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
-        hitGroupDesc.ClosestHitShaderImport = L"ClosestHitShader";
-        hitGroupDesc.HitGroupExport = L"SceneHitGroup";
-
-        D3D12_RAYTRACING_SHADER_CONFIG shaderConfig{};
-        shaderConfig.MaxPayloadSizeInBytes = 32u;
-        shaderConfig.MaxAttributeSizeInBytes = D3D12_RAYTRACING_MAX_ATTRIBUTE_SIZE_IN_BYTES;
-
-        LPCWSTR shaderExports[] = {
-            L"RayGenShader",
-            L"MissShader",
-            L"ShadowMissShader",
-            L"SceneHitGroup",
-        };
-
-        D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION shaderConfigAssociation{};
-        shaderConfigAssociation.NumExports = _countof(shaderExports);
-        shaderConfigAssociation.pExports = shaderExports;
-
-        D3D12_GLOBAL_ROOT_SIGNATURE globalRootSignature{};
-        globalRootSignature.pGlobalRootSignature = m_globalRootSignature.Get();
-
-        D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig{};
-        pipelineConfig.MaxTraceRecursionDepth = kMaxRayTracingBounceCount + 1u;
-
-        D3D12_STATE_SUBOBJECT subobjects[6] = {};
-        subobjects[0].Type = D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY;
-        subobjects[0].pDesc = &dxilLibraryDesc;
-        subobjects[1].Type = D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP;
-        subobjects[1].pDesc = &hitGroupDesc;
-        subobjects[2].Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG;
-        subobjects[2].pDesc = &shaderConfig;
-        shaderConfigAssociation.pSubobjectToAssociate = &subobjects[2];
-        subobjects[3].Type = D3D12_STATE_SUBOBJECT_TYPE_SUBOBJECT_TO_EXPORTS_ASSOCIATION;
-        subobjects[3].pDesc = &shaderConfigAssociation;
-        subobjects[4].Type = D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE;
-        subobjects[4].pDesc = &globalRootSignature;
-        subobjects[5].Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG;
-        subobjects[5].pDesc = &pipelineConfig;
-
-        D3D12_STATE_OBJECT_DESC stateObjectDesc{};
-        stateObjectDesc.Type = D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE;
-        stateObjectDesc.NumSubobjects = _countof(subobjects);
-        stateObjectDesc.pSubobjects = subobjects;
-
-        if (FAILED(dxrDevice->CreateStateObject(&stateObjectDesc, IID_PPV_ARGS(&m_stateObject))) ||
-            FAILED(m_stateObject.As(&m_stateObjectProperties))) {
-            DebugLog("DxrRayTracer: failed to create state object.\n");
+        m_rtPipelineHandle = device.CreateRhiRayTracingPipeline(pipelineDesc);
+        if (m_rtPipelineHandle.id == 0) {
+            DebugLog("DxrRayTracer: failed to create ray tracing pipeline.\n");
             return false;
         }
 
@@ -597,37 +528,28 @@ namespace SasamiRenderer
         return true;
     }
 
-    bool DxrRayTracer::CreateShaderTables(IRHIDevice& device)
+    bool DxrRayTracer::CreateShaderBindingTable(IRHIDevice& device)
     {
-        if (!m_pipelineReady || !m_stateObjectProperties) {
+        if (!m_pipelineReady || m_rtPipelineHandle.id == 0) {
             return false;
         }
 
-        m_rayGenShaderRecordSize = AlignUp(D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES, D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT);
-        m_missShaderRecordSize = m_rayGenShaderRecordSize;
-        m_hitGroupShaderRecordSize = m_rayGenShaderRecordSize;
+        const uint32_t missIndices[]     = { 1u, 2u };
+        const uint32_t hitGroupIndices[] = { 3u };
 
-        const UINT rayGenTableSize = AlignUp(m_rayGenShaderRecordSize, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
-        const UINT missTableSize = AlignUp(m_missShaderRecordSize * 2u, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
-        const UINT hitGroupTableSize = AlignUp(m_hitGroupShaderRecordSize, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
+        RhiShaderBindingTableDesc sbtDesc{};
+        sbtDesc.pipeline         = m_rtPipelineHandle;
+        sbtDesc.rayGenGroupIndex = 0u;
+        sbtDesc.missGroupIndices = missIndices;
+        sbtDesc.missGroupCount   = 2u;
+        sbtDesc.hitGroupIndices  = hitGroupIndices;
+        sbtDesc.hitGroupCount    = 1u;
 
-        auto createShaderTable = [&device](UINT size, Resource& outResource, uint8_t*& outMappedPtr) -> bool {
-            return ResourceUploadUtility::CreateUploadBuffer(device, size, outResource, reinterpret_cast<void**>(&outMappedPtr));
-        };
-
-        uint8_t* rayGenMapped = nullptr;
-        uint8_t* missMapped = nullptr;
-        uint8_t* hitGroupMapped = nullptr;
-        if (!createShaderTable(rayGenTableSize, m_rayGenShaderTable, rayGenMapped) ||
-            !createShaderTable(missTableSize, m_missShaderTable, missMapped) ||
-            !createShaderTable(hitGroupTableSize, m_hitGroupShaderTable, hitGroupMapped)) {
+        m_sbtHandle = device.CreateRhiShaderBindingTable(sbtDesc);
+        if (m_sbtHandle.id == 0) {
+            DebugLog("DxrRayTracer: failed to create shader binding table.\n");
             return false;
         }
-
-        WriteShaderIdentifierRecord(rayGenMapped, m_stateObjectProperties.Get(), L"RayGenShader");
-        WriteShaderIdentifierRecord(missMapped + m_missShaderRecordSize * 0u, m_stateObjectProperties.Get(), L"MissShader");
-        WriteShaderIdentifierRecord(missMapped + m_missShaderRecordSize * 1u, m_stateObjectProperties.Get(), L"ShadowMissShader");
-        WriteShaderIdentifierRecord(hitGroupMapped, m_stateObjectProperties.Get(), L"SceneHitGroup");
 
         return true;
     }

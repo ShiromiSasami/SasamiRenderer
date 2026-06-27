@@ -56,6 +56,9 @@ namespace SasamiRenderer
         virtual void SetVertexBufferBindings(uint32_t startSlot, uint32_t count,
                                              const RhiVertexBufferBinding* bindings) {}
         virtual void SetIndexBufferBinding(const RhiIndexBufferBinding& binding) {}
+
+        // Ray tracing dispatch
+        virtual void DispatchRays(const RhiDispatchRaysDesc&) {}
     };
 
     class NullRhiCommandEncoder final : public IRhiCommandEncoder
@@ -101,5 +104,19 @@ namespace SasamiRenderer
 
         virtual std::unique_ptr<IRhiCommandEncoder> CreateCommandEncoder(RhiQueueType queueType) = 0;
         virtual bool SubmitCommandEncoder(IRhiCommandEncoder& encoder, RhiQueueType queueType) = 0;
+
+        // Ray tracing (default no-op; DX11/OpenGL inherit these empty implementations)
+        virtual bool BuildRhiBlases(
+            const RhiBlasDesc* descs, uint32_t count,
+            RhiAccelerationStructureHandle* outHandles) { (void)descs; (void)count; (void)outHandles; return false; }
+        virtual RhiAccelerationStructureHandle BuildRhiTlas(const RhiTlasDesc&)    { return {}; }
+        virtual bool DestroyRhiAccelerationStructure(RhiAccelerationStructureHandle) { return false; }
+        virtual RhiGpuAddress GetRhiAccelerationStructureGpuAddress(RhiAccelerationStructureHandle) { return 0; }
+        virtual bool CreateRhiAccelerationStructureSrv(
+            RhiAccelerationStructureHandle, RhiCpuDescriptorHandle) { return false; }
+        virtual RhiRayTracingPipelineHandle CreateRhiRayTracingPipeline(
+            const RhiRayTracingPipelineDesc&) { return {}; }
+        virtual RhiShaderBindingTableHandle CreateRhiShaderBindingTable(
+            const RhiShaderBindingTableDesc&) { return {}; }
     };
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Renderer/RHI/GraphicsDevice.h"
+#include "Renderer/RHI/RhiDevice.h"
 #include "Renderer/RayTracing/RayTracingScene.h"
 
 #include <wrl.h>
@@ -126,11 +127,11 @@ namespace SasamiRenderer
             uint32_t vertexCount = 0;
             uint32_t indexOffset = 0;
             uint32_t indexCount = 0;
-            Resource blas;
+            RhiAccelerationStructureHandle blasHandle{};
         };
 
-        bool CompileShadersAndCreateStateObject(IRHIDevice& device);
-        bool CreateShaderTables(IRHIDevice& device);
+        bool CompileShadersAndCreatePipeline(IRHIDevice& device);
+        bool CreateShaderBindingTable(IRHIDevice& device);
         bool UploadSceneBuffers(IRHIDevice& device);
         bool BuildAccelerationStructures(IRHIDevice& device);
         bool EnsureFrameConstantBuffer(IRHIDevice& device);
@@ -152,20 +153,12 @@ namespace SasamiRenderer
         Resource m_indexBuffer;
         Resource m_materialBuffer;
         Resource m_instanceBuffer;
-        Resource m_tlas;
 
         Resource m_frameConstantsBuffer;
         uint8_t* m_frameConstantsPtr = nullptr;
 
-        Microsoft::WRL::ComPtr<ID3D12RootSignature> m_globalRootSignature;
-        Microsoft::WRL::ComPtr<ID3D12StateObject> m_stateObject;
-        Microsoft::WRL::ComPtr<ID3D12StateObjectProperties> m_stateObjectProperties;
-
-        Resource m_rayGenShaderTable;
-        Resource m_missShaderTable;
-        Resource m_hitGroupShaderTable;
-        UINT m_rayGenShaderRecordSize = 0;
-        UINT m_missShaderRecordSize = 0;
-        UINT m_hitGroupShaderRecordSize = 0;
+        RhiRayTracingPipelineHandle  m_rtPipelineHandle{};
+        RhiShaderBindingTableHandle  m_sbtHandle{};
+        RhiAccelerationStructureHandle m_tlasHandle{};
     };
 }

@@ -628,6 +628,96 @@ namespace SasamiRenderer
         bool            is32Bit       = true;
     };
 
+    // =========================================================================
+    // Ray Tracing types
+    // =========================================================================
+
+    using RhiAccelerationStructureHandle = RhiHandle;
+    using RhiRayTracingPipelineHandle    = RhiHandle;
+    using RhiShaderBindingTableHandle    = RhiHandle;
+
+    struct RhiRayTracingGeometryDesc
+    {
+        RhiGpuAddress vertexBufferAddress  = 0;   // GPU virtual address of vertex data
+        RhiFormat     vertexFormat         = RhiFormat::R32G32B32Float;
+        uint32_t      vertexCount          = 0;
+        uint32_t      vertexStrideInBytes  = 0;
+        RhiGpuAddress indexBufferAddress   = 0;   // GPU virtual address of index data (0 = no index buffer)
+        uint32_t      indexCount           = 0;
+        bool          index32Bit           = true;
+        bool          opaque               = true;
+    };
+
+    struct RhiBlasDesc
+    {
+        const RhiRayTracingGeometryDesc* geometries    = nullptr;
+        uint32_t                         geometryCount = 0;
+        bool                             preferFastTrace = true;
+    };
+
+    struct RhiTlasInstanceDesc
+    {
+        RhiAccelerationStructureHandle blasHandle{};
+        float    transform[12]  = {};  // 3×4 row-major affine transform
+        uint32_t instanceID     = 0;
+        uint32_t instanceMask   = 0xFF;
+        uint32_t hitGroupIndex  = 0;
+        bool     forceOpaque    = true;
+    };
+
+    struct RhiTlasDesc
+    {
+        const RhiTlasInstanceDesc* instances      = nullptr;
+        uint32_t                   instanceCount  = 0;
+        bool                       preferFastTrace = true;
+    };
+
+    struct RhiRayTracingShaderGroupDesc
+    {
+        enum class Type : uint32_t { General, TrianglesHit } type = Type::General;
+        // General group: name of the shader export (raygen, miss, callable)
+        const char* exportName       = nullptr;
+        // TrianglesHit group: unique name for this hit group and the closest-hit shader import
+        const char* hitGroupExport   = nullptr;
+        const char* closestHitExport = nullptr;
+    };
+
+    struct RhiRayTracingPipelineDesc
+    {
+        // Pre-compiled shader library bytecode (DXIL lib_6_6 for DX12)
+        const uint8_t* libraryBytecode              = nullptr;
+        uint64_t       libraryBytecodeSizeInBytes   = 0;
+
+        const RhiRayTracingShaderGroupDesc* shaderGroups     = nullptr;
+        uint32_t                            shaderGroupCount = 0;
+
+        uint32_t maxRecursionDepth     = 1;
+        uint32_t maxPayloadSizeBytes   = 32;
+        uint32_t maxAttributeSizeBytes = 32;
+    };
+
+    struct RhiShaderBindingTableDesc
+    {
+        RhiRayTracingPipelineHandle pipeline{};
+        uint32_t        rayGenGroupIndex  = 0;
+        const uint32_t* missGroupIndices  = nullptr;
+        uint32_t        missGroupCount    = 0;
+        const uint32_t* hitGroupIndices   = nullptr;
+        uint32_t        hitGroupCount     = 0;
+    };
+
+    struct RhiDispatchRaysDesc
+    {
+        RhiShaderBindingTableHandle sbt{};
+        uint32_t width  = 0;
+        uint32_t height = 0;
+        uint32_t depth  = 1;
+    };
+
+    // =========================================================================
+    // Capabilities
+    // =========================================================================
+
     struct RhiBackendCapabilities
     {
         RhiBackendApi api = RhiBackendApi::Unknown;
