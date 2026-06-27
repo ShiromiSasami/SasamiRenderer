@@ -61,8 +61,8 @@ MSBuild 側の `ShaderSourceRoot` も `$(ProjectDir)Shaders` を参照します�
 
 | Backend | Status |
 | --- | --- |
-| DirectX 12 | 主実装。feature render path、RenderGraph、GBuffer、PBR、SSR、SWRT、DXR 周辺を検証対象にしています。 |
-| Vulkan | native fallback path。clear/present、static mesh、D32 depth test、swapchain resize、RGBA8 texture upload を実装済み。DX12 feature path と同等ではありません。 |
+| DirectX 12 | 主実装。feature render path、RenderGraph、GBuffer、PBR、SSR、SWRT、DXR 周辺を検証対象にしています。RHI 抽象化層 (BLAS/TLAS ビルド、RT パイプライン、SBT) の DX12 実装完了。 |
+| Vulkan | native fallback path。clear/present、static mesh、D32 depth test、swapchain resize、RGBA8 texture upload を実装済み。RHI ray tracing API はスタブのみ (VK_KHR_ray_tracing_pipeline 未実装)。DX12 feature path と同等ではありません。 |
 | DirectX 11 | native fallback path。clear/present、static mesh、depth test、swapchain resize、RGBA8 texture upload を実装済み。DX12 feature path と同等ではありません。 |
 | OpenGL | native fallback path。clear/present、static mesh、depth test、window resize、albedo texture sampling を実装済み。DX12 feature path と同等ではありません。 |
 
