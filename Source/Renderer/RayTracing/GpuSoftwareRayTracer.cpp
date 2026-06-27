@@ -227,6 +227,17 @@ namespace SasamiRenderer
             m_nrdIntegration->Destroy();
             m_nrdIntegration.reset();
         }
+        if (m_device) {
+            auto destroyHandle = [&](RhiBufferHandle& h) {
+                if (h.IsValid()) { m_device->DestroyRhiResource(h); h = {}; }
+            };
+            destroyHandle(m_bvhNodesHandle);
+            destroyHandle(m_triangleHandle);
+            destroyHandle(m_meshInfoHandle);
+            destroyHandle(m_instanceHandle);
+            destroyHandle(m_tlasHandle);
+            destroyHandle(m_materialHandle);
+        }
     }
 
     // =========================================================================
@@ -240,12 +251,16 @@ namespace SasamiRenderer
             out.missingMask = BvhGpuAddresses::MISSING_SWRT_NOT_INITIALIZED;
             return out;
         }
-        out.bvhNodes  = m_bvhNodesBuffer.IsValid() ? m_bvhNodesBuffer.GetGPUVirtualAddress() : 0u;
-        out.triangles = m_triangleBuffer.IsValid()  ? m_triangleBuffer.GetGPUVirtualAddress()  : 0u;
-        out.meshInfo  = m_meshInfoBuffer.IsValid()  ? m_meshInfoBuffer.GetGPUVirtualAddress()  : 0u;
-        out.instances = m_instanceBuffer.IsValid()  ? m_instanceBuffer.GetGPUVirtualAddress()  : 0u;
-        out.tlasNodes = m_tlasBuffer.IsValid()      ? m_tlasBuffer.GetGPUVirtualAddress()      : 0u;
-        out.materials = m_materialBuffer.IsValid()  ? m_materialBuffer.GetGPUVirtualAddress()  : 0u;
+        auto getVa = [](const Resource* compat, const Resource& buf) -> D3D12_GPU_VIRTUAL_ADDRESS {
+            if (compat && compat->IsValid()) return compat->GetGPUVirtualAddress();
+            return buf.IsValid() ? buf.GetGPUVirtualAddress() : 0u;
+        };
+        out.bvhNodes  = getVa(m_bvhNodesCompat, m_bvhNodesBuffer);
+        out.triangles = getVa(m_triangleCompat,  m_triangleBuffer);
+        out.meshInfo  = getVa(m_meshInfoCompat,  m_meshInfoBuffer);
+        out.instances = getVa(m_instanceCompat,  m_instanceBuffer);
+        out.tlasNodes = getVa(m_tlasCompat,      m_tlasBuffer);
+        out.materials = getVa(m_materialCompat,  m_materialBuffer);
         if (out.bvhNodes  == 0u) out.missingMask |= BvhGpuAddresses::MISSING_BVH_NODES;
         if (out.triangles == 0u) out.missingMask |= BvhGpuAddresses::MISSING_TRIANGLES;
         if (out.meshInfo  == 0u) out.missingMask |= BvhGpuAddresses::MISSING_MESH_INFO;
@@ -264,6 +279,7 @@ namespace SasamiRenderer
     {
         if (m_initialized) return true;
 
+        m_device = &device;
         ID3D12Device* dev = device.GetDevice();
         if (!dev) return false;
 
@@ -565,13 +581,16 @@ namespace SasamiRenderer
         const bool geoDirty  = (scene.geometryVersion != m_bvhGeometryVersion);
         const bool matDirty  = (scene.materialVersion != m_bvhMaterialVersion);
         const bool instDirty = (scene.instanceVersion  != m_bvhInstanceVersion);
+        auto isBufferValid = [](const RhiBufferHandle& h, const Resource* c, const Resource& buf) {
+            return (h.IsValid() && c != nullptr) || buf.IsValid();
+        };
         const bool bvhBuffersMissing =
-            !m_bvhNodesBuffer.IsValid() ||
-            !m_triangleBuffer.IsValid() ||
-            !m_meshInfoBuffer.IsValid() ||
-            !m_instanceBuffer.IsValid() ||
-            !m_tlasBuffer.IsValid() ||
-            !m_materialBuffer.IsValid();
+            !isBufferValid(m_bvhNodesHandle, m_bvhNodesCompat, m_bvhNodesBuffer) ||
+            !isBufferValid(m_triangleHandle,  m_triangleCompat,  m_triangleBuffer)  ||
+            !isBufferValid(m_meshInfoHandle,  m_meshInfoCompat,  m_meshInfoBuffer)  ||
+            !isBufferValid(m_instanceHandle,  m_instanceCompat,  m_instanceBuffer)  ||
+            !isBufferValid(m_tlasHandle,      m_tlasCompat,      m_tlasBuffer)      ||
+            !isBufferValid(m_materialHandle,  m_materialCompat,  m_materialBuffer);
         if (!geoDirty && !matDirty && !instDirty && !bvhBuffersMissing) return;
 
         if (geoDirty || instDirty || m_meshAccelerations.size() != m_scene.meshes.size()) {
@@ -678,11 +697,34 @@ namespace SasamiRenderer
         m_bvhDiagnostics.tlasNodeCount = static_cast<uint32_t>(m_topLevelNodes.size());
 
         // ---- Upload to GPU (stalls GPU once if dirty) ----
+        const bool supportsRhi = device.GetCapabilities().supportsRhiResourceCreation;
         auto uploadBuffer = [&](const char* name,
                                 const void* data,
                                 size_t byteSize,
-                                Resource& outBuffer) -> bool {
+                                size_t stride,
+                                Resource& outBuffer,
+                                RhiBufferHandle& outHandle,
+                                Resource*& outCompat) -> bool {
             std::snprintf(m_bvhDiagnostics.lastPhase, sizeof(m_bvhDiagnostics.lastPhase), "Upload %s", name);
+
+            // RHI-first (CpuToGpu — upload via CreateRhiBuffer initialData; no staging copy)
+            if (supportsRhi) {
+                if (outHandle.IsValid()) device.DestroyRhiResource(outHandle);
+                RhiBufferDesc desc{};
+                desc.sizeInBytes   = static_cast<uint64_t>(byteSize);
+                desc.strideInBytes = static_cast<uint32_t>(stride);
+                desc.usage         = RhiBufferUsageFlags::Structured | RhiBufferUsageFlags::ShaderResource;
+                desc.memoryUsage   = RhiMemoryUsage::CpuToGpu;
+                desc.initialState  = RhiResourceState::ShaderResource;
+                outHandle = device.CreateRhiBuffer(desc, data);
+                outCompat = device.GetD3D12CompatibilityResource(outHandle);
+                if (outCompat && outCompat->IsValid()) return true;
+                // RHI failed — reset and fall through to DX12 path
+                outHandle = {};
+                outCompat = nullptr;
+            }
+
+            // DX12 fallback (DEFAULT heap + staging copy)
             if (!CreateAndUploadBuffer(device, data, static_cast<UINT64>(byteSize),
                                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, outBuffer)) {
                 std::snprintf(m_bvhDiagnostics.lastFailure,
@@ -698,12 +740,12 @@ namespace SasamiRenderer
             return true;
         };
 
-        if (!uploadBuffer("BVH nodes", allNodes.data(), allNodes.size() * sizeof(BvhNode), m_bvhNodesBuffer)) return false;
-        if (!uploadBuffer("triangles", allTris.data(), allTris.size() * sizeof(GpuTriangle), m_triangleBuffer)) return false;
-        if (!uploadBuffer("mesh info", meshInfos.data(), meshInfos.size() * sizeof(GpuMeshInfo), m_meshInfoBuffer)) return false;
-        if (!uploadBuffer("instances", instBuf.data(), instBuf.size() * sizeof(GpuInstanceInfo), m_instanceBuffer)) return false;
-        if (!uploadBuffer("TLAS nodes", m_topLevelNodes.data(), m_topLevelNodes.size() * sizeof(TlasNode), m_tlasBuffer)) return false;
-        if (!uploadBuffer("materials", matBuf.data(), matBuf.size() * sizeof(GpuMaterial), m_materialBuffer)) return false;
+        if (!uploadBuffer("BVH nodes",  allNodes.data(),          allNodes.size()          * sizeof(BvhNode),        sizeof(BvhNode),        m_bvhNodesBuffer, m_bvhNodesHandle, m_bvhNodesCompat)) return false;
+        if (!uploadBuffer("triangles",  allTris.data(),            allTris.size()           * sizeof(GpuTriangle),    sizeof(GpuTriangle),    m_triangleBuffer, m_triangleHandle, m_triangleCompat)) return false;
+        if (!uploadBuffer("mesh info",  meshInfos.data(),          meshInfos.size()         * sizeof(GpuMeshInfo),    sizeof(GpuMeshInfo),    m_meshInfoBuffer, m_meshInfoHandle, m_meshInfoCompat)) return false;
+        if (!uploadBuffer("instances",  instBuf.data(),            instBuf.size()           * sizeof(GpuInstanceInfo),sizeof(GpuInstanceInfo),m_instanceBuffer, m_instanceHandle, m_instanceCompat)) return false;
+        if (!uploadBuffer("TLAS nodes", m_topLevelNodes.data(),    m_topLevelNodes.size()   * sizeof(TlasNode),       sizeof(TlasNode),       m_tlasBuffer,     m_tlasHandle,     m_tlasCompat))     return false;
+        if (!uploadBuffer("materials",  matBuf.data(),             matBuf.size()            * sizeof(GpuMaterial),    sizeof(GpuMaterial),    m_materialBuffer, m_materialHandle, m_materialCompat)) return false;
 
         // ---- Create SRVs in descriptor heap ----
         auto cpuBase = m_descHeap.GetCPUDescriptorHandleForHeapStart();
@@ -711,12 +753,15 @@ namespace SasamiRenderer
             return { cpuBase.ptr + slot * m_descIncrementSize };
         };
 
-        CreateStructuredSrv(dev, m_bvhNodesBuffer,  (UINT)allNodes.size(),  sizeof(BvhNode),       srv(0));
-        CreateStructuredSrv(dev, m_triangleBuffer,  (UINT)allTris.size(),   sizeof(GpuTriangle),   srv(1));
-        CreateStructuredSrv(dev, m_meshInfoBuffer,  (UINT)meshInfos.size(), sizeof(GpuMeshInfo),   srv(2));
-        CreateStructuredSrv(dev, m_instanceBuffer,  (UINT)instBuf.size(),   sizeof(GpuInstanceInfo), srv(3));
-        CreateStructuredSrv(dev, m_tlasBuffer,      (UINT)m_topLevelNodes.size(), sizeof(TlasNode), srv(4));
-        CreateStructuredSrv(dev, m_materialBuffer,  (UINT)matBuf.size(),    sizeof(GpuMaterial),   srv(5));
+        auto getRes = [](Resource* compat, Resource& buf) -> Resource& {
+            return compat ? *compat : buf;
+        };
+        CreateStructuredSrv(dev, getRes(m_bvhNodesCompat, m_bvhNodesBuffer), (UINT)allNodes.size(),           sizeof(BvhNode),        srv(0));
+        CreateStructuredSrv(dev, getRes(m_triangleCompat,  m_triangleBuffer), (UINT)allTris.size(),            sizeof(GpuTriangle),    srv(1));
+        CreateStructuredSrv(dev, getRes(m_meshInfoCompat,  m_meshInfoBuffer), (UINT)meshInfos.size(),          sizeof(GpuMeshInfo),    srv(2));
+        CreateStructuredSrv(dev, getRes(m_instanceCompat,  m_instanceBuffer), (UINT)instBuf.size(),            sizeof(GpuInstanceInfo),srv(3));
+        CreateStructuredSrv(dev, getRes(m_tlasCompat,      m_tlasBuffer),     (UINT)m_topLevelNodes.size(),    sizeof(TlasNode),       srv(4));
+        CreateStructuredSrv(dev, getRes(m_materialCompat,  m_materialBuffer), (UINT)matBuf.size(),             sizeof(GpuMaterial),    srv(5));
 
         m_uploadedGeometryVersion = m_scene.geometryVersion;
         m_uploadedMaterialVersion = m_scene.materialVersion;

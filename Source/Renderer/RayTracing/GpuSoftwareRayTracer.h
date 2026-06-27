@@ -463,12 +463,27 @@ namespace SasamiRenderer
         void RebuildTlas();
 
         // ---- GPU buffers ----
-        Resource m_bvhNodesBuffer;      // SRV t0
-        Resource m_triangleBuffer;      // SRV t1
-        Resource m_meshInfoBuffer;      // SRV t2
-        Resource m_instanceBuffer;      // SRV t3
-        Resource m_tlasBuffer;          // SRV t4
-        Resource m_materialBuffer;      // SRV t5
+        Resource m_bvhNodesBuffer;      // SRV t0 (DX12 fallback)
+        Resource m_triangleBuffer;      // SRV t1 (DX12 fallback)
+        Resource m_meshInfoBuffer;      // SRV t2 (DX12 fallback)
+        Resource m_instanceBuffer;      // SRV t3 (DX12 fallback)
+        Resource m_tlasBuffer;          // SRV t4 (DX12 fallback)
+        Resource m_materialBuffer;      // SRV t5 (DX12 fallback)
+
+        // RHI handles (preferred path) — parallel to the 6 fallback Resource fields above
+        IRHIDevice*     m_device          = nullptr;
+        RhiBufferHandle m_bvhNodesHandle{};
+        Resource*       m_bvhNodesCompat  = nullptr;
+        RhiBufferHandle m_triangleHandle{};
+        Resource*       m_triangleCompat  = nullptr;
+        RhiBufferHandle m_meshInfoHandle{};
+        Resource*       m_meshInfoCompat  = nullptr;
+        RhiBufferHandle m_instanceHandle{};
+        Resource*       m_instanceCompat  = nullptr;
+        RhiBufferHandle m_tlasHandle{};
+        Resource*       m_tlasCompat      = nullptr;
+        RhiBufferHandle m_materialHandle{};
+        Resource*       m_materialCompat  = nullptr;
         Resource m_frameConstantsBuffer;
         uint8_t* m_frameConstantsMapped = nullptr;
         BvhBuildDiagnostics m_bvhDiagnostics{};
