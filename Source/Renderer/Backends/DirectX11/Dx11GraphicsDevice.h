@@ -41,6 +41,11 @@ namespace SasamiRenderer
                                                      uint32_t rowPitchBytes) override;
         RhiTextureHandle CreateRhiTexture(const RhiTextureDesc& desc) override;
         RhiBufferHandle CreateRhiBuffer(const RhiBufferDesc& desc, const void* initialData = nullptr) override;
+        bool UpdateRhiBuffer(RhiBufferHandle buffer,
+                             uint64_t offsetInBytes,
+                             const void* data,
+                             uint64_t sizeInBytes) override;
+        bool DestroyRhiResource(RhiResourceHandle resource) override;
         RhiShaderHandle CreateRhiShaderModule(const RhiShaderModuleDesc& desc) override;
         RhiPipelineLayoutHandle CreateRhiPipelineLayout(const RhiPipelineLayoutDesc& desc) override;
         RhiPipelineHandle CreateRhiGraphicsPipeline(const RhiGraphicsPipelineDesc& desc) override;
@@ -51,6 +56,9 @@ namespace SasamiRenderer
         bool CreateRhiShaderResourceView(RhiResourceHandle resource,
                                          const RhiTextureViewDesc& desc,
                                          RhiCpuDescriptorHandle destination) override;
+        bool CreateRhiBufferShaderResourceView(RhiBufferHandle buffer,
+                                               const RhiBufferViewDesc& desc,
+                                               RhiCpuDescriptorHandle destination) override;
         bool CreateRhiRenderTargetView(RhiTextureHandle texture,
                                        const RhiRenderTargetViewDesc& desc,
                                        RhiCpuDescriptorHandle destination) override;
@@ -148,6 +156,7 @@ namespace SasamiRenderer
         std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>> m_rhiSrvs;
         std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID3D11RenderTargetView>> m_rhiRtvs;
         std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID3D11DepthStencilView>> m_rhiDsvs;
+        std::unordered_map<uint64_t, uint64_t> m_rhiViewResources;
 
         friend class Dx11RhiCommandEncoder;
     };

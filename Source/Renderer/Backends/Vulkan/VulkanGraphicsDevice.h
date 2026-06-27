@@ -34,12 +34,18 @@ namespace SasamiRenderer
         void WaitForGPU() override;
         bool ExecuteBackendFrame(const RhiBackendFrameDesc& frameDesc) override;
         bool RenderBackendClearFrame(const float clearColor[4]) override;
+        bool ResizeBackendSwapChain(UINT width, UINT height) override;
         RhiTextureHandle CreateRhiTexture2DFromRgba8(uint32_t width,
                                                      uint32_t height,
                                                      const void* pixels,
                                                      uint32_t rowPitchBytes) override;
         RhiTextureHandle CreateRhiTexture(const RhiTextureDesc& desc) override;
         RhiBufferHandle CreateRhiBuffer(const RhiBufferDesc& desc, const void* initialData = nullptr) override;
+        bool UpdateRhiBuffer(RhiBufferHandle buffer,
+                             uint64_t offsetInBytes,
+                             const void* data,
+                             uint64_t sizeInBytes) override;
+        bool DestroyRhiResource(RhiResourceHandle resource) override;
         RhiShaderHandle CreateRhiShaderModule(const RhiShaderModuleDesc& desc) override;
         RhiPipelineLayoutHandle CreateRhiPipelineLayout(const RhiPipelineLayoutDesc& desc) override;
         RhiPipelineHandle CreateRhiGraphicsPipeline(const RhiGraphicsPipelineDesc& desc) override;
@@ -50,6 +56,9 @@ namespace SasamiRenderer
         bool CreateRhiShaderResourceView(RhiResourceHandle resource,
                                          const RhiTextureViewDesc& desc,
                                          RhiCpuDescriptorHandle destination) override;
+        bool CreateRhiBufferShaderResourceView(RhiBufferHandle buffer,
+                                               const RhiBufferViewDesc& desc,
+                                               RhiCpuDescriptorHandle destination) override;
         bool CreateRhiRenderTargetView(RhiTextureHandle texture,
                                        const RhiRenderTargetViewDesc& desc,
                                        RhiCpuDescriptorHandle destination) override;
@@ -91,7 +100,9 @@ namespace SasamiRenderer
         bool CreateSwapChain(UINT width, UINT height, UINT bufferCount);
         bool CreateFrameResources(UINT bufferCount);
         bool CreateSwapChainImageViews();
+        bool EnsureRhiDescriptorPool();
         bool EnsureNativeMeshResources();
+        void DestroyNativeMeshResources();
         bool RenderMeshFrame(uint32_t frame,
                              uint32_t imageIndex,
                              VkCommandBuffer cmd,
@@ -108,6 +119,10 @@ namespace SasamiRenderer
             VkImage image = VK_NULL_HANDLE;
             VkBuffer buffer = VK_NULL_HANDLE;
             VkDeviceMemory memory = VK_NULL_HANDLE;
+            uint64_t sizeInBytes = 0;
+            RhiMemoryUsage memoryUsage = RhiMemoryUsage::GpuOnly;
+            RhiExtent3D extent{};
+            RhiFormat format = RhiFormat::Unknown;
         };
 
         struct VulkanRhiShader
@@ -119,8 +134,18 @@ namespace SasamiRenderer
 
         struct VulkanRhiPipelineLayout
         {
+            struct Binding
+            {
+                uint32_t binding = 0;
+                uint32_t descriptorCount = 0;
+                VkDescriptorType descriptorType = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+                bool valid = false;
+            };
+
             VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
             VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+            std::vector<Binding> bindings;
+            std::vector<VkSampler> immutableSamplers;
         };
 
         struct VulkanRhiPipeline
@@ -128,6 +153,17 @@ namespace SasamiRenderer
             VkPipeline pipeline = VK_NULL_HANDLE;
             VkRenderPass renderPass = VK_NULL_HANDLE;
             VkPipelineLayout ownedPipelineLayout = VK_NULL_HANDLE;
+            RhiPipelineLayoutHandle layout{};
+        };
+
+        struct VulkanRhiDescriptor
+        {
+            VkDescriptorType type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+            VkImageView imageView = VK_NULL_HANDLE;
+            VkBuffer buffer = VK_NULL_HANDLE;
+            VkDeviceSize offset = 0;
+            VkDeviceSize range = 0;
+            uint64_t resourceId = 0;
         };
 
         VkInstance m_instance = VK_NULL_HANDLE;
@@ -167,10 +203,16 @@ namespace SasamiRenderer
         std::unordered_map<uint64_t, VulkanRhiPipelineLayout> m_rhiPipelineLayouts;
         std::unordered_map<uint64_t, VulkanRhiPipeline> m_rhiPipelines;
         std::unordered_map<uint64_t, VkImageView> m_rhiImageViews;
+        std::unordered_map<uint64_t, uint64_t> m_rhiImageViewResources;
+        std::unordered_map<uint64_t, VulkanRhiDescriptor> m_rhiDescriptors;
+        VkDescriptorPool m_rhiDescriptorPool = VK_NULL_HANDLE;
         VkRenderPass m_nativeMeshRenderPass = VK_NULL_HANDLE;
         VkPipelineLayout m_nativeMeshPipelineLayout = VK_NULL_HANDLE;
         VkPipeline m_nativeMeshPipeline = VK_NULL_HANDLE;
         std::vector<VkFramebuffer> m_nativeMeshFramebuffers;
+        std::vector<VkImage> m_nativeMeshDepthImages;
+        std::vector<VkDeviceMemory> m_nativeMeshDepthMemory;
+        std::vector<VkImageView> m_nativeMeshDepthViews;
 
         friend class VulkanRhiCommandEncoder;
     };

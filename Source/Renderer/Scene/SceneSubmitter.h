@@ -74,7 +74,10 @@ namespace SasamiRenderer
             SrvIndexFn        srvIndexFn;
         };
 
+        ~SceneSubmitter();
+
         void Initialize(const InitParams& params);
+        void ReleaseTextures();
 
         void SubmitRenderProxies(std::vector<RenderProxy>&& proxies);
         void ClearSubmittedRenderProxies();

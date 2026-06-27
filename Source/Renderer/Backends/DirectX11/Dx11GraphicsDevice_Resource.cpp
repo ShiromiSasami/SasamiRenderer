@@ -6,6 +6,7 @@
 
 #include "Foundation/Tools/DebugOutput.h"
 
+#include <algorithm>
 #include <cstring>
 #include <utility>
 
@@ -23,6 +24,7 @@ namespace SasamiRenderer
             case RhiFormat::R16G16B16A16Float: return DXGI_FORMAT_R16G16B16A16_FLOAT;
             case RhiFormat::R32G32B32Float: return DXGI_FORMAT_R32G32B32_FLOAT;
             case RhiFormat::R32G32Float: return DXGI_FORMAT_R32G32_FLOAT;
+            case RhiFormat::R16Float: return DXGI_FORMAT_R16_FLOAT;
             case RhiFormat::R16Typeless: return DXGI_FORMAT_R16_TYPELESS;
             case RhiFormat::R16UNorm: return DXGI_FORMAT_R16_UNORM;
             case RhiFormat::R32Float: return DXGI_FORMAT_R32_FLOAT;
@@ -235,6 +237,70 @@ namespace SasamiRenderer
         return RhiBufferHandle{ id };
     }
 
+    bool Dx11GraphicsDevice::UpdateRhiBuffer(RhiBufferHandle bufferHandle,
+                                             uint64_t offsetInBytes,
+                                             const void* data,
+                                             uint64_t sizeInBytes)
+    {
+        const auto resourceIt = m_rhiResources.find(bufferHandle.id);
+        if (resourceIt == m_rhiResources.end() || !m_context || !data || sizeInBytes == 0) {
+            return false;
+        }
+
+        Microsoft::WRL::ComPtr<ID3D11Buffer> buffer;
+        if (FAILED(resourceIt->second.As(&buffer))) {
+            return false;
+        }
+
+        D3D11_BUFFER_DESC desc{};
+        buffer->GetDesc(&desc);
+        if (offsetInBytes >= desc.ByteWidth || sizeInBytes > desc.ByteWidth - offsetInBytes) {
+            return false;
+        }
+
+        if (desc.Usage == D3D11_USAGE_DYNAMIC) {
+            D3D11_MAPPED_SUBRESOURCE mapped{};
+            if (FAILED(m_context->Map(buffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)) || !mapped.pData) {
+                return false;
+            }
+            std::memcpy(static_cast<uint8_t*>(mapped.pData) + offsetInBytes,
+                        data,
+                        static_cast<size_t>(sizeInBytes));
+            m_context->Unmap(buffer.Get(), 0);
+            return true;
+        }
+
+        D3D11_BOX box{};
+        box.left = static_cast<UINT>(offsetInBytes);
+        box.right = static_cast<UINT>(offsetInBytes + sizeInBytes);
+        box.top = 0;
+        box.bottom = 1;
+        box.front = 0;
+        box.back = 1;
+        m_context->UpdateSubresource(buffer.Get(), 0, &box, data, 0, 0);
+        return true;
+    }
+
+    bool Dx11GraphicsDevice::DestroyRhiResource(RhiResourceHandle resource)
+    {
+        if (!resource.IsValid() || m_rhiResources.find(resource.id) == m_rhiResources.end()) {
+            return false;
+        }
+
+        for (auto it = m_rhiViewResources.begin(); it != m_rhiViewResources.end();) {
+            if (it->second == resource.id) {
+                m_rhiSrvs.erase(it->first);
+                m_rhiRtvs.erase(it->first);
+                m_rhiDsvs.erase(it->first);
+                it = m_rhiViewResources.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        m_rhiResources.erase(resource.id);
+        return true;
+    }
+
     RhiShaderHandle Dx11GraphicsDevice::CreateRhiShaderModule(const RhiShaderModuleDesc& desc)
     {
         if (!desc.bytecode || desc.bytecodeSize == 0) {
@@ -445,6 +511,52 @@ namespace SasamiRenderer
             return false;
         }
         m_rhiSrvs[destination.ptr] = view;
+        m_rhiViewResources[destination.ptr] = resourceHandle.id;
+        return true;
+    }
+
+    bool Dx11GraphicsDevice::CreateRhiBufferShaderResourceView(RhiBufferHandle bufferHandle,
+                                                               const RhiBufferViewDesc& desc,
+                                                               RhiCpuDescriptorHandle destination)
+    {
+        const auto resourceIt = m_rhiResources.find(bufferHandle.id);
+        if (resourceIt == m_rhiResources.end() || !destination.IsValid() ||
+            desc.type == RhiBufferViewType::Raw || desc.type == RhiBufferViewType::Constant) {
+            return false;
+        }
+
+        Microsoft::WRL::ComPtr<ID3D11Buffer> buffer;
+        if (FAILED(resourceIt->second.As(&buffer))) {
+            return false;
+        }
+
+        D3D11_BUFFER_DESC bufferDesc{};
+        buffer->GetDesc(&bufferDesc);
+        const uint64_t viewSize = desc.sizeInBytes == 0
+            ? static_cast<uint64_t>(bufferDesc.ByteWidth) -
+                std::min<uint64_t>(desc.offset, bufferDesc.ByteWidth)
+            : desc.sizeInBytes;
+        const uint32_t elementSize = desc.strideInBytes;
+        if (elementSize == 0 || desc.offset >= bufferDesc.ByteWidth ||
+            viewSize == 0 || viewSize > static_cast<uint64_t>(bufferDesc.ByteWidth) - desc.offset ||
+            (desc.offset % elementSize) != 0 || (viewSize % elementSize) != 0) {
+            return false;
+        }
+
+        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Format = desc.type == RhiBufferViewType::Structured
+            ? DXGI_FORMAT_UNKNOWN
+            : ToDx11Format(desc.format);
+        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+        srvDesc.Buffer.FirstElement = static_cast<UINT>(desc.offset / elementSize);
+        srvDesc.Buffer.NumElements = static_cast<UINT>(viewSize / elementSize);
+
+        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> view;
+        if (FAILED(m_device->CreateShaderResourceView(resourceIt->second.Get(), &srvDesc, view.GetAddressOf()))) {
+            return false;
+        }
+        m_rhiSrvs[destination.ptr] = view;
+        m_rhiViewResources[destination.ptr] = bufferHandle.id;
         return true;
     }
 
@@ -475,6 +587,7 @@ namespace SasamiRenderer
             return false;
         }
         m_rhiRtvs[destination.ptr] = view;
+        m_rhiViewResources[destination.ptr] = texture.id;
         return true;
     }
 
@@ -511,6 +624,7 @@ namespace SasamiRenderer
             return false;
         }
         m_rhiDsvs[destination.ptr] = view;
+        m_rhiViewResources[destination.ptr] = texture.id;
         return true;
     }
 

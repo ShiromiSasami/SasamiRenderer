@@ -28,6 +28,7 @@ namespace SasamiRenderer
             case RhiFormat::R16G16B16A16Float: return DXGI_FORMAT_R16G16B16A16_FLOAT;
             case RhiFormat::R32G32B32Float: return DXGI_FORMAT_R32G32B32_FLOAT;
             case RhiFormat::R32G32Float: return DXGI_FORMAT_R32G32_FLOAT;
+            case RhiFormat::R16Float: return DXGI_FORMAT_R16_FLOAT;
             case RhiFormat::R16Typeless: return DXGI_FORMAT_R16_TYPELESS;
             case RhiFormat::R16UNorm: return DXGI_FORMAT_R16_UNORM;
             case RhiFormat::R32Float: return DXGI_FORMAT_R32_FLOAT;
@@ -361,8 +362,11 @@ namespace SasamiRenderer
         heap.Type = ToDx12HeapType(desc.memoryUsage);
 
         Resource resource;
-        const D3D12_RESOURCE_STATES initialState =
-            desc.memoryUsage == RhiMemoryUsage::CpuToGpu ? D3D12_RESOURCE_STATE_GENERIC_READ : ToDx12State(desc.initialState);
+        const bool needsStagingUpload = initialData && desc.memoryUsage == RhiMemoryUsage::GpuOnly;
+        const D3D12_RESOURCE_STATES finalState = ToDx12State(desc.initialState);
+        const D3D12_RESOURCE_STATES initialState = desc.memoryUsage == RhiMemoryUsage::CpuToGpu
+            ? D3D12_RESOURCE_STATE_GENERIC_READ
+            : (needsStagingUpload ? D3D12_RESOURCE_STATE_COPY_DEST : finalState);
         const HRESULT hr = CreateCommittedResource(&heap,
                                                    D3D12_HEAP_FLAG_NONE,
                                                    &dxDesc,
@@ -381,8 +385,88 @@ namespace SasamiRenderer
                 resource.Unmap(0, nullptr);
             }
         }
+        if (needsStagingUpload) {
+            D3D12_HEAP_PROPERTIES uploadHeap{};
+            uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
+            Resource upload;
+            if (FAILED(CreateCommittedResource(&uploadHeap,
+                                               D3D12_HEAP_FLAG_NONE,
+                                               &dxDesc,
+                                               D3D12_RESOURCE_STATE_GENERIC_READ,
+                                               nullptr,
+                                               upload))) {
+                return {};
+            }
+
+            void* mapped = nullptr;
+            const D3D12_RANGE emptyRange{ 0, 0 };
+            if (FAILED(upload.Map(0, &emptyRange, &mapped)) || !mapped) {
+                return {};
+            }
+            std::memcpy(mapped, initialData, static_cast<size_t>(desc.sizeInBytes));
+            upload.Unmap(0, nullptr);
+
+            CommandAllocator allocator;
+            CommandList commandList;
+            if (FAILED(CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, allocator)) ||
+                FAILED(CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nullptr, commandList))) {
+                return {};
+            }
+            commandList.Get()->CopyBufferRegion(resource.Get(), 0, upload.Get(), 0, desc.sizeInBytes);
+            if (finalState != D3D12_RESOURCE_STATE_COPY_DEST) {
+                ResourceBarrier barrier = CD3DX12_RESOURCE_BARRIER::Transition(resource.Get(),
+                                                                               D3D12_RESOURCE_STATE_COPY_DEST,
+                                                                               finalState);
+                commandList.ResourceBarrier(1, &barrier);
+            }
+            if (FAILED(commandList.Close())) {
+                return {};
+            }
+            ID3D12CommandList* lists[] = { commandList.Get() };
+            m_commandQueue.ExecuteCommandLists(1, lists);
+            WaitForGPU();
+        }
 
         return StoreRhiResource(std::move(resource));
+    }
+
+    bool Dx12GraphicsDevice::UpdateRhiBuffer(RhiBufferHandle bufferHandle,
+                                             uint64_t offsetInBytes,
+                                             const void* data,
+                                             uint64_t sizeInBytes)
+    {
+        Resource* resource = FindRhiResource(bufferHandle);
+        if (!resource || !data || sizeInBytes == 0) {
+            return false;
+        }
+
+        const uint64_t bufferSize = resource->Get()->GetDesc().Width;
+        if (offsetInBytes >= bufferSize || sizeInBytes > bufferSize - offsetInBytes) {
+            return false;
+        }
+
+        void* mapped = nullptr;
+        const D3D12_RANGE readRange{ 0, 0 };
+        if (FAILED(resource->Map(0, &readRange, &mapped)) || !mapped) {
+            return false;
+        }
+        std::memcpy(static_cast<uint8_t*>(mapped) + offsetInBytes,
+                    data,
+                    static_cast<size_t>(sizeInBytes));
+        const D3D12_RANGE writtenRange{
+            static_cast<SIZE_T>(offsetInBytes),
+            static_cast<SIZE_T>(offsetInBytes + sizeInBytes),
+        };
+        resource->Unmap(0, &writtenRange);
+        return true;
+    }
+
+    bool Dx12GraphicsDevice::DestroyRhiResource(RhiResourceHandle resource)
+    {
+        if (!resource.IsValid()) {
+            return false;
+        }
+        return m_rhiResources.erase(resource.id) != 0;
     }
 
     RhiShaderHandle Dx12GraphicsDevice::CreateRhiShaderModule(const RhiShaderModuleDesc& desc)

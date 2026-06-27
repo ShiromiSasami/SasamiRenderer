@@ -13,6 +13,8 @@ namespace SasamiRenderer
                                                             CpuDescriptorHandle& outCpu,
                                                             GpuDescriptorHandle& outGpu)>;
 
+        ~ShadowMapManager();
+
         bool Initialize(IRHIDevice& device, const AllocateSrvRangeCallback& allocateSrvRange);
 
         bool EnsureShadowResources();

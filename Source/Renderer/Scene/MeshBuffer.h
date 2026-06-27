@@ -22,13 +22,17 @@ namespace SasamiRenderer
             UINT indexCount = 0;
         };
 
+        ~MeshBuffer();
+
         bool Upload(GraphicsDevice& device, const std::vector<Mesh>& meshes);
+        void Release();
 
         const std::vector<GPUItem>& Items() const { return m_items; }
 
         void Bind(IRhiCommandEncoder* enc, size_t i);
 
     private:
+        GraphicsDevice* m_device = nullptr;
         std::vector<GPUItem> m_items;
     };
 }

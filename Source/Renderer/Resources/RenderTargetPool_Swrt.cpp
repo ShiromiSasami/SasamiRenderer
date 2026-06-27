@@ -8,6 +8,75 @@
 
 namespace SasamiRenderer
 {
+    namespace
+    {
+        void ReleaseCompatibleRhiTexture(IRHIDevice& device, Resource& texture, RhiTextureHandle& textureHandle)
+        {
+            texture.Reset();
+            if (textureHandle.IsValid()) {
+                device.DestroyRhiResource(textureHandle);
+                textureHandle = {};
+            }
+        }
+
+        bool CreateCompatibleTexture(IRHIDevice& device,
+                                     uint32_t width,
+                                     uint32_t height,
+                                     uint16_t arrayLayers,
+                                     DXGI_FORMAT dxgiFormat,
+                                     RhiFormat rhiFormat,
+                                     RhiTextureUsageFlags usage,
+                                     D3D12_RESOURCE_FLAGS dx12Flags,
+                                     D3D12_RESOURCE_STATES initialDx12State,
+                                     RhiResourceState initialRhiState,
+                                     const D3D12_CLEAR_VALUE* clearValue,
+                                     Resource& texture,
+                                     RhiTextureHandle& textureHandle)
+        {
+            if (device.GetCapabilities().supportsRhiResourceCreation) {
+                RhiTextureDesc rhiDesc{};
+                rhiDesc.dimension = RhiResourceDimension::Texture2D;
+                rhiDesc.extent = { width, height, 1u };
+                rhiDesc.mipLevels = 1u;
+                rhiDesc.arrayLayers = arrayLayers;
+                rhiDesc.format = rhiFormat;
+                rhiDesc.usage = usage;
+                rhiDesc.memoryUsage = RhiMemoryUsage::GpuOnly;
+                rhiDesc.initialState = initialRhiState;
+                textureHandle = device.CreateRhiTexture(rhiDesc);
+                if (Resource* compatibilityResource = device.GetD3D12CompatibilityResource(textureHandle)) {
+                    texture = *compatibilityResource;
+                } else if (textureHandle.IsValid()) {
+                    device.DestroyRhiResource(textureHandle);
+                    textureHandle = {};
+                }
+            }
+
+            if (texture.IsValid()) {
+                return true;
+            }
+
+            D3D12_RESOURCE_DESC texDesc{};
+            texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+            texDesc.Width = width;
+            texDesc.Height = height;
+            texDesc.DepthOrArraySize = arrayLayers;
+            texDesc.MipLevels = 1;
+            texDesc.Format = dxgiFormat;
+            texDesc.SampleDesc.Count = 1;
+            texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+            texDesc.Flags = dx12Flags;
+
+            CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
+            return SUCCEEDED(device.CreateCommittedResource(&defaultHeap,
+                                                            D3D12_HEAP_FLAG_NONE,
+                                                            &texDesc,
+                                                            initialDx12State,
+                                                            clearValue,
+                                                            texture));
+        }
+    }
+
     bool RenderTargetPool::EnsureSWRTShadow(IRHIDevice& device, uint32_t size, bool& outCacheInvalidated)
     {
         if (size == 0u || m_softwareDirectionalShadowSrvCpu.ptr == 0) {
@@ -19,28 +88,23 @@ namespace SasamiRenderer
             return true;
         }
 
-        m_softwareDirectionalShadowTexture.Reset();
+        ReleaseCompatibleRhiTexture(device, m_softwareDirectionalShadowTexture, m_softwareDirectionalShadowTextureHandle);
         m_softwareDirectionalShadowMapSize = 0u;
         outCacheInvalidated = true;
 
-        D3D12_RESOURCE_DESC shadowDesc{};
-        shadowDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        shadowDesc.Width = size;
-        shadowDesc.Height = size;
-        shadowDesc.DepthOrArraySize = LightSystem::kDirectionalCascadeCount;
-        shadowDesc.MipLevels = 1;
-        shadowDesc.Format = DXGI_FORMAT_R32_FLOAT;
-        shadowDesc.SampleDesc.Count = 1;
-        shadowDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        shadowDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-
-        CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
-        if (FAILED(device.CreateCommittedResource(&defaultHeap,
-                                                  D3D12_HEAP_FLAG_NONE,
-                                                  &shadowDesc,
-                                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                  nullptr,
-                                                  m_softwareDirectionalShadowTexture))) {
+        if (!CreateCompatibleTexture(device,
+                                     size,
+                                     size,
+                                     LightSystem::kDirectionalCascadeCount,
+                                     DXGI_FORMAT_R32_FLOAT,
+                                     RhiFormat::R32Float,
+                                     RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::UnorderedAccess,
+                                     D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+                                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                     RhiResourceState::ShaderResource,
+                                     nullptr,
+                                     m_softwareDirectionalShadowTexture,
+                                     m_softwareDirectionalShadowTextureHandle)) {
             return false;
         }
 
@@ -68,29 +132,24 @@ namespace SasamiRenderer
             return true;
         }
 
-        m_softwareReflectionTexture.Reset();
+        ReleaseCompatibleRhiTexture(device, m_softwareReflectionTexture, m_softwareReflectionTextureHandle);
         m_softwareReflectionWidth = 0u;
         m_softwareReflectionHeight = 0u;
         outCacheInvalidated = true;
 
-        D3D12_RESOURCE_DESC reflectionDesc{};
-        reflectionDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        reflectionDesc.Width = width;
-        reflectionDesc.Height = height;
-        reflectionDesc.DepthOrArraySize = 1;
-        reflectionDesc.MipLevels = 1;
-        reflectionDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        reflectionDesc.SampleDesc.Count = 1;
-        reflectionDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        reflectionDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-
-        CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
-        if (FAILED(device.CreateCommittedResource(&defaultHeap,
-                                                  D3D12_HEAP_FLAG_NONE,
-                                                  &reflectionDesc,
-                                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                  nullptr,
-                                                  m_softwareReflectionTexture))) {
+        if (!CreateCompatibleTexture(device,
+                                     width,
+                                     height,
+                                     1,
+                                     DXGI_FORMAT_R16G16B16A16_FLOAT,
+                                     RhiFormat::R16G16B16A16Float,
+                                     RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::UnorderedAccess,
+                                     D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+                                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                     RhiResourceState::ShaderResource,
+                                     nullptr,
+                                     m_softwareReflectionTexture,
+                                     m_softwareReflectionTextureHandle)) {
             return false;
         }
 
@@ -122,41 +181,41 @@ namespace SasamiRenderer
             return true;
         }
 
-        m_ssrSceneColorCopyTexture.Reset();
-        m_ssrReflectionTexture.Reset();
+        ReleaseCompatibleRhiTexture(device, m_ssrSceneColorCopyTexture, m_ssrSceneColorCopyTextureHandle);
+        ReleaseCompatibleRhiTexture(device, m_ssrReflectionTexture, m_ssrReflectionTextureHandle);
         m_ssrWidth = 0u;
         m_ssrHeight = 0u;
 
-        D3D12_RESOURCE_DESC copyDesc{};
-        copyDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        copyDesc.Width = width;
-        copyDesc.Height = height;
-        copyDesc.DepthOrArraySize = 1;
-        copyDesc.MipLevels = 1;
-        copyDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        copyDesc.SampleDesc.Count = 1;
-        copyDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        copyDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-        CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
-        if (FAILED(device.CreateCommittedResource(&defaultHeap,
-                                                  D3D12_HEAP_FLAG_NONE,
-                                                  &copyDesc,
-                                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                  nullptr,
-                                                  m_ssrSceneColorCopyTexture))) {
+        if (!CreateCompatibleTexture(device,
+                                     width,
+                                     height,
+                                     1,
+                                     DXGI_FORMAT_R16G16B16A16_FLOAT,
+                                     RhiFormat::R16G16B16A16Float,
+                                     RhiTextureUsageFlags::ShaderResource,
+                                     D3D12_RESOURCE_FLAG_NONE,
+                                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                     RhiResourceState::ShaderResource,
+                                     nullptr,
+                                     m_ssrSceneColorCopyTexture,
+                                     m_ssrSceneColorCopyTextureHandle)) {
             return false;
         }
 
-        D3D12_RESOURCE_DESC reflectionDesc = copyDesc;
-        reflectionDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-        if (FAILED(device.CreateCommittedResource(&defaultHeap,
-                                                  D3D12_HEAP_FLAG_NONE,
-                                                  &reflectionDesc,
-                                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                  nullptr,
-                                                  m_ssrReflectionTexture))) {
-            m_ssrSceneColorCopyTexture.Reset();
+        if (!CreateCompatibleTexture(device,
+                                     width,
+                                     height,
+                                     1,
+                                     DXGI_FORMAT_R16G16B16A16_FLOAT,
+                                     RhiFormat::R16G16B16A16Float,
+                                     RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::UnorderedAccess,
+                                     D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+                                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                     RhiResourceState::ShaderResource,
+                                     nullptr,
+                                     m_ssrReflectionTexture,
+                                     m_ssrReflectionTextureHandle)) {
+            ReleaseCompatibleRhiTexture(device, m_ssrSceneColorCopyTexture, m_ssrSceneColorCopyTextureHandle);
             return false;
         }
 
@@ -170,8 +229,8 @@ namespace SasamiRenderer
 
         ID3D12Device* nativeDevice = device.GetDevice();
         if (!nativeDevice) {
-            m_ssrSceneColorCopyTexture.Reset();
-            m_ssrReflectionTexture.Reset();
+            ReleaseCompatibleRhiTexture(device, m_ssrSceneColorCopyTexture, m_ssrSceneColorCopyTextureHandle);
+            ReleaseCompatibleRhiTexture(device, m_ssrReflectionTexture, m_ssrReflectionTextureHandle);
             return false;
         }
 
@@ -200,29 +259,24 @@ namespace SasamiRenderer
             return true;
         }
 
-        m_softwareAmbientOcclusionTexture.Reset();
+        ReleaseCompatibleRhiTexture(device, m_softwareAmbientOcclusionTexture, m_softwareAmbientOcclusionTextureHandle);
         m_softwareAmbientOcclusionWidth = 0u;
         m_softwareAmbientOcclusionHeight = 0u;
         outCacheInvalidated = true;
 
-        D3D12_RESOURCE_DESC aoDesc{};
-        aoDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        aoDesc.Width = width;
-        aoDesc.Height = height;
-        aoDesc.DepthOrArraySize = 1;
-        aoDesc.MipLevels = 1;
-        aoDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        aoDesc.SampleDesc.Count = 1;
-        aoDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        aoDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-
-        CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
-        if (FAILED(device.CreateCommittedResource(&defaultHeap,
-                                                  D3D12_HEAP_FLAG_NONE,
-                                                  &aoDesc,
-                                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                  nullptr,
-                                                  m_softwareAmbientOcclusionTexture))) {
+        if (!CreateCompatibleTexture(device,
+                                     width,
+                                     height,
+                                     1,
+                                     DXGI_FORMAT_R8G8B8A8_UNORM,
+                                     RhiFormat::R8G8B8A8UNorm,
+                                     RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::UnorderedAccess,
+                                     D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+                                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                     RhiResourceState::ShaderResource,
+                                     nullptr,
+                                     m_softwareAmbientOcclusionTexture,
+                                     m_softwareAmbientOcclusionTextureHandle)) {
             return false;
         }
 
@@ -250,56 +304,23 @@ namespace SasamiRenderer
             return true;
         }
 
-        m_transparentSceneColorCopyTexture.Reset();
+        ReleaseCompatibleRhiTexture(device, m_transparentSceneColorCopyTexture, m_transparentSceneColorCopyTextureHandle);
         m_transparentSceneColorCopyWidth = 0u;
         m_transparentSceneColorCopyHeight = 0u;
 
-        if (device.GetCapabilities().supportsRhiResourceCreation) {
-            RhiTextureDesc rhiDesc{};
-            rhiDesc.dimension = RhiResourceDimension::Texture2D;
-            rhiDesc.extent = { width, height, 1u };
-            rhiDesc.mipLevels = 1;
-            rhiDesc.arrayLayers = 1;
-            rhiDesc.format = RhiFormat::R8G8B8A8UNorm;
-            rhiDesc.usage = RhiTextureUsageFlags::ShaderResource;
-            rhiDesc.memoryUsage = RhiMemoryUsage::GpuOnly;
-            rhiDesc.initialState = RhiResourceState::ShaderResource;
-
-            const RhiTextureHandle rhiTexture = device.CreateRhiTexture(rhiDesc);
-            if (Resource* compatibilityResource = device.GetD3D12CompatibilityResource(rhiTexture)) {
-                m_transparentSceneColorCopyTexture = *compatibilityResource;
-
-                D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-                srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-                srvDesc.Texture2D.MipLevels = 1;
-                device.CreateShaderResourceView(m_transparentSceneColorCopyTexture, &srvDesc, m_transparentSceneColorCopySrvCpu);
-
-                m_transparentSceneColorCopyWidth = width;
-                m_transparentSceneColorCopyHeight = height;
-                return true;
-            }
-        }
-
-        D3D12_RESOURCE_DESC texDesc{};
-        texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        texDesc.Width = width;
-        texDesc.Height = height;
-        texDesc.DepthOrArraySize = 1;
-        texDesc.MipLevels = 1;
-        texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        texDesc.SampleDesc.Count = 1;
-        texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        texDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-        CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
-        if (FAILED(device.CreateCommittedResource(&defaultHeap,
-                                                  D3D12_HEAP_FLAG_NONE,
-                                                  &texDesc,
-                                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                  nullptr,
-                                                  m_transparentSceneColorCopyTexture))) {
+        if (!CreateCompatibleTexture(device,
+                                     width,
+                                     height,
+                                     1,
+                                     DXGI_FORMAT_R8G8B8A8_UNORM,
+                                     RhiFormat::R8G8B8A8UNorm,
+                                     RhiTextureUsageFlags::ShaderResource,
+                                     D3D12_RESOURCE_FLAG_NONE,
+                                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                     RhiResourceState::ShaderResource,
+                                     nullptr,
+                                     m_transparentSceneColorCopyTexture,
+                                     m_transparentSceneColorCopyTextureHandle)) {
             return false;
         }
 
@@ -327,28 +348,23 @@ namespace SasamiRenderer
             return true;
         }
 
-        m_transmissionSceneColorCopyTexture.Reset();
+        ReleaseCompatibleRhiTexture(device, m_transmissionSceneColorCopyTexture, m_transmissionSceneColorCopyTextureHandle);
         m_transmissionSceneColorCopyWidth = 0u;
         m_transmissionSceneColorCopyHeight = 0u;
 
-        D3D12_RESOURCE_DESC texDesc{};
-        texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        texDesc.Width = width;
-        texDesc.Height = height;
-        texDesc.DepthOrArraySize = 1;
-        texDesc.MipLevels = 1;
-        texDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        texDesc.SampleDesc.Count = 1;
-        texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        texDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-        CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
-        if (FAILED(device.CreateCommittedResource(&defaultHeap,
-                                                  D3D12_HEAP_FLAG_NONE,
-                                                  &texDesc,
-                                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                  nullptr,
-                                                  m_transmissionSceneColorCopyTexture))) {
+        if (!CreateCompatibleTexture(device,
+                                     width,
+                                     height,
+                                     1,
+                                     DXGI_FORMAT_R16G16B16A16_FLOAT,
+                                     RhiFormat::R16G16B16A16Float,
+                                     RhiTextureUsageFlags::ShaderResource,
+                                     D3D12_RESOURCE_FLAG_NONE,
+                                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                     RhiResourceState::ShaderResource,
+                                     nullptr,
+                                     m_transmissionSceneColorCopyTexture,
+                                     m_transmissionSceneColorCopyTextureHandle)) {
             return false;
         }
 
@@ -376,7 +392,7 @@ namespace SasamiRenderer
             return true;
         }
 
-        m_transparentBackfaceDistanceTexture.Reset();
+        ReleaseCompatibleRhiTexture(device, m_transparentBackfaceDistanceTexture, m_transparentBackfaceDistanceTextureHandle);
         m_transparentBackfaceDistanceRtvHeap.Reset();
         m_transparentBackfaceDistanceWidth = 0u;
         m_transparentBackfaceDistanceHeight = 0u;
@@ -390,17 +406,6 @@ namespace SasamiRenderer
         }
         m_transparentBackfaceDistanceRtv = m_transparentBackfaceDistanceRtvHeap->GetCPUDescriptorHandleForHeapStart();
 
-        D3D12_RESOURCE_DESC texDesc{};
-        texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        texDesc.Width = width;
-        texDesc.Height = height;
-        texDesc.DepthOrArraySize = 1;
-        texDesc.MipLevels = 1;
-        texDesc.Format = DXGI_FORMAT_R32_FLOAT;
-        texDesc.SampleDesc.Count = 1;
-        texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        texDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-
         D3D12_CLEAR_VALUE clearValue{};
         clearValue.Format = DXGI_FORMAT_R32_FLOAT;
         clearValue.Color[0] = 0.0f;
@@ -408,13 +413,19 @@ namespace SasamiRenderer
         clearValue.Color[2] = 0.0f;
         clearValue.Color[3] = 0.0f;
 
-        CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
-        if (FAILED(device.CreateCommittedResource(&defaultHeap,
-                                                  D3D12_HEAP_FLAG_NONE,
-                                                  &texDesc,
-                                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                  &clearValue,
-                                                  m_transparentBackfaceDistanceTexture))) {
+        if (!CreateCompatibleTexture(device,
+                                     width,
+                                     height,
+                                     1,
+                                     DXGI_FORMAT_R32_FLOAT,
+                                     RhiFormat::R32Float,
+                                     RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::RenderTarget,
+                                     D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,
+                                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                     RhiResourceState::ShaderResource,
+                                     &clearValue,
+                                     m_transparentBackfaceDistanceTexture,
+                                     m_transparentBackfaceDistanceTextureHandle)) {
             return false;
         }
 
@@ -450,8 +461,8 @@ namespace SasamiRenderer
             return true;
         }
 
-        m_transparentOitAccumTexture.Reset();
-        m_transparentOitRevealageTexture.Reset();
+        ReleaseCompatibleRhiTexture(device, m_transparentOitAccumTexture, m_transparentOitAccumTextureHandle);
+        ReleaseCompatibleRhiTexture(device, m_transparentOitRevealageTexture, m_transparentOitRevealageTextureHandle);
         m_transparentOitAccumRtvHeap.Reset();
         m_transparentOitRevealageRtvHeap.Reset();
         m_transparentOitWidth = 0u;
@@ -469,21 +480,12 @@ namespace SasamiRenderer
         m_transparentOitRevealageRtv = m_transparentOitRevealageRtvHeap->GetCPUDescriptorHandleForHeapStart();
 
         auto createTexture = [&](DXGI_FORMAT format,
+                                 RhiFormat rhiFormat,
                                  const float clearColor[4],
                                  Resource& texture,
+                                 RhiTextureHandle& textureHandle,
                                  CpuDescriptorHandle rtv,
                                  CpuDescriptorHandle srvCpu) -> bool {
-            D3D12_RESOURCE_DESC texDesc{};
-            texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-            texDesc.Width = width;
-            texDesc.Height = height;
-            texDesc.DepthOrArraySize = 1;
-            texDesc.MipLevels = 1;
-            texDesc.Format = format;
-            texDesc.SampleDesc.Count = 1;
-            texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-            texDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-
             D3D12_CLEAR_VALUE clearValue{};
             clearValue.Format = format;
             clearValue.Color[0] = clearColor[0];
@@ -491,13 +493,19 @@ namespace SasamiRenderer
             clearValue.Color[2] = clearColor[2];
             clearValue.Color[3] = clearColor[3];
 
-            CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
-            if (FAILED(device.CreateCommittedResource(&defaultHeap,
-                                                      D3D12_HEAP_FLAG_NONE,
-                                                      &texDesc,
-                                                      D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                      &clearValue,
-                                                      texture))) {
+            if (!CreateCompatibleTexture(device,
+                                         width,
+                                         height,
+                                         1,
+                                         format,
+                                         rhiFormat,
+                                         RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::RenderTarget,
+                                         D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,
+                                         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                         RhiResourceState::ShaderResource,
+                                         &clearValue,
+                                         texture,
+                                         textureHandle)) {
                 return false;
             }
 
@@ -518,17 +526,21 @@ namespace SasamiRenderer
         const float accumClear[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
         const float revealageClear[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
         if (!createTexture(DXGI_FORMAT_R16G16B16A16_FLOAT,
+                           RhiFormat::R16G16B16A16Float,
                            accumClear,
                            m_transparentOitAccumTexture,
+                           m_transparentOitAccumTextureHandle,
                            m_transparentOitAccumRtv,
                            m_transparentOitAccumSrvCpu) ||
             !createTexture(DXGI_FORMAT_R16_FLOAT,
+                           RhiFormat::R16Float,
                            revealageClear,
                            m_transparentOitRevealageTexture,
+                           m_transparentOitRevealageTextureHandle,
                            m_transparentOitRevealageRtv,
                            m_transparentOitRevealageSrvCpu)) {
-            m_transparentOitAccumTexture.Reset();
-            m_transparentOitRevealageTexture.Reset();
+            ReleaseCompatibleRhiTexture(device, m_transparentOitAccumTexture, m_transparentOitAccumTextureHandle);
+            ReleaseCompatibleRhiTexture(device, m_transparentOitRevealageTexture, m_transparentOitRevealageTextureHandle);
             return false;
         }
 
@@ -549,28 +561,23 @@ namespace SasamiRenderer
             return true;
         }
 
-        m_softwareShadowReSTIRTexture.Reset();
+        ReleaseCompatibleRhiTexture(device, m_softwareShadowReSTIRTexture, m_softwareShadowReSTIRTextureHandle);
         m_softwareShadowReSTIRWidth  = 0u;
         m_softwareShadowReSTIRHeight = 0u;
 
-        D3D12_RESOURCE_DESC texDesc{};
-        texDesc.Dimension          = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        texDesc.Width              = width;
-        texDesc.Height             = height;
-        texDesc.DepthOrArraySize   = 1;
-        texDesc.MipLevels          = 1;
-        texDesc.Format             = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        texDesc.SampleDesc.Count   = 1;
-        texDesc.Layout             = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        texDesc.Flags              = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-
-        CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
-        if (FAILED(device.CreateCommittedResource(&defaultHeap,
-                                                  D3D12_HEAP_FLAG_NONE,
-                                                  &texDesc,
-                                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                  nullptr,
-                                                  m_softwareShadowReSTIRTexture))) {
+        if (!CreateCompatibleTexture(device,
+                                     width,
+                                     height,
+                                     1,
+                                     DXGI_FORMAT_R16G16B16A16_FLOAT,
+                                     RhiFormat::R16G16B16A16Float,
+                                     RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::UnorderedAccess,
+                                     D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+                                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                     RhiResourceState::ShaderResource,
+                                     nullptr,
+                                     m_softwareShadowReSTIRTexture,
+                                     m_softwareShadowReSTIRTextureHandle)) {
             return false;
         }
 
@@ -598,48 +605,23 @@ namespace SasamiRenderer
             return true;
         }
 
-        m_rayTracingOutput.Reset();
+        ReleaseCompatibleRhiTexture(device, m_rayTracingOutput, m_rayTracingOutputHandle);
         m_rayTracingOutputWidth = 0u;
         m_rayTracingOutputHeight = 0u;
 
-        if (device.GetCapabilities().supportsRhiResourceCreation) {
-            RhiTextureDesc rhiDesc{};
-            rhiDesc.dimension = RhiResourceDimension::Texture2D;
-            rhiDesc.extent = { width, height, 1u };
-            rhiDesc.mipLevels = 1;
-            rhiDesc.arrayLayers = 1;
-            rhiDesc.format = RhiFormat::R8G8B8A8UNorm;
-            rhiDesc.usage = RhiTextureUsageFlags::UnorderedAccess | RhiTextureUsageFlags::CopySource;
-            rhiDesc.memoryUsage = RhiMemoryUsage::GpuOnly;
-            rhiDesc.initialState = RhiResourceState::CopySource;
-
-            const RhiTextureHandle rhiTexture = device.CreateRhiTexture(rhiDesc);
-            if (Resource* compatibilityResource = device.GetD3D12CompatibilityResource(rhiTexture)) {
-                m_rayTracingOutput = *compatibilityResource;
-                m_rayTracingOutputWidth = width;
-                m_rayTracingOutputHeight = height;
-                return true;
-            }
-        }
-
-        D3D12_RESOURCE_DESC outputDesc{};
-        outputDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        outputDesc.Width = width;
-        outputDesc.Height = height;
-        outputDesc.DepthOrArraySize = 1;
-        outputDesc.MipLevels = 1;
-        outputDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        outputDesc.SampleDesc.Count = 1;
-        outputDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        outputDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-
-        CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
-        if (FAILED(device.CreateCommittedResource(&defaultHeap,
-                                                  D3D12_HEAP_FLAG_NONE,
-                                                  &outputDesc,
-                                                  D3D12_RESOURCE_STATE_COPY_SOURCE,
-                                                  nullptr,
-                                                  m_rayTracingOutput))) {
+        if (!CreateCompatibleTexture(device,
+                                     width,
+                                     height,
+                                     1,
+                                     DXGI_FORMAT_R8G8B8A8_UNORM,
+                                     RhiFormat::R8G8B8A8UNorm,
+                                     RhiTextureUsageFlags::UnorderedAccess | RhiTextureUsageFlags::CopySource,
+                                     D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+                                     D3D12_RESOURCE_STATE_COPY_SOURCE,
+                                     RhiResourceState::CopySource,
+                                     nullptr,
+                                     m_rayTracingOutput,
+                                     m_rayTracingOutputHandle)) {
             return false;
         }
 

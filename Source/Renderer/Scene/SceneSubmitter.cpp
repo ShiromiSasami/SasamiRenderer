@@ -119,6 +119,25 @@ namespace SasamiRenderer
 
     }
 
+    SceneSubmitter::~SceneSubmitter()
+    {
+        ReleaseTextures();
+    }
+
+    void SceneSubmitter::ReleaseTextures()
+    {
+        if (m_device) {
+            for (auto& texture : m_sceneTextures) {
+                if (texture && texture->rhiTexture.IsValid()) {
+                    m_device->DestroyRhiResource(texture->rhiTexture);
+                    texture->rhiTexture = {};
+                }
+            }
+        }
+        m_sceneTextures.clear();
+        m_textureCache.clear();
+    }
+
     void SceneSubmitter::Initialize(const InitParams& params)
     {
         m_device             = params.device;
@@ -181,6 +200,7 @@ namespace SasamiRenderer
                         return m_sceneTextures.back().get();
                     }
                 }
+                m_device->DestroyRhiResource(rhiTexture);
             }
         }
 

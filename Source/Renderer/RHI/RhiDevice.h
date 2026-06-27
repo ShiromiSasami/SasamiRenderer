@@ -74,6 +74,11 @@ namespace SasamiRenderer
 
         virtual RhiTextureHandle CreateRhiTexture(const RhiTextureDesc& desc) = 0;
         virtual RhiBufferHandle CreateRhiBuffer(const RhiBufferDesc& desc, const void* initialData = nullptr) = 0;
+        virtual bool UpdateRhiBuffer(RhiBufferHandle buffer,
+                                     uint64_t offsetInBytes,
+                                     const void* data,
+                                     uint64_t sizeInBytes) = 0;
+        virtual bool DestroyRhiResource(RhiResourceHandle resource) = 0;
         virtual RhiShaderHandle CreateRhiShaderModule(const RhiShaderModuleDesc& desc) = 0;
         virtual RhiPipelineLayoutHandle CreateRhiPipelineLayout(const RhiPipelineLayoutDesc& desc) = 0;
         virtual RhiPipelineHandle CreateRhiGraphicsPipeline(const RhiGraphicsPipelineDesc& desc) = 0;
@@ -84,6 +89,9 @@ namespace SasamiRenderer
         virtual bool CreateRhiShaderResourceView(RhiResourceHandle resource,
                                                  const RhiTextureViewDesc& desc,
                                                  RhiCpuDescriptorHandle destination) = 0;
+        virtual bool CreateRhiBufferShaderResourceView(RhiBufferHandle buffer,
+                                                       const RhiBufferViewDesc& desc,
+                                                       RhiCpuDescriptorHandle destination) = 0;
         virtual bool CreateRhiRenderTargetView(RhiTextureHandle texture,
                                                const RhiRenderTargetViewDesc& desc,
                                                RhiCpuDescriptorHandle destination) = 0;

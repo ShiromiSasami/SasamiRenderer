@@ -12,6 +12,30 @@
 
 namespace SasamiRenderer
 {
+    MeshletBuffer::~MeshletBuffer()
+    {
+        Release();
+    }
+
+    void MeshletBuffer::Release()
+    {
+        if (m_device) {
+            if (m_descBufferHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_descBufferHandle);
+            }
+            if (m_indexBufferHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_indexBufferHandle);
+            }
+        }
+
+        m_descBuffer.Reset();
+        m_indexBuffer.Reset();
+        m_descBufferHandle = {};
+        m_indexBufferHandle = {};
+        m_descBufferCompat = nullptr;
+        m_indexBufferCompat = nullptr;
+    }
+
     Resource* MeshletBuffer::GetDescBufferResource() const
     {
         return m_descBufferCompat ? m_descBufferCompat : const_cast<Resource*>(&m_descBuffer);
@@ -109,12 +133,8 @@ namespace SasamiRenderer
 
     bool MeshletBuffer::Upload(IRHIDevice& device)
     {
-        m_descBuffer.Reset();
-        m_indexBuffer.Reset();
-        m_descBufferHandle = {};
-        m_indexBufferHandle = {};
-        m_descBufferCompat = nullptr;
-        m_indexBufferCompat = nullptr;
+        Release();
+        m_device = &device;
 
         if (m_meshletDescs.empty())
         {
@@ -150,10 +170,7 @@ namespace SasamiRenderer
                 return true;
             }
 
-            m_descBufferHandle = {};
-            m_indexBufferHandle = {};
-            m_descBufferCompat = nullptr;
-            m_indexBufferCompat = nullptr;
+            Release();
         }
 
         if (!device.GetCapabilities().supportsD3D12CompatibilitySurface)

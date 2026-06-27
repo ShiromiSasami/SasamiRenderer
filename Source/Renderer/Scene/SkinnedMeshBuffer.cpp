@@ -5,9 +5,30 @@
 
 namespace SasamiRenderer
 {
+    SkinnedMeshBuffer::~SkinnedMeshBuffer()
+    {
+        Release();
+    }
+
+    void SkinnedMeshBuffer::Release()
+    {
+        if (m_device) {
+            for (auto& item : m_items) {
+                if (item.rhiVb.IsValid()) {
+                    m_device->DestroyRhiResource(item.rhiVb);
+                }
+                if (item.rhiIb.IsValid()) {
+                    m_device->DestroyRhiResource(item.rhiIb);
+                }
+            }
+        }
+        m_items.clear();
+    }
+
     bool SkinnedMeshBuffer::Upload(GraphicsDevice& device, const std::vector<SkinnedMesh>& meshes)
     {
-        m_items.clear();
+        Release();
+        m_device = &device;
         m_items.reserve(meshes.size());
         if (meshes.empty()) return false;
 
@@ -24,7 +45,10 @@ namespace SasamiRenderer
                     vbDesc.memoryUsage = RhiMemoryUsage::CpuToGpu;
                     vbDesc.initialState = RhiResourceState::Common;
                     item.rhiVb = device.CreateRhiBuffer(vbDesc, m.vertices.data());
-                    if (!item.rhiVb.IsValid()) return false;
+                    if (!item.rhiVb.IsValid()) {
+                        Release();
+                        return false;
+                    }
 
                     item.vbv.StrideInBytes  = sizeof(SkinnedVertex);
                     item.vbv.SizeInBytes    = static_cast<UINT>(vbBytes);
@@ -40,7 +64,13 @@ namespace SasamiRenderer
                     ibDesc.memoryUsage = RhiMemoryUsage::CpuToGpu;
                     ibDesc.initialState = RhiResourceState::Common;
                     item.rhiIb = device.CreateRhiBuffer(ibDesc, m.indices.data());
-                    if (!item.rhiIb.IsValid()) return false;
+                    if (!item.rhiIb.IsValid()) {
+                        if (item.rhiVb.IsValid()) {
+                            device.DestroyRhiResource(item.rhiVb);
+                        }
+                        Release();
+                        return false;
+                    }
 
                     item.ibv.SizeInBytes    = static_cast<UINT>(ibBytes);
                     item.ibv.Format         = DXGI_FORMAT_R32_UINT;

@@ -28,6 +28,7 @@ namespace SasamiRenderer
             case RhiFormat::R16G16B16A16Float: return DXGI_FORMAT_R16G16B16A16_FLOAT;
             case RhiFormat::R32G32B32Float: return DXGI_FORMAT_R32G32B32_FLOAT;
             case RhiFormat::R32G32Float: return DXGI_FORMAT_R32G32_FLOAT;
+            case RhiFormat::R16Float: return DXGI_FORMAT_R16_FLOAT;
             case RhiFormat::R16Typeless: return DXGI_FORMAT_R16_TYPELESS;
             case RhiFormat::R16UNorm: return DXGI_FORMAT_R16_UNORM;
             case RhiFormat::R32Float: return DXGI_FORMAT_R32_FLOAT;

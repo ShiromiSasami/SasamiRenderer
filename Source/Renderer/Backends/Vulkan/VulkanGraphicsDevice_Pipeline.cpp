@@ -36,6 +36,8 @@ namespace SasamiRenderer
             static_cast<VkDeviceSize>(rowPitchBytes) * static_cast<VkDeviceSize>(height);
 
         VulkanRhiResource texture{};
+        texture.extent = { width, height, 1u };
+        texture.format = RhiFormat::R8G8B8A8UNorm;
         VkImageCreateInfo imageInfo{};
         imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -257,6 +259,8 @@ namespace SasamiRenderer
         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
         VulkanRhiResource resource{};
+        resource.extent = desc.extent;
+        resource.format = desc.format;
         if (vkCreateImage(m_device, &imageInfo, nullptr, &resource.image) != VK_SUCCESS) {
             return {};
         }
@@ -295,6 +299,10 @@ namespace SasamiRenderer
         bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferInfo.size = desc.sizeInBytes;
         bufferInfo.usage = ToVkBufferUsage(desc.usage);
+        const bool needsStagingUpload = initialData && desc.memoryUsage == RhiMemoryUsage::GpuOnly;
+        if (needsStagingUpload) {
+            bufferInfo.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        }
         bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &resource.buffer) != VK_SUCCESS) {
             return {};
@@ -318,17 +326,189 @@ namespace SasamiRenderer
             return {};
         }
 
-        if (initialData && desc.memoryUsage != RhiMemoryUsage::GpuOnly) {
+        resource.sizeInBytes = desc.sizeInBytes;
+        resource.memoryUsage = desc.memoryUsage;
+        if (initialData && desc.memoryUsage == RhiMemoryUsage::CpuToGpu) {
             void* mapped = nullptr;
             if (vkMapMemory(m_device, resource.memory, 0, desc.sizeInBytes, 0, &mapped) == VK_SUCCESS && mapped) {
                 std::memcpy(mapped, initialData, static_cast<size_t>(desc.sizeInBytes));
                 vkUnmapMemory(m_device, resource.memory);
             }
         }
+        if (needsStagingUpload) {
+            VulkanRhiResource staging{};
+            VkBufferCreateInfo stagingInfo{};
+            stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+            stagingInfo.size = desc.sizeInBytes;
+            stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+            stagingInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            if (vkCreateBuffer(m_device, &stagingInfo, nullptr, &staging.buffer) != VK_SUCCESS) {
+                vkFreeMemory(m_device, resource.memory, nullptr);
+                vkDestroyBuffer(m_device, resource.buffer, nullptr);
+                return {};
+            }
+
+            VkMemoryRequirements stagingRequirements{};
+            vkGetBufferMemoryRequirements(m_device, staging.buffer, &stagingRequirements);
+            VkMemoryAllocateInfo stagingAllocate{};
+            stagingAllocate.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+            stagingAllocate.allocationSize = stagingRequirements.size;
+            stagingAllocate.memoryTypeIndex = FindMemoryType(
+                stagingRequirements.memoryTypeBits,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            bool uploadSucceeded = stagingAllocate.memoryTypeIndex != UINT32_MAX &&
+                vkAllocateMemory(m_device, &stagingAllocate, nullptr, &staging.memory) == VK_SUCCESS &&
+                vkBindBufferMemory(m_device, staging.buffer, staging.memory, 0) == VK_SUCCESS;
+            void* mapped = nullptr;
+            if (uploadSucceeded) {
+                uploadSucceeded = vkMapMemory(m_device, staging.memory, 0, desc.sizeInBytes, 0, &mapped) == VK_SUCCESS && mapped;
+            }
+            if (uploadSucceeded) {
+                std::memcpy(mapped, initialData, static_cast<size_t>(desc.sizeInBytes));
+                vkUnmapMemory(m_device, staging.memory);
+            }
+
+            VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+            if (uploadSucceeded && m_commandPool != VK_NULL_HANDLE) {
+                VkCommandBufferAllocateInfo commandAllocate{};
+                commandAllocate.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+                commandAllocate.commandPool = m_commandPool;
+                commandAllocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+                commandAllocate.commandBufferCount = 1;
+                uploadSucceeded = vkAllocateCommandBuffers(m_device, &commandAllocate, &commandBuffer) == VK_SUCCESS;
+            } else {
+                uploadSucceeded = false;
+            }
+            if (uploadSucceeded) {
+                VkCommandBufferBeginInfo beginInfo{};
+                beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+                beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+                uploadSucceeded = vkBeginCommandBuffer(commandBuffer, &beginInfo) == VK_SUCCESS;
+            }
+            if (uploadSucceeded) {
+                VkBufferCopy copy{};
+                copy.size = desc.sizeInBytes;
+                vkCmdCopyBuffer(commandBuffer, staging.buffer, resource.buffer, 1, &copy);
+
+                VkBufferMemoryBarrier barrier{};
+                barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+                barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                barrier.dstAccessMask = ToVkAccessFlags(desc.initialState);
+                barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier.buffer = resource.buffer;
+                barrier.offset = 0;
+                barrier.size = desc.sizeInBytes;
+                vkCmdPipelineBarrier(commandBuffer,
+                                     VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                     ToVkPipelineStage(desc.initialState),
+                                     0,
+                                     0,
+                                     nullptr,
+                                     1,
+                                     &barrier,
+                                     0,
+                                     nullptr);
+                uploadSucceeded = vkEndCommandBuffer(commandBuffer) == VK_SUCCESS;
+            }
+            if (uploadSucceeded) {
+                VkSubmitInfo submitInfo{};
+                submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+                submitInfo.commandBufferCount = 1;
+                submitInfo.pCommandBuffers = &commandBuffer;
+                uploadSucceeded = vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE) == VK_SUCCESS &&
+                    vkQueueWaitIdle(m_graphicsQueue) == VK_SUCCESS;
+            }
+            if (commandBuffer != VK_NULL_HANDLE) {
+                vkFreeCommandBuffers(m_device, m_commandPool, 1, &commandBuffer);
+            }
+            if (staging.memory != VK_NULL_HANDLE) {
+                vkFreeMemory(m_device, staging.memory, nullptr);
+            }
+            vkDestroyBuffer(m_device, staging.buffer, nullptr);
+            if (!uploadSucceeded) {
+                vkFreeMemory(m_device, resource.memory, nullptr);
+                vkDestroyBuffer(m_device, resource.buffer, nullptr);
+                return {};
+            }
+        }
 
         const uint64_t id = m_nextRhiResourceHandle++;
         m_rhiResources.emplace(id, resource);
         return RhiBufferHandle{ id };
+    }
+
+    bool VulkanGraphicsDevice::UpdateRhiBuffer(RhiBufferHandle bufferHandle,
+                                               uint64_t offsetInBytes,
+                                               const void* data,
+                                               uint64_t sizeInBytes)
+    {
+        const auto resourceIt = m_rhiResources.find(bufferHandle.id);
+        if (resourceIt == m_rhiResources.end() || !data || sizeInBytes == 0 ||
+            resourceIt->second.buffer == VK_NULL_HANDLE ||
+            resourceIt->second.memory == VK_NULL_HANDLE ||
+            resourceIt->second.memoryUsage != RhiMemoryUsage::CpuToGpu ||
+            offsetInBytes >= resourceIt->second.sizeInBytes ||
+            sizeInBytes > resourceIt->second.sizeInBytes - offsetInBytes) {
+            return false;
+        }
+
+        void* mapped = nullptr;
+        if (vkMapMemory(m_device,
+                        resourceIt->second.memory,
+                        offsetInBytes,
+                        sizeInBytes,
+                        0,
+                        &mapped) != VK_SUCCESS ||
+            !mapped) {
+            return false;
+        }
+        std::memcpy(mapped, data, static_cast<size_t>(sizeInBytes));
+        vkUnmapMemory(m_device, resourceIt->second.memory);
+        return true;
+    }
+
+    bool VulkanGraphicsDevice::DestroyRhiResource(RhiResourceHandle resource)
+    {
+        const auto resourceIt = m_rhiResources.find(resource.id);
+        if (!resource.IsValid() || resourceIt == m_rhiResources.end() || m_device == VK_NULL_HANDLE) {
+            return false;
+        }
+
+        for (auto it = m_rhiImageViewResources.begin(); it != m_rhiImageViewResources.end();) {
+            if (it->second == resource.id) {
+                const auto viewIt = m_rhiImageViews.find(it->first);
+                if (viewIt != m_rhiImageViews.end()) {
+                    if (viewIt->second != VK_NULL_HANDLE) {
+                        vkDestroyImageView(m_device, viewIt->second, nullptr);
+                    }
+                    m_rhiImageViews.erase(viewIt);
+                }
+                it = m_rhiImageViewResources.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        for (auto it = m_rhiDescriptors.begin(); it != m_rhiDescriptors.end();) {
+            if (it->second.resourceId == resource.id) {
+                it = m_rhiDescriptors.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        const VulkanRhiResource nativeResource = resourceIt->second;
+        if (nativeResource.image != VK_NULL_HANDLE) {
+            vkDestroyImage(m_device, nativeResource.image, nullptr);
+        }
+        if (nativeResource.buffer != VK_NULL_HANDLE) {
+            vkDestroyBuffer(m_device, nativeResource.buffer, nullptr);
+        }
+        if (nativeResource.memory != VK_NULL_HANDLE) {
+            vkFreeMemory(m_device, nativeResource.memory, nullptr);
+        }
+        m_rhiResources.erase(resourceIt);
+        return true;
     }
 
     RhiShaderHandle VulkanGraphicsDevice::CreateRhiShaderModule(const RhiShaderModuleDesc& desc)
@@ -377,13 +557,24 @@ namespace SasamiRenderer
 
             VkDescriptorSetLayoutBinding setBinding{};
             setBinding.binding = binding.baseRegister;
-            setBinding.descriptorType = ToVkDescriptorType(binding.type);
+            setBinding.descriptorType = ToVkDescriptorType(binding);
             setBinding.descriptorCount = binding.descriptorCount;
             setBinding.stageFlags = ToVkShaderStages(binding.visibility);
             setBindings.push_back(setBinding);
         }
 
         VulkanRhiPipelineLayout layout{};
+        layout.bindings.resize(desc.bindingCount);
+        for (uint32_t i = 0; i < desc.bindingCount; ++i) {
+            const RhiBindingRangeDesc& binding = desc.bindings[i];
+            if (binding.type == RhiBindingType::RootConstants) {
+                continue;
+            }
+            layout.bindings[i].binding = binding.baseRegister;
+            layout.bindings[i].descriptorCount = binding.descriptorCount;
+            layout.bindings[i].descriptorType = ToVkDescriptorType(binding);
+            layout.bindings[i].valid = true;
+        }
         if (!setBindings.empty()) {
             VkDescriptorSetLayoutCreateInfo setInfo{};
             setInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -632,6 +823,7 @@ namespace SasamiRenderer
         }
 
         const uint64_t id = m_nextRhiPipelineHandle++;
+        pipeline.layout = desc.layout;
         m_rhiPipelines.emplace(id, pipeline);
         return RhiPipelineHandle{ id };
     }
@@ -653,13 +845,24 @@ namespace SasamiRenderer
             return {};
         }
 
-        VkPipelineLayoutCreateInfo layoutInfo{};
-        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-
         VulkanRhiPipeline pipeline{};
-        if (vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &pipeline.ownedPipelineLayout) != VK_SUCCESS) {
-            vkDestroyShaderModule(m_device, shader, nullptr);
-            return {};
+        VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+        if (desc.layout.IsValid()) {
+            const auto layoutIt = m_rhiPipelineLayouts.find(desc.layout.id);
+            if (layoutIt == m_rhiPipelineLayouts.end() || layoutIt->second.pipelineLayout == VK_NULL_HANDLE) {
+                vkDestroyShaderModule(m_device, shader, nullptr);
+                return {};
+            }
+            pipelineLayout = layoutIt->second.pipelineLayout;
+            pipeline.layout = desc.layout;
+        } else {
+            VkPipelineLayoutCreateInfo layoutInfo{};
+            layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+            if (vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &pipeline.ownedPipelineLayout) != VK_SUCCESS) {
+                vkDestroyShaderModule(m_device, shader, nullptr);
+                return {};
+            }
+            pipelineLayout = pipeline.ownedPipelineLayout;
         }
 
         VkComputePipelineCreateInfo pipelineInfo{};
@@ -668,12 +871,14 @@ namespace SasamiRenderer
         pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
         pipelineInfo.stage.module = shader;
         pipelineInfo.stage.pName = desc.shader.entryPoint ? desc.shader.entryPoint : "main";
-        pipelineInfo.layout = pipeline.ownedPipelineLayout;
+        pipelineInfo.layout = pipelineLayout;
 
         const VkResult result = vkCreateComputePipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline.pipeline);
         vkDestroyShaderModule(m_device, shader, nullptr);
         if (result != VK_SUCCESS) {
-            vkDestroyPipelineLayout(m_device, pipeline.ownedPipelineLayout, nullptr);
+            if (pipeline.ownedPipelineLayout != VK_NULL_HANDLE) {
+                vkDestroyPipelineLayout(m_device, pipeline.ownedPipelineLayout, nullptr);
+            }
             return {};
         }
 
@@ -702,6 +907,30 @@ namespace SasamiRenderer
         return allocation;
     }
 
+    bool VulkanGraphicsDevice::EnsureRhiDescriptorPool()
+    {
+        if (m_rhiDescriptorPool != VK_NULL_HANDLE) {
+            return true;
+        }
+        if (m_device == VK_NULL_HANDLE) {
+            return false;
+        }
+
+        const std::array<VkDescriptorPoolSize, 4> poolSizes = {{
+            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 8192 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2048 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4096 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 8192 },
+        }};
+        VkDescriptorPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        poolInfo.maxSets = 8192;
+        poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+        poolInfo.pPoolSizes = poolSizes.data();
+        return vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_rhiDescriptorPool) == VK_SUCCESS;
+    }
+
     bool VulkanGraphicsDevice::CreateRhiShaderResourceView(RhiResourceHandle resourceHandle,
                                                            const RhiTextureViewDesc& desc,
                                                            RhiCpuDescriptorHandle destination)
@@ -726,7 +955,42 @@ namespace SasamiRenderer
         if (vkCreateImageView(m_device, &viewInfo, nullptr, &view) != VK_SUCCESS) {
             return false;
         }
+        const auto previousView = m_rhiImageViews.find(destination.ptr);
+        if (previousView != m_rhiImageViews.end() && previousView->second != VK_NULL_HANDLE) {
+            vkDestroyImageView(m_device, previousView->second, nullptr);
+        }
         m_rhiImageViews[destination.ptr] = view;
+        m_rhiImageViewResources[destination.ptr] = resourceHandle.id;
+        VulkanRhiDescriptor descriptor{};
+        descriptor.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        descriptor.imageView = view;
+        descriptor.resourceId = resourceHandle.id;
+        m_rhiDescriptors[destination.ptr] = descriptor;
+        return true;
+    }
+
+    bool VulkanGraphicsDevice::CreateRhiBufferShaderResourceView(RhiBufferHandle bufferHandle,
+                                                                 const RhiBufferViewDesc& desc,
+                                                                 RhiCpuDescriptorHandle destination)
+    {
+        const auto resourceIt = m_rhiResources.find(bufferHandle.id);
+        if (resourceIt == m_rhiResources.end() || resourceIt->second.buffer == VK_NULL_HANDLE ||
+            !destination.IsValid() || desc.offset >= resourceIt->second.sizeInBytes) {
+            return false;
+        }
+        const uint64_t available = resourceIt->second.sizeInBytes - desc.offset;
+        const uint64_t range = desc.sizeInBytes == 0 ? available : desc.sizeInBytes;
+        if (range == 0 || range > available) {
+            return false;
+        }
+
+        VulkanRhiDescriptor descriptor{};
+        descriptor.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        descriptor.buffer = resourceIt->second.buffer;
+        descriptor.offset = desc.offset;
+        descriptor.range = range;
+        descriptor.resourceId = bufferHandle.id;
+        m_rhiDescriptors[destination.ptr] = descriptor;
         return true;
     }
 

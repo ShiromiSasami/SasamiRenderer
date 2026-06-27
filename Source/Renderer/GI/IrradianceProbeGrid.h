@@ -191,6 +191,7 @@ namespace SasamiRenderer
         RhiBufferHandle m_cbBufferHandle{};
         Resource* m_cbBufferCompat = nullptr;
         mutable uint8_t* m_cbMapped = nullptr;
+        IRHIDevice* m_device = nullptr;
 
         // Compute pipeline
         Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;

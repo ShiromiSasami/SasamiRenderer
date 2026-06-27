@@ -4,9 +4,30 @@
 
 namespace SasamiRenderer
 {
+    MeshBuffer::~MeshBuffer()
+    {
+        Release();
+    }
+
+    void MeshBuffer::Release()
+    {
+        if (m_device) {
+            for (auto& item : m_items) {
+                if (item.rhiVb.IsValid()) {
+                    m_device->DestroyRhiResource(item.rhiVb);
+                }
+                if (item.rhiIb.IsValid()) {
+                    m_device->DestroyRhiResource(item.rhiIb);
+                }
+            }
+        }
+        m_items.clear();
+    }
+
     bool MeshBuffer::Upload(GraphicsDevice& device, const std::vector<Mesh>& meshes)
     {
-        m_items.clear();
+        Release();
+        m_device = &device;
         m_items.reserve(meshes.size());
         if (meshes.empty()) {
             return false;
@@ -26,6 +47,7 @@ namespace SasamiRenderer
                     vbDesc.initialState = RhiResourceState::Common;
                     item.rhiVb = device.CreateRhiBuffer(vbDesc, m.vertices.data());
                     if (!item.rhiVb.IsValid()) {
+                        Release();
                         return false;
                     }
                     item.vbv.StrideInBytes = sizeof(Vertex);
@@ -43,6 +65,10 @@ namespace SasamiRenderer
                     ibDesc.initialState = RhiResourceState::Common;
                     item.rhiIb = device.CreateRhiBuffer(ibDesc, m.indices.data());
                     if (!item.rhiIb.IsValid()) {
+                        if (item.rhiVb.IsValid()) {
+                            device.DestroyRhiResource(item.rhiVb);
+                        }
+                        Release();
                         return false;
                     }
                     item.ibv.SizeInBytes = static_cast<UINT>(ibBytes);

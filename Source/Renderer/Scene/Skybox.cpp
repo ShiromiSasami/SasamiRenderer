@@ -282,6 +282,9 @@ namespace SasamiRenderer
         RefreshEnvironmentAssets();
         m_skyboxVB.Reset();
         m_skyboxVBV = {};
+        if (m_device && m_skyboxRhiVB.IsValid()) {
+            m_device->DestroyRhiResource(m_skyboxRhiVB);
+        }
         m_skyboxRhiVB = {};
         m_skyboxVbBinding = {};
         m_device = nullptr;

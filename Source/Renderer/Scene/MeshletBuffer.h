@@ -26,11 +26,14 @@ namespace SasamiRenderer
         // fitting within the MS 256-primitive / 256-vertex hard limits.
         static constexpr uint32_t kMaxTrianglesPerMeshlet = 16u;
 
+        ~MeshletBuffer();
+
         // Build meshlets from all submitted meshes.
         void Build(const std::vector<Mesh>& meshes);
 
         // Upload to GPU. Safe to call every time Build() is called.
         bool Upload(IRHIDevice& device);
+        void Release();
 
         // GPU virtual addresses (valid after Upload)
         D3D12_GPU_VIRTUAL_ADDRESS GetMeshletDescGpuVA()  const;
@@ -59,5 +62,6 @@ namespace SasamiRenderer
         RhiBufferHandle m_indexBufferHandle{};
         Resource* m_descBufferCompat = nullptr;
         Resource* m_indexBufferCompat = nullptr;
+        IRHIDevice* m_device = nullptr;
     };
 }

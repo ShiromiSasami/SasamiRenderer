@@ -387,6 +387,22 @@ namespace SasamiRenderer
             (void)initialData;
             return {};
         }
+        bool UpdateRhiBuffer(RhiBufferHandle buffer,
+                             uint64_t offsetInBytes,
+                             const void* data,
+                             uint64_t sizeInBytes) override
+        {
+            (void)buffer;
+            (void)offsetInBytes;
+            (void)data;
+            (void)sizeInBytes;
+            return false;
+        }
+        bool DestroyRhiResource(RhiResourceHandle resource) override
+        {
+            (void)resource;
+            return false;
+        }
         RhiShaderHandle CreateRhiShaderModule(const RhiShaderModuleDesc& desc) override
         {
             (void)desc;
@@ -421,6 +437,15 @@ namespace SasamiRenderer
                                          RhiCpuDescriptorHandle destination) override
         {
             (void)resource;
+            (void)desc;
+            (void)destination;
+            return false;
+        }
+        bool CreateRhiBufferShaderResourceView(RhiBufferHandle buffer,
+                                               const RhiBufferViewDesc& desc,
+                                               RhiCpuDescriptorHandle destination) override
+        {
+            (void)buffer;
             (void)desc;
             (void)destination;
             return false;

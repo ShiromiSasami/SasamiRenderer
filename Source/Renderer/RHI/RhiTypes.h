@@ -25,6 +25,7 @@ namespace SasamiRenderer
         R16G16B16A16Float,
         R32G32B32Float,
         R32G32Float,
+        R16Float,
         R16Typeless,
         R16UNorm,
         R32Float,
@@ -412,6 +413,7 @@ namespace SasamiRenderer
         uint32_t descriptorCount = 1;
         bool inlineRootDescriptor = false;
         uint32_t rootConstantCount = 0;
+        bool bufferResource = false;
     };
 
     struct RhiStaticSamplerDesc
@@ -491,6 +493,7 @@ namespace SasamiRenderer
 
     struct RhiComputePipelineDesc
     {
+        RhiPipelineLayoutHandle layout{};
         RhiShaderModuleDesc shader{};
     };
 

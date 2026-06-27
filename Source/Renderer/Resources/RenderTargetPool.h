@@ -166,6 +166,7 @@ namespace SasamiRenderer
         DescriptorHeap m_rtvHeap;
 
         Resource m_sceneColor;
+        RhiTextureHandle m_sceneColorHandle{};
         DescriptorHeap m_sceneColorRtvHeap;
         CpuDescriptorHandle m_sceneColorRtv{};
         CpuDescriptorHandle m_sceneColorSrvCpu{};
@@ -175,12 +176,14 @@ namespace SasamiRenderer
 
         // Depth
         Resource m_depth;
+        RhiTextureHandle m_depthHandle{};
         DescriptorHeap m_dsvHeap;
         CpuDescriptorHandle m_depthSrvCpu{};
         GpuDescriptorHandle m_depthSrv{};
 
         // SSAO
         Resource m_ssaoTexture;
+        RhiTextureHandle m_ssaoTextureHandle{};
         DescriptorHeap m_ssaoRtvHeap;
         CpuDescriptorHandle m_ssaoRtvCpu{};
         CpuDescriptorHandle m_ssaoSrvCpu{};
@@ -189,6 +192,7 @@ namespace SasamiRenderer
         UINT m_ssaoHeight = 0;
 
         Resource m_ssaoBlurTexture;
+        RhiTextureHandle m_ssaoBlurTextureHandle{};
         DescriptorHeap m_ssaoBlurRtvHeap;
         CpuDescriptorHandle m_ssaoBlurRtvCpu{};
         CpuDescriptorHandle m_ssaoBlurSrvCpu{};
@@ -196,6 +200,11 @@ namespace SasamiRenderer
 
         // GBuffer
         Resource m_gbufferAlbedo, m_gbufferNormal, m_gbufferMaterial, m_gbufferEmissive, m_gbufferSpecularWorkflow;
+        RhiTextureHandle m_gbufferAlbedoHandle{};
+        RhiTextureHandle m_gbufferNormalHandle{};
+        RhiTextureHandle m_gbufferMaterialHandle{};
+        RhiTextureHandle m_gbufferEmissiveHandle{};
+        RhiTextureHandle m_gbufferSpecularWorkflowHandle{};
         DescriptorHeap m_gbufferRtvHeap;
         CpuDescriptorHandle m_gbufferAlbedoRtv{}, m_gbufferNormalRtv{}, m_gbufferMaterialRtv{}, m_gbufferEmissiveRtv{}, m_gbufferSpecularWorkflowRtv{};
         CpuDescriptorHandle m_gbufferAlbedoSrvCpu{}, m_gbufferNormalSrvCpu{}, m_gbufferMaterialSrvCpu{}, m_gbufferEmissiveSrvCpu{}, m_gbufferSpecularWorkflowSrvCpu{};
@@ -204,20 +213,24 @@ namespace SasamiRenderer
 
         // SWRT shadow
         Resource m_softwareDirectionalShadowTexture;
+        RhiTextureHandle m_softwareDirectionalShadowTextureHandle{};
         CpuDescriptorHandle m_softwareDirectionalShadowSrvCpu{};
         GpuDescriptorHandle m_softwareDirectionalShadowSrv{};
         uint32_t m_softwareDirectionalShadowMapSize = 0;
 
         // SWRT reflection
         Resource m_softwareReflectionTexture;
+        RhiTextureHandle m_softwareReflectionTextureHandle{};
         CpuDescriptorHandle m_softwareReflectionSrvCpu{};
         GpuDescriptorHandle m_softwareReflectionSrv{};
         uint32_t m_softwareReflectionWidth = 0, m_softwareReflectionHeight = 0;
 
         Resource m_ssrSceneColorCopyTexture;
+        RhiTextureHandle m_ssrSceneColorCopyTextureHandle{};
         CpuDescriptorHandle m_ssrSceneColorCopySrvCpu{};
         GpuDescriptorHandle m_ssrSceneColorCopySrv{};
         Resource m_ssrReflectionTexture;
+        RhiTextureHandle m_ssrReflectionTextureHandle{};
         CpuDescriptorHandle m_ssrReflectionSrvCpu{};
         GpuDescriptorHandle m_ssrReflectionSrv{};
         CpuDescriptorHandle m_ssrReflectionUavCpu{};
@@ -226,22 +239,26 @@ namespace SasamiRenderer
 
         // SWRT ambient occlusion
         Resource m_softwareAmbientOcclusionTexture;
+        RhiTextureHandle m_softwareAmbientOcclusionTextureHandle{};
         CpuDescriptorHandle m_softwareAmbientOcclusionSrvCpu{};
         GpuDescriptorHandle m_softwareAmbientOcclusionSrv{};
         uint32_t m_softwareAmbientOcclusionWidth = 0, m_softwareAmbientOcclusionHeight = 0;
 
         // Transparent scene color copy
         Resource m_transparentSceneColorCopyTexture;
+        RhiTextureHandle m_transparentSceneColorCopyTextureHandle{};
         CpuDescriptorHandle m_transparentSceneColorCopySrvCpu{};
         GpuDescriptorHandle m_transparentSceneColorCopySrv{};
         uint32_t m_transparentSceneColorCopyWidth = 0, m_transparentSceneColorCopyHeight = 0;
 
         Resource m_transmissionSceneColorCopyTexture;
+        RhiTextureHandle m_transmissionSceneColorCopyTextureHandle{};
         CpuDescriptorHandle m_transmissionSceneColorCopySrvCpu{};
         GpuDescriptorHandle m_transmissionSceneColorCopySrv{};
         uint32_t m_transmissionSceneColorCopyWidth = 0, m_transmissionSceneColorCopyHeight = 0;
 
         Resource m_transparentBackfaceDistanceTexture;
+        RhiTextureHandle m_transparentBackfaceDistanceTextureHandle{};
         DescriptorHeap m_transparentBackfaceDistanceRtvHeap;
         CpuDescriptorHandle m_transparentBackfaceDistanceRtv{};
         CpuDescriptorHandle m_transparentBackfaceDistanceSrvCpu{};
@@ -250,6 +267,8 @@ namespace SasamiRenderer
 
         Resource m_transparentOitAccumTexture;
         Resource m_transparentOitRevealageTexture;
+        RhiTextureHandle m_transparentOitAccumTextureHandle{};
+        RhiTextureHandle m_transparentOitRevealageTextureHandle{};
         DescriptorHeap m_transparentOitAccumRtvHeap;
         DescriptorHeap m_transparentOitRevealageRtvHeap;
         CpuDescriptorHandle m_transparentOitAccumRtv{};
@@ -262,15 +281,18 @@ namespace SasamiRenderer
 
         // ReSTIR shadow
         Resource m_softwareShadowReSTIRTexture;
+        RhiTextureHandle m_softwareShadowReSTIRTextureHandle{};
         CpuDescriptorHandle m_softwareShadowReSTIRSrvCpu{};
         GpuDescriptorHandle m_softwareShadowReSTIRSrv{};
         uint32_t m_softwareShadowReSTIRWidth = 0, m_softwareShadowReSTIRHeight = 0;
 
         // HW RT output
         Resource m_rayTracingOutput;
+        RhiTextureHandle m_rayTracingOutputHandle{};
         UINT m_rayTracingOutputWidth = 0, m_rayTracingOutputHeight = 0;
 
         SrvAllocFn m_srvAllocFn;
+        IRHIDevice* m_device = nullptr;
         bool m_initialized = false;
     };
 }

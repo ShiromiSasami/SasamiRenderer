@@ -174,6 +174,16 @@ namespace SasamiRenderer
             }
         }
         m_cbMapped = nullptr;
+        if (m_device && m_cbBufferHandle.IsValid()) {
+            m_device->DestroyRhiResource(m_cbBufferHandle);
+        }
+        if (m_device && m_probeBufferHandle.IsValid()) {
+            m_device->DestroyRhiResource(m_probeBufferHandle);
+        }
+        m_cbBufferHandle = {};
+        m_probeBufferHandle = {};
+        m_cbBufferCompat = nullptr;
+        m_probeBufferCompat = nullptr;
     }
 
     // =========================================================================
@@ -220,6 +230,7 @@ namespace SasamiRenderer
     bool IrradianceProbeGrid::Initialize(IRHIDevice& device)
     {
         if (m_initialized) return true;
+        m_device = &device;
 
         ID3D12Device* dev = device.GetDevice();
         if (!dev) return false;
@@ -242,6 +253,9 @@ namespace SasamiRenderer
                 const D3D12_RANGE emptyRange{ 0, 0 };
                 if (FAILED(m_cbBufferCompat->Map(0, &emptyRange, reinterpret_cast<void**>(&m_cbMapped)))) {
                     m_cbMapped = nullptr;
+                    device.DestroyRhiResource(m_cbBufferHandle);
+                    m_cbBufferHandle = {};
+                    m_cbBufferCompat = nullptr;
                     return false;
                 }
             }
@@ -304,6 +318,10 @@ namespace SasamiRenderer
         // float4[9] per probe
         const UINT64 bufSize = static_cast<UINT64>(totalProbes) * 9u * sizeof(float) * 4u;
 
+        m_probeBuffer.Reset();
+        if (m_probeBufferHandle.IsValid()) {
+            device.DestroyRhiResource(m_probeBufferHandle);
+        }
         m_probeBufferCompat = nullptr;
         m_probeBufferHandle = {};
         if (device.GetCapabilities().supportsRhiResourceCreation) {
@@ -320,6 +338,10 @@ namespace SasamiRenderer
         }
 
         if (!m_probeBufferCompat) {
+            if (m_probeBufferHandle.IsValid()) {
+                device.DestroyRhiResource(m_probeBufferHandle);
+                m_probeBufferHandle = {};
+            }
             // Allocate default-heap buffer with UAV flag; initial state = PIXEL_SHADER_RESOURCE
             D3D12_HEAP_PROPERTIES heap{}; heap.Type = D3D12_HEAP_TYPE_DEFAULT;
             D3D12_RESOURCE_DESC desc{};
@@ -344,14 +366,27 @@ namespace SasamiRenderer
 
         // ---- SRV (slot 0) ----
         D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = m_descHeap.GetCPUDescriptorHandleForHeapStart();
-        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srvDesc.Format                  = DXGI_FORMAT_UNKNOWN;
-        srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_BUFFER;
-        srvDesc.Buffer.FirstElement     = 0;
-        srvDesc.Buffer.NumElements      = totalProbes * 9u;
-        srvDesc.Buffer.StructureByteStride = sizeof(float) * 4u;
-        dev->CreateShaderResourceView(probeBuffer->Get(), &srvDesc, srvCpu);
+        if (m_probeBufferHandle.IsValid()) {
+            RhiBufferViewDesc viewDesc{};
+            viewDesc.type = RhiBufferViewType::Structured;
+            viewDesc.sizeInBytes = bufSize;
+            viewDesc.strideInBytes = sizeof(float) * 4u;
+            if (!device.CreateRhiBufferShaderResourceView(
+                    m_probeBufferHandle,
+                    viewDesc,
+                    RhiCpuDescriptorHandle{ srvCpu.ptr })) {
+                return false;
+            }
+        } else {
+            D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+            srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            srvDesc.Format                  = DXGI_FORMAT_UNKNOWN;
+            srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_BUFFER;
+            srvDesc.Buffer.FirstElement     = 0;
+            srvDesc.Buffer.NumElements      = totalProbes * 9u;
+            srvDesc.Buffer.StructureByteStride = sizeof(float) * 4u;
+            dev->CreateShaderResourceView(probeBuffer->Get(), &srvDesc, srvCpu);
+        }
 
         // ---- UAV (slot 1) ----
         D3D12_CPU_DESCRIPTOR_HANDLE uavCpu = m_descHeap.GetCPUDescriptorHandleForHeapStart();

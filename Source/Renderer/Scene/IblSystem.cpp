@@ -290,6 +290,15 @@ namespace SasamiRenderer
 
     void IblSystem::Reset()
     {
+        if (m_device && m_iblIrradianceHandle.IsValid()) {
+            m_device->DestroyRhiResource(m_iblIrradianceHandle);
+        }
+        if (m_device && m_iblPrefilterHandle.IsValid()) {
+            m_device->DestroyRhiResource(m_iblPrefilterHandle);
+        }
+        if (m_device && m_iblBrdfLutHandle.IsValid()) {
+            m_device->DestroyRhiResource(m_iblBrdfLutHandle);
+        }
         m_iblIrradianceHandle = {};
         m_iblIrradianceCompat = nullptr;
         m_iblPrefilterHandle  = {};
@@ -417,6 +426,10 @@ namespace SasamiRenderer
             rhiDesc.initialState = RhiResourceState::CopyDest;
             m_iblIrradianceHandle = m_device->CreateRhiTexture(rhiDesc);
             m_iblIrradianceCompat = m_device->GetD3D12CompatibilityResource(m_iblIrradianceHandle);
+            if (!m_iblIrradianceCompat && m_iblIrradianceHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_iblIrradianceHandle);
+                m_iblIrradianceHandle = {};
+            }
             irrPreCreated = m_iblIrradianceCompat;
         }
         const bool irrOk = CreateTextureCubeFromFloatFacesWithMips(*m_device,
@@ -441,6 +454,10 @@ namespace SasamiRenderer
             rhiDesc.initialState = RhiResourceState::CopyDest;
             m_iblPrefilterHandle = m_device->CreateRhiTexture(rhiDesc);
             m_iblPrefilterCompat = m_device->GetD3D12CompatibilityResource(m_iblPrefilterHandle);
+            if (!m_iblPrefilterCompat && m_iblPrefilterHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_iblPrefilterHandle);
+                m_iblPrefilterHandle = {};
+            }
             prePreCreated = m_iblPrefilterCompat;
         }
         const bool preOk = CreateTextureCubeFromFloatFacesWithMips(*m_device,
@@ -465,6 +482,10 @@ namespace SasamiRenderer
             rhiDesc.initialState = RhiResourceState::CopyDest;
             m_iblBrdfLutHandle = m_device->CreateRhiTexture(rhiDesc);
             m_iblBrdfLutCompat = m_device->GetD3D12CompatibilityResource(m_iblBrdfLutHandle);
+            if (!m_iblBrdfLutCompat && m_iblBrdfLutHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_iblBrdfLutHandle);
+                m_iblBrdfLutHandle = {};
+            }
             brdfPreCreated = m_iblBrdfLutCompat;
         }
         const bool brdfOk = CreateTexture2DFromFloatRgba(*m_device,

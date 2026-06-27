@@ -141,8 +141,13 @@ namespace SasamiRenderer
                 if (FAILED(frame.lightCBCompat->Map(0, &emptyRange, &frame.lightCBPtr))) {
                     frame.lightCBPtr = nullptr;
                     frame.lightCBCompat = nullptr;
+                    m_device->DestroyRhiResource(frame.lightCBHandle);
                     frame.lightCBHandle = {};
                 }
+            }
+            if (!frame.lightCBCompat && frame.lightCBHandle.IsValid()) {
+                m_device->DestroyRhiResource(frame.lightCBHandle);
+                frame.lightCBHandle = {};
             }
         }
         if (!frame.lightCBPtr &&
@@ -198,6 +203,15 @@ namespace SasamiRenderer
         frame.lightCB.Reset();
         frame.pointLightBuffer.Reset();
         frame.spotLightBuffer.Reset();
+        if (m_device && frame.lightCBHandle.IsValid()) {
+            m_device->DestroyRhiResource(frame.lightCBHandle);
+        }
+        if (m_device && frame.pointLightBufferHandle.IsValid()) {
+            m_device->DestroyRhiResource(frame.pointLightBufferHandle);
+        }
+        if (m_device && frame.spotLightBufferHandle.IsValid()) {
+            m_device->DestroyRhiResource(frame.spotLightBufferHandle);
+        }
         frame.lightCBHandle = {};
         frame.pointLightBufferHandle = {};
         frame.spotLightBufferHandle = {};
@@ -244,6 +258,9 @@ namespace SasamiRenderer
                 }
             }
             frame.pointLightBuffer.Reset();
+            if (frame.pointLightBufferHandle.IsValid()) {
+                m_device->DestroyRhiResource(frame.pointLightBufferHandle);
+            }
             frame.pointLightBufferHandle = {};
             frame.pointLightBufferCompat = nullptr;
             frame.pointLightBufferPtr = nullptr;
@@ -263,8 +280,13 @@ namespace SasamiRenderer
                     if (FAILED(frame.pointLightBufferCompat->Map(0, &emptyRange, &frame.pointLightBufferPtr))) {
                         frame.pointLightBufferPtr = nullptr;
                         frame.pointLightBufferCompat = nullptr;
+                        m_device->DestroyRhiResource(frame.pointLightBufferHandle);
                         frame.pointLightBufferHandle = {};
                     }
+                }
+                if (!frame.pointLightBufferCompat && frame.pointLightBufferHandle.IsValid()) {
+                    m_device->DestroyRhiResource(frame.pointLightBufferHandle);
+                    frame.pointLightBufferHandle = {};
                 }
             }
             if (!frame.pointLightBufferPtr &&
@@ -282,6 +304,9 @@ namespace SasamiRenderer
                 }
             }
             frame.spotLightBuffer.Reset();
+            if (frame.spotLightBufferHandle.IsValid()) {
+                m_device->DestroyRhiResource(frame.spotLightBufferHandle);
+            }
             frame.spotLightBufferHandle = {};
             frame.spotLightBufferCompat = nullptr;
             frame.spotLightBufferPtr = nullptr;
@@ -301,8 +326,13 @@ namespace SasamiRenderer
                     if (FAILED(frame.spotLightBufferCompat->Map(0, &emptyRange, &frame.spotLightBufferPtr))) {
                         frame.spotLightBufferPtr = nullptr;
                         frame.spotLightBufferCompat = nullptr;
+                        m_device->DestroyRhiResource(frame.spotLightBufferHandle);
                         frame.spotLightBufferHandle = {};
                     }
+                }
+                if (!frame.spotLightBufferCompat && frame.spotLightBufferHandle.IsValid()) {
+                    m_device->DestroyRhiResource(frame.spotLightBufferHandle);
+                    frame.spotLightBufferHandle = {};
                 }
             }
             if (!frame.spotLightBufferPtr &&
@@ -312,7 +342,17 @@ namespace SasamiRenderer
         }
 
         // --- ポイントライト SRV を作成（バッファが有効な場合）---
-        if (Resource* pointBuffer = frame.GetPointLightResource(); pointBuffer && pointBuffer->IsValid()) {
+        if (frame.pointLightBufferHandle.IsValid()) {
+            RhiBufferViewDesc viewDesc{};
+            viewDesc.type = RhiBufferViewType::Structured;
+            viewDesc.sizeInBytes =
+                static_cast<uint64_t>(frame.pointLightCapacity) * sizeof(PointLightGPU);
+            viewDesc.strideInBytes = sizeof(PointLightGPU);
+            m_device->CreateRhiBufferShaderResourceView(
+                frame.pointLightBufferHandle,
+                viewDesc,
+                RhiCpuDescriptorHandle{ frame.pointSrvCpu.ptr });
+        } else if (Resource* pointBuffer = frame.GetPointLightResource(); pointBuffer && pointBuffer->IsValid()) {
             D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
             srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
             srvDesc.Format = DXGI_FORMAT_UNKNOWN; // 構造化バッファは UNKNOWN
@@ -325,7 +365,17 @@ namespace SasamiRenderer
         }
 
         // --- スポットライト SRV を作成 ---
-        if (Resource* spotBuffer = frame.GetSpotLightResource(); spotBuffer && spotBuffer->IsValid()) {
+        if (frame.spotLightBufferHandle.IsValid()) {
+            RhiBufferViewDesc viewDesc{};
+            viewDesc.type = RhiBufferViewType::Structured;
+            viewDesc.sizeInBytes =
+                static_cast<uint64_t>(frame.spotLightCapacity) * sizeof(SpotLightGPU);
+            viewDesc.strideInBytes = sizeof(SpotLightGPU);
+            m_device->CreateRhiBufferShaderResourceView(
+                frame.spotLightBufferHandle,
+                viewDesc,
+                RhiCpuDescriptorHandle{ frame.spotSrvCpu.ptr });
+        } else if (Resource* spotBuffer = frame.GetSpotLightResource(); spotBuffer && spotBuffer->IsValid()) {
             D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
             srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
             srvDesc.Format = DXGI_FORMAT_UNKNOWN;

@@ -18,6 +18,26 @@
 
 namespace SasamiRenderer
 {
+    ShadowMapManager::~ShadowMapManager()
+    {
+        if (m_device && m_shadowMapHandle.IsValid()) {
+            m_device->DestroyRhiResource(m_shadowMapHandle);
+        }
+        if (m_device && m_spotShadowMapHandle.IsValid()) {
+            m_device->DestroyRhiResource(m_spotShadowMapHandle);
+        }
+        if (m_device && m_vsmMapHandle.IsValid()) {
+            m_device->DestroyRhiResource(m_vsmMapHandle);
+        }
+        if (m_device && m_vsmMapTempHandle.IsValid()) {
+            m_device->DestroyRhiResource(m_vsmMapTempHandle);
+        }
+        m_shadowMapHandle = {};
+        m_spotShadowMapHandle = {};
+        m_vsmMapHandle = {};
+        m_vsmMapTempHandle = {};
+    }
+
     Resource* ShadowMapManager::GetShadowMapResource() const
     {
         return m_shadowMapCompat ? m_shadowMapCompat : const_cast<Resource*>(&m_shadowMap);
@@ -176,6 +196,10 @@ namespace SasamiRenderer
         CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_DEFAULT);
         HRESULT hr = S_OK;
         if (!m_shadowMapCompat) {
+            if (m_shadowMapHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_shadowMapHandle);
+                m_shadowMapHandle = {};
+            }
             hr = m_device->CreateCommittedResource(&heap,
                                                        D3D12_HEAP_FLAG_NONE,
                                                        &smDesc,
@@ -192,6 +216,9 @@ namespace SasamiRenderer
         if (!shadowMap || !shadowMap->IsValid()) {
             DebugLogDialog("ShadowMapManager::EnsureShadowResources: Shadow map compatibility resource lookup failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             m_shadowMap.Reset();
+            if (m_shadowMapHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_shadowMapHandle);
+            }
             m_shadowMapHandle = {};
             m_shadowMapCompat = nullptr;
             return false;
@@ -205,6 +232,9 @@ namespace SasamiRenderer
         hr = m_device->CreateDescriptorHeap(dsvDesc, m_dsvHeapShadow);
         if (FAILED(hr)) {
             m_shadowMap.Reset();
+            if (m_shadowMapHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_shadowMapHandle);
+            }
             m_shadowMapHandle = {};
             m_shadowMapCompat = nullptr;
             DebugLogDialog("ShadowMapManager::EnsureShadowResources: Shadow DSV heap creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
@@ -298,6 +328,10 @@ namespace SasamiRenderer
             m_spotShadowMapCompat = m_device->GetD3D12CompatibilityResource(m_spotShadowMapHandle);
         }
         if (!m_spotShadowMapCompat) {
+            if (m_spotShadowMapHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_spotShadowMapHandle);
+                m_spotShadowMapHandle = {};
+            }
             hr = m_device->CreateCommittedResource(&heap,
                                                    D3D12_HEAP_FLAG_NONE,
                                                    &smDesc,
@@ -314,6 +348,9 @@ namespace SasamiRenderer
         if (!spotShadowMap || !spotShadowMap->IsValid()) {
             DebugLogDialog("ShadowMapManager::EnsureSpotShadowResources: texture compatibility resource lookup failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             m_spotShadowMap.Reset();
+            if (m_spotShadowMapHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_spotShadowMapHandle);
+            }
             m_spotShadowMapHandle = {};
             m_spotShadowMapCompat = nullptr;
             return false;
@@ -326,6 +363,9 @@ namespace SasamiRenderer
         hr = m_device->CreateDescriptorHeap(dsvDesc, m_spotDsvHeap);
         if (FAILED(hr)) {
             m_spotShadowMap.Reset();
+            if (m_spotShadowMapHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_spotShadowMapHandle);
+            }
             m_spotShadowMapHandle = {};
             m_spotShadowMapCompat = nullptr;
             DebugLogDialog("ShadowMapManager::EnsureSpotShadowResources: DSV heap creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
@@ -407,6 +447,10 @@ namespace SasamiRenderer
             m_vsmMapCompat = m_device->GetD3D12CompatibilityResource(m_vsmMapHandle);
         }
         if (!m_vsmMapCompat) {
+            if (m_vsmMapHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_vsmMapHandle);
+                m_vsmMapHandle = {};
+            }
             hr = m_device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &vsmDesc,
                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &vsmClear, m_vsmMap);
             if (FAILED(hr)) {
@@ -436,6 +480,10 @@ namespace SasamiRenderer
             m_vsmMapTempCompat = m_device->GetD3D12CompatibilityResource(m_vsmMapTempHandle);
         }
         if (!m_vsmMapTempCompat) {
+            if (m_vsmMapTempHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_vsmMapTempHandle);
+                m_vsmMapTempHandle = {};
+            }
             hr = m_device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &vsmTempDesc,
                 D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, m_vsmMapTemp);
             if (FAILED(hr)) {
@@ -443,6 +491,12 @@ namespace SasamiRenderer
                                L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
                 m_vsmMap.Reset();
                 m_vsmMapTemp.Reset();
+                if (m_vsmMapHandle.IsValid()) {
+                    m_device->DestroyRhiResource(m_vsmMapHandle);
+                }
+                if (m_vsmMapTempHandle.IsValid()) {
+                    m_device->DestroyRhiResource(m_vsmMapTempHandle);
+                }
                 m_vsmMapHandle = {}; m_vsmMapTempHandle = {};
                 m_vsmMapCompat = nullptr; m_vsmMapTempCompat = nullptr;
                 return false;
@@ -459,6 +513,12 @@ namespace SasamiRenderer
             DebugLogDialog("ShadowMapManager::EnsureVsmResources: RTV heap creation failed.\n",
                            L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             m_vsmMap.Reset(); m_vsmMapTemp.Reset();
+            if (m_vsmMapHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_vsmMapHandle);
+            }
+            if (m_vsmMapTempHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_vsmMapTempHandle);
+            }
             m_vsmMapHandle = {}; m_vsmMapTempHandle = {};
             m_vsmMapCompat = nullptr; m_vsmMapTempCompat = nullptr;
             return false;
@@ -477,6 +537,12 @@ namespace SasamiRenderer
             DebugLogDialog("ShadowMapManager::EnsureVsmResources: VSM compatibility resource lookup failed.\n",
                            L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             m_vsmMap.Reset(); m_vsmMapTemp.Reset(); m_vsmRtvHeap = {};
+            if (m_vsmMapHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_vsmMapHandle);
+            }
+            if (m_vsmMapTempHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_vsmMapTempHandle);
+            }
             m_vsmMapHandle = {}; m_vsmMapTempHandle = {};
             m_vsmMapCompat = nullptr; m_vsmMapTempCompat = nullptr;
             return false;
@@ -501,6 +567,12 @@ namespace SasamiRenderer
             DebugLogDialog("ShadowMapManager::EnsureVsmResources: blur descriptor heap creation failed.\n",
                            L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             m_vsmMap.Reset(); m_vsmMapTemp.Reset(); m_vsmRtvHeap = {};
+            if (m_vsmMapHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_vsmMapHandle);
+            }
+            if (m_vsmMapTempHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_vsmMapTempHandle);
+            }
             m_vsmMapHandle = {}; m_vsmMapTempHandle = {};
             m_vsmMapCompat = nullptr; m_vsmMapTempCompat = nullptr;
             return false;

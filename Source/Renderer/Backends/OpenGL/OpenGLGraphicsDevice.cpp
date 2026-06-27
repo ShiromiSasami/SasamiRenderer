@@ -5,6 +5,7 @@
 #include "Foundation/Tools/DebugOutput.h"
 #include "Foundation/Math/MathUtil.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -38,6 +39,12 @@ namespace SasamiRenderer
 #ifndef GL_RGBA16F
         constexpr GLint GL_RGBA16F = 0x881A;
 #endif
+#ifndef GL_R16F
+        constexpr GLint GL_R16F = 0x822D;
+#endif
+#ifndef GL_R16
+        constexpr GLint GL_R16 = 0x822A;
+#endif
 #ifndef GL_RED
         constexpr GLenum GL_RED = 0x1903;
 #endif
@@ -56,8 +63,26 @@ namespace SasamiRenderer
 #ifndef GL_R32F
         constexpr GLint GL_R32F = 0x822E;
 #endif
+#ifndef GL_R32UI
+        constexpr GLint GL_R32UI = 0x8236;
+#endif
+#ifndef GL_RED_INTEGER
+        constexpr GLenum GL_RED_INTEGER = 0x8D94;
+#endif
 #ifndef GL_DEPTH_COMPONENT32F
         constexpr GLint GL_DEPTH_COMPONENT32F = 0x8CAC;
+#endif
+#ifndef GL_DEPTH_COMPONENT16
+        constexpr GLint GL_DEPTH_COMPONENT16 = 0x81A5;
+#endif
+#ifndef GL_DEPTH24_STENCIL8
+        constexpr GLint GL_DEPTH24_STENCIL8 = 0x88F0;
+#endif
+#ifndef GL_DEPTH_STENCIL
+        constexpr GLenum GL_DEPTH_STENCIL = 0x84F9;
+#endif
+#ifndef GL_UNSIGNED_INT_24_8
+        constexpr GLenum GL_UNSIGNED_INT_24_8 = 0x84FA;
 #endif
 #ifndef GL_VERTEX_SHADER
         constexpr GLenum GL_VERTEX_SHADER = 0x8B31;
@@ -101,16 +126,26 @@ namespace SasamiRenderer
 #ifndef GL_TEXTURE0
         constexpr GLenum GL_TEXTURE0 = 0x84C0;
 #endif
+#ifndef GL_UNIFORM_BUFFER
+        constexpr GLenum GL_UNIFORM_BUFFER = 0x8A11;
+#endif
+#ifndef GL_SHADER_STORAGE_BUFFER
+        constexpr GLenum GL_SHADER_STORAGE_BUFFER = 0x90D2;
+#endif
 
         using GlGenBuffersFn = void (APIENTRY*)(GLsizei, GLuint*);
         using GlBindBufferFn = void (APIENTRY*)(GLenum, GLuint);
+        using GlBindBufferBaseFn = void (APIENTRY*)(GLenum, GLuint, GLuint);
         using GlBufferDataFn = void (APIENTRY*)(GLenum, std::ptrdiff_t, const void*, GLenum);
+        using GlBufferSubDataFn = void (APIENTRY*)(GLenum, std::ptrdiff_t, std::ptrdiff_t, const void*);
         using GlDeleteBuffersFn = void (APIENTRY*)(GLsizei, const GLuint*);
         using GlGenFramebuffersFn = void (APIENTRY*)(GLsizei, GLuint*);
         using GlBindFramebufferFn = void (APIENTRY*)(GLenum, GLuint);
         using GlFramebufferTexture2DFn = void (APIENTRY*)(GLenum, GLenum, GLenum, GLuint, GLint);
         using GlCheckFramebufferStatusFn = GLenum (APIENTRY*)(GLenum);
         using GlDeleteFramebuffersFn = void (APIENTRY*)(GLsizei, const GLuint*);
+        using GlDrawBuffersFn = void (APIENTRY*)(GLsizei, const GLenum*);
+        using GlClearBufferfvFn = void (APIENTRY*)(GLenum, GLint, const GLfloat*);
         using GlActiveTextureFn = void (APIENTRY*)(GLenum);
         using GlCreateShaderFn = GLuint (APIENTRY*)(GLenum);
         using GlShaderSourceFn = void (APIENTRY*)(GLuint, GLsizei, const char* const*, const GLint*);
@@ -145,12 +180,15 @@ namespace SasamiRenderer
             case RhiFormat::R16G16B16A16Float: return GL_RGBA16F;
             case RhiFormat::R32G32B32Float: return GL_RGB32F;
             case RhiFormat::R32G32Float: return GL_RG32F;
+            case RhiFormat::R16Float: return GL_R16F;
             case RhiFormat::R16UNorm: return GL_R16;
             case RhiFormat::R32Float: return GL_R32F;
+            case RhiFormat::R32UInt: return GL_R32UI;
             case RhiFormat::R16Typeless:
             case RhiFormat::D16UNorm: return GL_DEPTH_COMPONENT16;
             case RhiFormat::R32Typeless:
             case RhiFormat::D32Float: return GL_DEPTH_COMPONENT32F;
+            case RhiFormat::D24UNormS8UInt: return GL_DEPTH24_STENCIL8;
             case RhiFormat::R8G8B8A8UNorm:
             case RhiFormat::B8G8R8A8UNorm:
             default: return GL_RGBA8;
@@ -161,9 +199,12 @@ namespace SasamiRenderer
         {
             switch (format) {
             case RhiFormat::R8UNorm:
+            case RhiFormat::R16Float:
             case RhiFormat::R16UNorm:
             case RhiFormat::R32Float:
                 return GL_RED;
+            case RhiFormat::R32UInt:
+                return GL_RED_INTEGER;
             case RhiFormat::R32G32B32Float:
                 return GL_RGB;
             case RhiFormat::R32G32Float:
@@ -173,6 +214,8 @@ namespace SasamiRenderer
             case RhiFormat::D16UNorm:
             case RhiFormat::D32Float:
                 return GL_DEPTH_COMPONENT;
+            case RhiFormat::D24UNormS8UInt:
+                return GL_DEPTH_STENCIL;
             default:
                 return GL_RGBA;
             }
@@ -182,6 +225,7 @@ namespace SasamiRenderer
         {
             switch (format) {
             case RhiFormat::R16G16B16A16Float:
+            case RhiFormat::R16Float:
             case RhiFormat::R32G32B32Float:
             case RhiFormat::R32G32Float:
             case RhiFormat::R32Float:
@@ -192,6 +236,10 @@ namespace SasamiRenderer
             case RhiFormat::R16Typeless:
             case RhiFormat::D16UNorm:
                 return GL_UNSIGNED_SHORT;
+            case RhiFormat::R32UInt:
+                return GL_UNSIGNED_INT;
+            case RhiFormat::D24UNormS8UInt:
+                return GL_UNSIGNED_INT_24_8;
             default:
                 return GL_UNSIGNED_BYTE;
             }
@@ -304,6 +352,99 @@ void main()
 
         RhiQueueType QueueType() const { return m_queueType; }
 
+        void BeginRenderPass(const RhiRenderPassDesc& desc) override
+        {
+            if (!MakeCurrent() || desc.colorAttachmentCount > 8 ||
+                (desc.colorAttachmentCount > 0 && !desc.colorAttachments)) {
+                return;
+            }
+            auto genFramebuffers = LoadGlProc<GlGenFramebuffersFn>("glGenFramebuffers");
+            auto bindFramebuffer = LoadGlProc<GlBindFramebufferFn>("glBindFramebuffer");
+            auto framebufferTexture2D = LoadGlProc<GlFramebufferTexture2DFn>("glFramebufferTexture2D");
+            auto drawBuffers = LoadGlProc<GlDrawBuffersFn>("glDrawBuffers");
+            auto clearBufferfv = LoadGlProc<GlClearBufferfvFn>("glClearBufferfv");
+            auto checkFramebufferStatus = LoadGlProc<GlCheckFramebufferStatusFn>("glCheckFramebufferStatus");
+            if (!genFramebuffers || !bindFramebuffer || !framebufferTexture2D || !drawBuffers) {
+                return;
+            }
+            if (m_framebuffer == 0) {
+                genFramebuffers(1, &m_framebuffer);
+            }
+            bindFramebuffer(GL_FRAMEBUFFER, m_framebuffer);
+
+            std::array<GLenum, 8> drawAttachments{};
+            for (uint32_t i = 0; i < desc.colorAttachmentCount; ++i) {
+                const auto textureIt = m_device.m_rhiTextures.find(desc.colorAttachments[i].texture.id);
+                const GLuint texture = textureIt != m_device.m_rhiTextures.end() ? textureIt->second : 0;
+                framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, GL_TEXTURE_2D, texture, 0);
+                drawAttachments[i] = GL_COLOR_ATTACHMENT0 + i;
+            }
+            for (uint32_t i = desc.colorAttachmentCount; i < m_colorAttachmentCount; ++i) {
+                framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, GL_TEXTURE_2D, 0, 0);
+            }
+            m_colorAttachmentCount = desc.colorAttachmentCount;
+            if (desc.colorAttachmentCount > 0) {
+                drawBuffers(static_cast<GLsizei>(desc.colorAttachmentCount), drawAttachments.data());
+            } else {
+                glDrawBuffer(GL_NONE);
+                glReadBuffer(GL_NONE);
+            }
+
+            GLuint depthTexture = 0;
+            if (desc.depthStencilAttachment) {
+                const auto depthIt = m_device.m_rhiTextures.find(desc.depthStencilAttachment->texture.id);
+                if (depthIt != m_device.m_rhiTextures.end()) {
+                    depthTexture = depthIt->second;
+                }
+            }
+            framebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthTexture, 0);
+            if (checkFramebufferStatus && checkFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+                DebugLog("OpenGLRhiCommandEncoder::BeginRenderPass: framebuffer is incomplete.\n");
+                return;
+            }
+
+            for (uint32_t i = 0; i < desc.colorAttachmentCount; ++i) {
+                const RhiAttachmentDesc& attachment = desc.colorAttachments[i];
+                if (attachment.loadOp != RhiLoadOp::Clear) {
+                    continue;
+                }
+                const GLfloat color[4] = {
+                    attachment.clearColor.r,
+                    attachment.clearColor.g,
+                    attachment.clearColor.b,
+                    attachment.clearColor.a,
+                };
+                if (clearBufferfv) {
+                    clearBufferfv(GL_COLOR, static_cast<GLint>(i), color);
+                } else if (i == 0) {
+                    glClearColor(color[0], color[1], color[2], color[3]);
+                    glClear(GL_COLOR_BUFFER_BIT);
+                }
+            }
+            if (desc.depthStencilAttachment && desc.depthStencilAttachment->loadOp == RhiLoadOp::Clear) {
+                const GLfloat depth = desc.depthStencilAttachment->clearDepthStencil.depth;
+                if (clearBufferfv) {
+                    clearBufferfv(GL_DEPTH, 0, &depth);
+                } else {
+                    glClearDepth(depth);
+                    glClear(GL_DEPTH_BUFFER_BIT);
+                }
+            }
+            m_renderPassActive = true;
+        }
+
+        void EndRenderPass() override
+        {
+            if (!MakeCurrent() || !m_renderPassActive) {
+                return;
+            }
+            auto bindFramebuffer = LoadGlProc<GlBindFramebufferFn>("glBindFramebuffer");
+            if (bindFramebuffer) {
+                bindFramebuffer(GL_FRAMEBUFFER, 0);
+            }
+            m_renderPassActive = false;
+        }
+
         void SetGraphicsPipeline(RhiPipelineHandle pipelineHandle) override
         {
             BindProgram(pipelineHandle);
@@ -405,14 +546,22 @@ void main()
                 return;
             }
             const auto it = m_device.m_rhiTextureViews.find(table.ptr);
-            if (it == m_device.m_rhiTextureViews.end()) {
+            if (it != m_device.m_rhiTextureViews.end()) {
+                auto activeTexture = LoadGlProc<GlActiveTextureFn>("glActiveTexture");
+                if (activeTexture) {
+                    activeTexture(GL_TEXTURE0 + slot);
+                }
+                glBindTexture(GL_TEXTURE_2D, it->second);
                 return;
             }
-            auto activeTexture = LoadGlProc<GlActiveTextureFn>("glActiveTexture");
-            if (activeTexture) {
-                activeTexture(GL_TEXTURE0 + slot);
+
+            const auto bufferIt = m_device.m_rhiBufferViews.find(table.ptr);
+            if (bufferIt != m_device.m_rhiBufferViews.end()) {
+                auto bindBufferBase = LoadGlProc<GlBindBufferBaseFn>("glBindBufferBase");
+                if (bindBufferBase) {
+                    bindBufferBase(bufferIt->second.target, slot, bufferIt->second.buffer);
+                }
             }
-            glBindTexture(GL_TEXTURE_2D, it->second);
         }
 
         void SetComputeDescriptorTable(uint32_t slot, RhiGpuDescriptorHandle table) override
@@ -571,6 +720,8 @@ void main()
         RhiQueueType m_queueType = RhiQueueType::Graphics;
         GLenum m_primitiveMode = GL_TRIANGLES;
         GLuint m_framebuffer = 0;
+        uint32_t m_colorAttachmentCount = 0;
+        bool m_renderPassActive = false;
     };
 
     OpenGLGraphicsDevice::~OpenGLGraphicsDevice()
@@ -922,6 +1073,16 @@ void main()
         return ExecuteBackendFrame(frameDesc);
     }
 
+    bool OpenGLGraphicsDevice::ResizeBackendSwapChain(UINT width, UINT height)
+    {
+        if (!m_hdc || !m_context || width == 0 || height == 0 ||
+            !wglMakeCurrent(m_hdc, m_context)) {
+            return false;
+        }
+        glViewport(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
+        return true;
+    }
+
     RhiTextureHandle OpenGLGraphicsDevice::CreateRhiTexture2DFromRgba8(uint32_t width,
                                                                        uint32_t height,
                                                                        const void* pixels,
@@ -1032,7 +1193,82 @@ void main()
 
         const uint64_t id = m_nextRhiResourceHandle++;
         m_rhiBuffers[id] = buffer;
+        m_rhiBufferSizes[id] = desc.sizeInBytes;
+        m_rhiBufferTargets[id] = target;
         return RhiBufferHandle{ id };
+    }
+
+    bool OpenGLGraphicsDevice::UpdateRhiBuffer(RhiBufferHandle bufferHandle,
+                                               uint64_t offsetInBytes,
+                                               const void* data,
+                                               uint64_t sizeInBytes)
+    {
+        const auto bufferIt = m_rhiBuffers.find(bufferHandle.id);
+        const auto sizeIt = m_rhiBufferSizes.find(bufferHandle.id);
+        const auto targetIt = m_rhiBufferTargets.find(bufferHandle.id);
+        if (bufferIt == m_rhiBuffers.end() || sizeIt == m_rhiBufferSizes.end() ||
+            targetIt == m_rhiBufferTargets.end() || !data || sizeInBytes == 0 ||
+            offsetInBytes >= sizeIt->second || sizeInBytes > sizeIt->second - offsetInBytes ||
+            !m_hdc || !m_context || !wglMakeCurrent(m_hdc, m_context)) {
+            return false;
+        }
+
+        auto bindBuffer = LoadGlProc<GlBindBufferFn>("glBindBuffer");
+        auto bufferSubData = LoadGlProc<GlBufferSubDataFn>("glBufferSubData");
+        if (!bindBuffer || !bufferSubData) {
+            return false;
+        }
+        bindBuffer(targetIt->second, bufferIt->second);
+        bufferSubData(targetIt->second,
+                      static_cast<std::ptrdiff_t>(offsetInBytes),
+                      static_cast<std::ptrdiff_t>(sizeInBytes),
+                      data);
+        bindBuffer(targetIt->second, 0);
+        return true;
+    }
+
+    bool OpenGLGraphicsDevice::DestroyRhiResource(RhiResourceHandle resource)
+    {
+        if (!resource.IsValid() || !m_hdc || !m_context || !wglMakeCurrent(m_hdc, m_context)) {
+            return false;
+        }
+
+        const auto textureIt = m_rhiTextures.find(resource.id);
+        if (textureIt != m_rhiTextures.end()) {
+            const GLuint texture = textureIt->second;
+            for (auto it = m_rhiTextureViews.begin(); it != m_rhiTextureViews.end();) {
+                if (it->second == texture) {
+                    it = m_rhiTextureViews.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            glDeleteTextures(1, &texture);
+            m_rhiTextures.erase(textureIt);
+            return true;
+        }
+
+        const auto bufferIt = m_rhiBuffers.find(resource.id);
+        if (bufferIt != m_rhiBuffers.end()) {
+            auto deleteBuffers = LoadGlProc<GlDeleteBuffersFn>("glDeleteBuffers");
+            if (!deleteBuffers) {
+                return false;
+            }
+            const GLuint buffer = bufferIt->second;
+            for (auto it = m_rhiBufferViews.begin(); it != m_rhiBufferViews.end();) {
+                if (it->second.resourceId == resource.id) {
+                    it = m_rhiBufferViews.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            deleteBuffers(1, &buffer);
+            m_rhiBuffers.erase(bufferIt);
+            m_rhiBufferSizes.erase(resource.id);
+            m_rhiBufferTargets.erase(resource.id);
+            return true;
+        }
+        return false;
     }
 
     RhiShaderHandle OpenGLGraphicsDevice::CreateRhiShaderModule(const RhiShaderModuleDesc& desc)
@@ -1114,9 +1350,53 @@ void main()
         return RhiPipelineHandle{ id };
     }
 
-    RhiPipelineHandle OpenGLGraphicsDevice::CreateRhiComputePipeline(const RhiComputePipelineDesc&)
+    RhiPipelineHandle OpenGLGraphicsDevice::CreateRhiComputePipeline(const RhiComputePipelineDesc& desc)
     {
-        return {};
+        if (!m_hdc || !m_context || !desc.shader.bytecode || desc.shader.bytecodeSize == 0 ||
+            !wglMakeCurrent(m_hdc, m_context)) {
+            return {};
+        }
+        auto createShader = LoadGlProc<GlCreateShaderFn>("glCreateShader");
+        auto shaderSource = LoadGlProc<GlShaderSourceFn>("glShaderSource");
+        auto compileShader = LoadGlProc<GlCompileShaderFn>("glCompileShader");
+        auto getShaderiv = LoadGlProc<GlGetShaderivFn>("glGetShaderiv");
+        auto deleteShader = LoadGlProc<GlDeleteShaderFn>("glDeleteShader");
+        auto createProgram = LoadGlProc<GlCreateProgramFn>("glCreateProgram");
+        auto attachShader = LoadGlProc<GlAttachShaderFn>("glAttachShader");
+        auto linkProgram = LoadGlProc<GlLinkProgramFn>("glLinkProgram");
+        auto getProgramiv = LoadGlProc<GlGetProgramivFn>("glGetProgramiv");
+        auto deleteProgram = LoadGlProc<GlDeleteProgramFn>("glDeleteProgram");
+        if (!createShader || !shaderSource || !compileShader || !getShaderiv || !deleteShader ||
+            !createProgram || !attachShader || !linkProgram || !getProgramiv || !deleteProgram) {
+            return {};
+        }
+
+        const char* source = static_cast<const char*>(desc.shader.bytecode);
+        const GLint length = static_cast<GLint>(desc.shader.bytecodeSize);
+        const GLuint shader = createShader(GL_COMPUTE_SHADER);
+        shaderSource(shader, 1, &source, &length);
+        compileShader(shader);
+        GLint compiled = GL_FALSE;
+        getShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+        if (compiled == GL_FALSE) {
+            deleteShader(shader);
+            return {};
+        }
+
+        const GLuint program = createProgram();
+        attachShader(program, shader);
+        linkProgram(program);
+        deleteShader(shader);
+        GLint linked = GL_FALSE;
+        getProgramiv(program, GL_LINK_STATUS, &linked);
+        if (linked == GL_FALSE) {
+            deleteProgram(program);
+            return {};
+        }
+
+        const uint64_t id = m_nextRhiPipelineHandle++;
+        m_rhiPipelines[id] = OpenGLRhiPipeline{ program };
+        return RhiPipelineHandle{ id };
     }
 
     RhiDescriptorAllocation OpenGLGraphicsDevice::AllocateRhiDescriptors(RhiDescriptorHeapType type,
@@ -1148,6 +1428,25 @@ void main()
             return false;
         }
         m_rhiTextureViews[destination.ptr] = it->second;
+        return true;
+    }
+
+    bool OpenGLGraphicsDevice::CreateRhiBufferShaderResourceView(RhiBufferHandle buffer,
+                                                                 const RhiBufferViewDesc& desc,
+                                                                 RhiCpuDescriptorHandle destination)
+    {
+        const auto it = m_rhiBuffers.find(buffer.id);
+        if (it == m_rhiBuffers.end() || !destination.IsValid()) {
+            return false;
+        }
+
+        OpenGLRhiBufferView view{};
+        view.buffer = it->second;
+        view.target = desc.type == RhiBufferViewType::Constant
+            ? GL_UNIFORM_BUFFER
+            : GL_SHADER_STORAGE_BUFFER;
+        view.resourceId = buffer.id;
+        m_rhiBufferViews[destination.ptr] = view;
         return true;
     }
 
@@ -1309,10 +1608,13 @@ void main()
             }
             m_rhiTextures.clear();
             m_rhiBuffers.clear();
+            m_rhiBufferSizes.clear();
+            m_rhiBufferTargets.clear();
             m_rhiShaders.clear();
             m_rhiPipelineLayouts.clear();
             m_rhiPipelines.clear();
             m_rhiTextureViews.clear();
+            m_rhiBufferViews.clear();
             m_nextRhiResourceHandle = 1;
             m_nextRhiDescriptorHandle = 1;
             m_nextRhiShaderHandle = 1;

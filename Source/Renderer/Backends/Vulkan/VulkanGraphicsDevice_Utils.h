@@ -38,6 +38,7 @@ namespace SasamiRenderer
         case RhiFormat::R16G16B16A16Float: return VK_FORMAT_R16G16B16A16_SFLOAT;
         case RhiFormat::R32G32B32Float: return VK_FORMAT_R32G32B32_SFLOAT;
         case RhiFormat::R32G32Float: return VK_FORMAT_R32G32_SFLOAT;
+        case RhiFormat::R16Float: return VK_FORMAT_R16_SFLOAT;
         case RhiFormat::R16Typeless: return VK_FORMAT_D16_UNORM;
         case RhiFormat::R16UNorm: return VK_FORMAT_R16_UNORM;
         case RhiFormat::R32Float: return VK_FORMAT_R32_SFLOAT;
@@ -151,14 +152,50 @@ namespace SasamiRenderer
         return result != 0 ? result : VK_SHADER_STAGE_ALL;
     }
 
-    inline VkDescriptorType ToVkDescriptorType(RhiBindingType type)
+    inline VkDescriptorType ToVkDescriptorType(const RhiBindingRangeDesc& binding)
     {
-        switch (type) {
+        switch (binding.type) {
         case RhiBindingType::ConstantBuffer: return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         case RhiBindingType::UnorderedAccess: return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         case RhiBindingType::Sampler: return VK_DESCRIPTOR_TYPE_SAMPLER;
         case RhiBindingType::ShaderResource:
-        default: return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        default:
+            return binding.bufferResource ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        }
+    }
+
+    inline VkAccessFlags ToVkAccessFlags(RhiResourceState state)
+    {
+        switch (state) {
+        case RhiResourceState::RenderTarget: return VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        case RhiResourceState::DepthWrite: return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        case RhiResourceState::DepthRead: return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+        case RhiResourceState::ShaderResource: return VK_ACCESS_SHADER_READ_BIT;
+        case RhiResourceState::UnorderedAccess: return VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        case RhiResourceState::CopySource: return VK_ACCESS_TRANSFER_READ_BIT;
+        case RhiResourceState::CopyDest: return VK_ACCESS_TRANSFER_WRITE_BIT;
+        case RhiResourceState::Present: return VK_ACCESS_MEMORY_READ_BIT;
+        case RhiResourceState::Common:
+        default: return VK_ACCESS_MEMORY_READ_BIT;
+        }
+    }
+
+    inline VkPipelineStageFlags ToVkPipelineStage(RhiResourceState state)
+    {
+        switch (state) {
+        case RhiResourceState::RenderTarget: return VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        case RhiResourceState::DepthWrite:
+        case RhiResourceState::DepthRead:
+            return VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        case RhiResourceState::ShaderResource:
+        case RhiResourceState::UnorderedAccess:
+            return VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+        case RhiResourceState::CopySource:
+        case RhiResourceState::CopyDest:
+            return VK_PIPELINE_STAGE_TRANSFER_BIT;
+        case RhiResourceState::Present: return VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        case RhiResourceState::Common:
+        default: return VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
         }
     }
 

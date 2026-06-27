@@ -5,6 +5,7 @@
 #include <windows.h>
 #include <debugapi.h>
 #include <d3d12sdklayers.h>
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <utility>
@@ -25,6 +26,7 @@ namespace SasamiRenderer
             case RhiFormat::R16G16B16A16Float: return DXGI_FORMAT_R16G16B16A16_FLOAT;
             case RhiFormat::R32G32B32Float: return DXGI_FORMAT_R32G32B32_FLOAT;
             case RhiFormat::R32G32Float: return DXGI_FORMAT_R32G32_FLOAT;
+            case RhiFormat::R16Float: return DXGI_FORMAT_R16_FLOAT;
             case RhiFormat::R16Typeless: return DXGI_FORMAT_R16_TYPELESS;
             case RhiFormat::R16UNorm: return DXGI_FORMAT_R16_UNORM;
             case RhiFormat::R32Float: return DXGI_FORMAT_R32_FLOAT;
@@ -600,29 +602,38 @@ namespace SasamiRenderer
             return {};
         }
 
-        D3D12_ROOT_SIGNATURE_DESC rootDesc{};
-        rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
-        ComPtr<ID3DBlob> blob;
-        ComPtr<ID3DBlob> error;
-        if (FAILED(D3D12SerializeRootSignature(&rootDesc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error))) {
-            return {};
-        }
-
         RootSignature rootSignature;
-        if (FAILED(CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), rootSignature))) {
-            return {};
+        RootSignature* pipelineLayout = nullptr;
+        if (desc.layout.IsValid()) {
+            const auto layoutIt = m_rhiPipelineLayouts.find(desc.layout.id);
+            if (layoutIt == m_rhiPipelineLayouts.end()) {
+                return {};
+            }
+            pipelineLayout = &layoutIt->second;
+        } else {
+            D3D12_ROOT_SIGNATURE_DESC rootDesc{};
+            rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+            ComPtr<ID3DBlob> blob;
+            ComPtr<ID3DBlob> error;
+            if (FAILED(D3D12SerializeRootSignature(&rootDesc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error)) ||
+                FAILED(CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), rootSignature))) {
+                return {};
+            }
+            pipelineLayout = &rootSignature;
         }
 
         D3D12_COMPUTE_PIPELINE_STATE_DESC pso{};
-        pso.pRootSignature = rootSignature.Get();
+        pso.pRootSignature = pipelineLayout->Get();
         pso.CS = { desc.shader.bytecode, static_cast<SIZE_T>(desc.shader.bytecodeSize) };
 
         PipelineState pipeline;
         if (FAILED(CreateComputePipelineState(pso, pipeline))) {
             return {};
         }
-        const uint64_t layoutId = m_nextRhiPipelineLayoutHandle++;
-        m_rhiPipelineLayouts.emplace(layoutId, std::move(rootSignature));
+        if (!desc.layout.IsValid()) {
+            const uint64_t layoutId = m_nextRhiPipelineLayoutHandle++;
+            m_rhiPipelineLayouts.emplace(layoutId, std::move(rootSignature));
+        }
         const uint64_t id = m_nextRhiPipelineHandle++;
         m_rhiPipelines.emplace(id, std::move(pipeline));
         return RhiPipelineHandle{ id };
@@ -712,6 +723,57 @@ namespace SasamiRenderer
             srv.Texture2D.MipLevels = desc.mipLevelCount;
             break;
         }
+        CreateShaderResourceView(*resource, &srv, CpuDescriptorHandle{ destination.ptr });
+        return true;
+    }
+
+    bool Dx12GraphicsDevice::CreateRhiBufferShaderResourceView(RhiBufferHandle bufferHandle,
+                                                               const RhiBufferViewDesc& desc,
+                                                               RhiCpuDescriptorHandle destination)
+    {
+        Resource* resource = FindRhiResource(bufferHandle);
+        if (!resource || !destination.IsValid() || desc.type == RhiBufferViewType::Constant) {
+            return false;
+        }
+
+        const uint64_t bufferSize = resource->Get()->GetDesc().Width;
+        if (desc.offset >= bufferSize) {
+            return false;
+        }
+        const uint64_t viewSize = desc.sizeInBytes == 0
+            ? bufferSize - desc.offset
+            : desc.sizeInBytes;
+        if (viewSize == 0 || viewSize > bufferSize - desc.offset) {
+            return false;
+        }
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+        srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srv.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+
+        uint32_t elementSize = desc.strideInBytes;
+        switch (desc.type) {
+        case RhiBufferViewType::Raw:
+            elementSize = sizeof(uint32_t);
+            srv.Format = DXGI_FORMAT_R32_TYPELESS;
+            srv.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+            break;
+        case RhiBufferViewType::Structured:
+            srv.Format = DXGI_FORMAT_UNKNOWN;
+            srv.Buffer.StructureByteStride = desc.strideInBytes;
+            break;
+        case RhiBufferViewType::Typed:
+            srv.Format = ToDxgiFormat(desc.format);
+            break;
+        default:
+            return false;
+        }
+
+        if (elementSize == 0 || (desc.offset % elementSize) != 0 || (viewSize % elementSize) != 0) {
+            return false;
+        }
+        srv.Buffer.FirstElement = desc.offset / elementSize;
+        srv.Buffer.NumElements = static_cast<UINT>(viewSize / elementSize);
         CreateShaderResourceView(*resource, &srv, CpuDescriptorHandle{ destination.ptr });
         return true;
     }
