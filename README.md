@@ -68,7 +68,7 @@ MSBuild 側の `ShaderSourceRoot` も `$(ProjectDir)Shaders` を参照します�
 
 Vulkan / DirectX 11 / OpenGL が灰色画面になる場合は、native fallback の mesh draw 入力、shader compile、vertex/index buffer binding、RHI 実装の順で確認してください。これらのバックエンドは DX12 feature pass ベースの RenderGraph には未対応です。
 
-2026-06-27 のローカル検証では、DX12 / DX11 / Vulkan / OpenGL の x64 Debug / Release フルソリューションビルドが成功しています。DX11 / Vulkan / OpenGL の PBRApp は hidden startup smoke を通過し、Vulkan / OpenGL は Win32 resize smoke も通過しました。
+2026-06-28 のローカル検証では、DX12 / DX11 / Vulkan / OpenGL の renderer library が x64 Debug / Release の全 8 構成でビルド成功しています。4 backend の Debug PBRApp も再ビルドし、hidden で 5 秒間の startup smoke を通過しました。今回の変更後の resize、描画内容、GPU validation は未検証です。
 
 ## Render Pipeline
 
@@ -147,7 +147,7 @@ Microsoft 系ツールは以下の役割で使います。
 
 ## RHI Migration Notes
 
-Status as of 2026-06-27:
+Status as of 2026-06-28:
 
 - `IRhiDevice` is the neutral lower RHI interface. `IRHIDevice` is the transitional renderer-facing device that still exposes the D3D12 compatibility surface used by the current feature render path.
 - `DebugProbeGridRenderPass` now creates its pipeline layout, graphics pipeline, and vertex buffer through RHI descriptors/API instead of directly owning D3D12 root signature and PSO objects.
@@ -169,7 +169,10 @@ Status as of 2026-06-27:
 - `IrradianceProbeGrid` now prefers RHI buffer creation for the probe SH buffer and mapped constant buffer. Its probe SH SRV is created through `CreateRhiBufferShaderResourceView()`, while the current DX12 feature path still uses the compatibility resource for root GPU virtual-address bindings, UAV creation, barriers, and compute dispatch.
 - `MeshletBuffer` now prefers RHI buffer creation for meshlet descriptor and meshlet index buffers, then uses DX12 compatibility resources for the current mesh shader feature path's GPU virtual-address root bindings. It now releases RHI handles on re-upload, compatibility fallback failure, and destruction instead of dropping failed compatibility handles.
 - The RHI resource contract now exposes `DestroyRhiResource()` for explicit texture/buffer lifetime management. DX12 and DX11 remove the registry entry, Vulkan also destroys related image views plus the native image/buffer and memory, and OpenGL deletes the native texture/buffer plus cached texture-view bindings. Callers must ensure the resource is no longer in flight before destruction.
-- The RHI buffer contract now exposes `UpdateRhiBuffer()` and `CreateRhiBufferShaderResourceView()`. CPU-visible buffers can be updated on DX12, DX11, Vulkan, and OpenGL. Structured/typed buffer SRVs are implemented on DX12 and DX11; OpenGL maps buffer views to SSBO/UBO bindings. Vulkan buffer descriptor binding remains incomplete because descriptor pool/set ownership is not implemented yet.
+- The RHI buffer contract exposes `UpdateRhiBuffer()`, `ReadRhiBuffer()`, `CopyBuffer()`, and `CreateRhiBufferShaderResourceView()`. The portable readback sequence is GPU resource transition to copy source, `CopyBuffer()` into a `GpuToCpu` buffer, queue submission/idle synchronization, then `ReadRhiBuffer()`. DX12 uses readback heaps in `COPY_DEST`, DX11 uses staging buffers with CPU read access, Vulkan uses host-visible coherent memory, and OpenGL uses `glGetBufferSubData()`. Vulkan command encoding emits buffer memory barriers in addition to image barriers.
+- Vulkan buffer and image descriptor tables are backed by an owned descriptor pool and per-command-encoder descriptor sets. Structured buffer SRVs map to storage-buffer descriptors. This does not make the DX12 feature render path portable by itself: inline GPU-address bindings and feature-pass shader portability remain incomplete.
+- The RHI descriptor contract exposes texture and buffer unordered-access views. DX12 creates native UAV descriptors, DX11 binds compute UAV slots, Vulkan uses storage-image/storage-buffer descriptors, and OpenGL binds 2D images or SSBOs for compute. Texture UAV support currently covers 2D/2D-array on DX11 and Vulkan, 2D on OpenGL, and 2D/2D-array/3D on DX12. This is descriptor plumbing only; no non-DX12 feature pass has been declared visually equivalent yet.
+- `RhiStaticSamplerDesc` is implemented on all four backends. DX12 uses root-signature static samplers, Vulkan uses immutable samplers owned for the descriptor-set-layout lifetime, DX11 owns `ID3D11SamplerState` objects in the RHI pipeline layout, and OpenGL owns sampler objects bound to texture units when the layout is selected. Vulkan space0 bindings use fixed DXC-compatible register-class ranges (`b=0`, `t=100`, `s=200`, `u=300`, 100 slots per class); register spaces other than zero remain unsupported by the current single-set Vulkan layout.
 - RHI-owned resources in `MeshBuffer`, `SkinnedMeshBuffer`, `Skybox`, `SceneSubmitter`, `IrradianceProbeGrid`, `LightSystem`, `ShadowMapManager`, `IblSystem`, `MeshletBuffer`, and `RenderTargetPool` now explicitly call `DestroyRhiResource()` on release, shutdown, resize, or fallback failure paths. This is still a caller-side lifetime contract; GPU idle/fence safety must be handled before destroying resources that may be in flight.
 - `RenderTargetPool` now prefers RHI texture creation for the shared typeless depth target, HDR scene color, GBuffer targets, SSAO/blur, SWRT shadow/reflection/AO, SSR scene-color/reflection targets, transparent scene/transmission copies, transparent backface distance, weighted blended OIT, ReSTIR shadow, and HW ray tracing output. The DX12 feature path keeps using compatibility resources for its DSV/RTV/SRV/UAV descriptors and barriers. Resize and pool release explicitly destroy the associated RHI handles. Direct DX12 allocation remains as a fallback when RHI resource creation or DX12 compatibility resources are unavailable.
 - Baked GI probe diffuse is evaluated independently from the IBL enable/intensity toggle in both forward PBR and deferred lighting. When `g_giEnabled > 0.5`, lighting uses `GI_SampleProbeGrid() * giIntensity` as the indirect diffuse irradiance source; IBL diffuse remains the fallback when GI is not baked/enabled.
@@ -178,8 +181,16 @@ Status as of 2026-06-27:
 - Vulkan native mesh rendering now owns one D32 depth image/view per swapchain image and recreates native framebuffers/depth resources on resize. Vulkan capability flags report only features enabled on the logical device; ray query, ray tracing pipeline, mesh shader, descriptor indexing, timeline semaphore, and dynamic rendering remain disabled until `CreateDevice()` enables the corresponding extension and feature chains.
 - OpenGL format conversion now covers `R32UInt` and `D24UNormS8UInt` in addition to the existing color, float, and depth formats.
 - Baked GI probe diffuse is currently consumed only by the DX12 feature render path. Vulkan / DX11 / OpenGL native fallback shaders do not bind or sample the baked SH probe buffer, so cross-backend GI visual parity is not claimed. Completing it requires portable buffer descriptor binding, a non-DX12 probe bake or serialized probe cache upload path, and native/feature shaders that evaluate the same probe interpolation.
-- `CreateRhiBuffer()` only guarantees immediate `initialData` upload for CPU-visible (`CpuToGpu`) buffers on DX12 and Vulkan. A portable staging-copy contract for `GpuOnly + initialData` is still missing.
+- `CreateRhiBuffer()` supports immediate `initialData` for `GpuOnly` buffers on all four backends: DX12 and Vulkan use staging copies, while DX11 `CreateBuffer()` and OpenGL `glBufferData()` consume initial data directly. `GpuToCpu + initialData` is rejected on DX12/DX11 because readback resources are copy destinations rather than upload resources.
+- Non-DX12 configurations exclude the DX12 RHI ray-tracing implementation at translation-unit scope. This prevents Vulkan, DX11, and OpenGL builds from compiling definitions for the macro-hidden `Dx12GraphicsDevice` class.
 - Remaining limitation: several DX12 feature-path systems still expose GPU virtual addresses for constant buffers, shader resource buffers, and ray tracing structures. SWRT/DXR BVH, acceleration structure, scratch/result buffers, and upload-helper staging resources remain direct DX12 allocations where the current RHI contract does not yet represent the required build/copy/state semantics. Future work should move these resource owners to RHI handles where the backend contract can represent the required binding type and synchronization requirements.
+
+Implementation references for the portable buffer copy/readback contract:
+
+- Microsoft `D3D12_HEAP_TYPE`: readback-heap resources must remain in `D3D12_RESOURCE_STATE_COPY_DEST`: https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ne-d3d12-d3d12_heap_type
+- Microsoft D3D12 readback guidance: synchronize copy completion before mapping the readback buffer: https://learn.microsoft.com/en-us/windows/win32/direct3d12/readback-data-using-heaps
+- Khronos `vkCmdPipelineBarrier` / `VkBufferMemoryBarrier`: buffer barriers define the resource-specific access dependency around buffer copies: https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCmdPipelineBarrier.html
+- Khronos `VkDescriptorSetLayoutBinding`: immutable sampler handles are copied into the layout but sampler objects must outlive layout/set use: https://registry.khronos.org/vulkan/specs/latest/man/html/VkDescriptorSetLayoutBinding.html
 
 レンダラー、graphics API、shading、lighting、ray tracing、GI、material、render graph を変更する場合は、実装前に短い実装方針を作り、可能な範囲で論文、公式 API 仕様、Unreal Engine などの既存実装、ベンダーサンプル、保守されているオープンソースレンダラーを参照してください。
 

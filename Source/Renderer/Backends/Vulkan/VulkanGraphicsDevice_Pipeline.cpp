@@ -300,7 +300,7 @@ namespace SasamiRenderer
         bufferInfo.size = desc.sizeInBytes;
         bufferInfo.usage = ToVkBufferUsage(desc.usage);
         const bool needsStagingUpload = initialData && desc.memoryUsage == RhiMemoryUsage::GpuOnly;
-        if (needsStagingUpload) {
+        if (needsStagingUpload || desc.memoryUsage == RhiMemoryUsage::GpuToCpu) {
             bufferInfo.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
         }
         bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -456,14 +456,48 @@ namespace SasamiRenderer
         void* mapped = nullptr;
         if (vkMapMemory(m_device,
                         resourceIt->second.memory,
-                        offsetInBytes,
-                        sizeInBytes,
+                        0,
+                        resourceIt->second.sizeInBytes,
                         0,
                         &mapped) != VK_SUCCESS ||
             !mapped) {
             return false;
         }
-        std::memcpy(mapped, data, static_cast<size_t>(sizeInBytes));
+        std::memcpy(static_cast<uint8_t*>(mapped) + offsetInBytes,
+                    data,
+                    static_cast<size_t>(sizeInBytes));
+        vkUnmapMemory(m_device, resourceIt->second.memory);
+        return true;
+    }
+
+    bool VulkanGraphicsDevice::ReadRhiBuffer(RhiBufferHandle bufferHandle,
+                                             uint64_t offsetInBytes,
+                                             void* data,
+                                             uint64_t sizeInBytes)
+    {
+        const auto resourceIt = m_rhiResources.find(bufferHandle.id);
+        if (resourceIt == m_rhiResources.end() || !data || sizeInBytes == 0 ||
+            resourceIt->second.buffer == VK_NULL_HANDLE ||
+            resourceIt->second.memory == VK_NULL_HANDLE ||
+            resourceIt->second.memoryUsage != RhiMemoryUsage::GpuToCpu ||
+            offsetInBytes >= resourceIt->second.sizeInBytes ||
+            sizeInBytes > resourceIt->second.sizeInBytes - offsetInBytes) {
+            return false;
+        }
+
+        void* mapped = nullptr;
+        if (vkMapMemory(m_device,
+                        resourceIt->second.memory,
+                        0,
+                        resourceIt->second.sizeInBytes,
+                        0,
+                        &mapped) != VK_SUCCESS ||
+            !mapped) {
+            return false;
+        }
+        std::memcpy(data,
+                    static_cast<const uint8_t*>(mapped) + offsetInBytes,
+                    static_cast<size_t>(sizeInBytes));
         vkUnmapMemory(m_device, resourceIt->second.memory);
         return true;
     }
@@ -542,10 +576,15 @@ namespace SasamiRenderer
 
         std::vector<VkDescriptorSetLayoutBinding> setBindings;
         std::vector<VkPushConstantRange> pushConstants;
-        setBindings.reserve(desc.bindingCount);
+        VulkanRhiPipelineLayout layout{};
+        setBindings.reserve(desc.bindingCount + desc.staticSamplerCount);
         pushConstants.reserve(desc.bindingCount);
         for (uint32_t i = 0; i < desc.bindingCount; ++i) {
             const RhiBindingRangeDesc& binding = desc.bindings[i];
+            if (binding.registerSpace != 0 || binding.baseRegister >= 100 ||
+                binding.descriptorCount == 0 || binding.descriptorCount > 100 - binding.baseRegister) {
+                return {};
+            }
             if (binding.type == RhiBindingType::RootConstants) {
                 VkPushConstantRange range{};
                 range.stageFlags = ToVkShaderStages(binding.visibility);
@@ -556,24 +595,70 @@ namespace SasamiRenderer
             }
 
             VkDescriptorSetLayoutBinding setBinding{};
-            setBinding.binding = binding.baseRegister;
+            setBinding.binding = ToVkBindingNumber(binding.type, binding.baseRegister);
             setBinding.descriptorType = ToVkDescriptorType(binding);
             setBinding.descriptorCount = binding.descriptorCount;
             setBinding.stageFlags = ToVkShaderStages(binding.visibility);
             setBindings.push_back(setBinding);
         }
 
-        VulkanRhiPipelineLayout layout{};
         layout.bindings.resize(desc.bindingCount);
         for (uint32_t i = 0; i < desc.bindingCount; ++i) {
             const RhiBindingRangeDesc& binding = desc.bindings[i];
             if (binding.type == RhiBindingType::RootConstants) {
                 continue;
             }
-            layout.bindings[i].binding = binding.baseRegister;
+            layout.bindings[i].binding = ToVkBindingNumber(binding.type, binding.baseRegister);
             layout.bindings[i].descriptorCount = binding.descriptorCount;
             layout.bindings[i].descriptorType = ToVkDescriptorType(binding);
             layout.bindings[i].valid = true;
+        }
+
+        layout.immutableSamplers.reserve(desc.staticSamplerCount);
+        for (uint32_t i = 0; i < desc.staticSamplerCount; ++i) {
+            const RhiStaticSamplerDesc& source = desc.staticSamplers[i];
+            const bool bindingCollision = std::any_of(
+                setBindings.begin(), setBindings.end(),
+                [&](const VkDescriptorSetLayoutBinding& binding) {
+                    return binding.binding == ToVkBindingNumber(RhiBindingType::Sampler, source.shaderRegister);
+                });
+            if (bindingCollision || source.registerSpace != 0 || source.shaderRegister >= 100) {
+                for (VkSampler sampler : layout.immutableSamplers) {
+                    vkDestroySampler(m_device, sampler, nullptr);
+                }
+                return {};
+            }
+
+            VkSamplerCreateInfo samplerInfo{};
+            samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+            samplerInfo.magFilter = source.linearFilter ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
+            samplerInfo.minFilter = source.linearFilter ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
+            samplerInfo.mipmapMode = source.linearFilter
+                ? VK_SAMPLER_MIPMAP_MODE_LINEAR
+                : VK_SAMPLER_MIPMAP_MODE_NEAREST;
+            samplerInfo.addressModeU = source.clamp
+                ? VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+                : VK_SAMPLER_ADDRESS_MODE_REPEAT;
+            samplerInfo.addressModeV = samplerInfo.addressModeU;
+            samplerInfo.addressModeW = samplerInfo.addressModeU;
+            samplerInfo.minLod = 0.0f;
+            samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
+            VkSampler sampler = VK_NULL_HANDLE;
+            if (vkCreateSampler(m_device, &samplerInfo, nullptr, &sampler) != VK_SUCCESS) {
+                for (VkSampler created : layout.immutableSamplers) {
+                    vkDestroySampler(m_device, created, nullptr);
+                }
+                return {};
+            }
+            layout.immutableSamplers.push_back(sampler);
+
+            VkDescriptorSetLayoutBinding samplerBinding{};
+            samplerBinding.binding = ToVkBindingNumber(RhiBindingType::Sampler, source.shaderRegister);
+            samplerBinding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+            samplerBinding.descriptorCount = 1;
+            samplerBinding.stageFlags = ToVkShaderStages(source.visibility);
+            samplerBinding.pImmutableSamplers = &layout.immutableSamplers.back();
+            setBindings.push_back(samplerBinding);
         }
         if (!setBindings.empty()) {
             VkDescriptorSetLayoutCreateInfo setInfo{};
@@ -581,6 +666,9 @@ namespace SasamiRenderer
             setInfo.bindingCount = static_cast<uint32_t>(setBindings.size());
             setInfo.pBindings = setBindings.data();
             if (vkCreateDescriptorSetLayout(m_device, &setInfo, nullptr, &layout.descriptorSetLayout) != VK_SUCCESS) {
+                for (VkSampler sampler : layout.immutableSamplers) {
+                    vkDestroySampler(m_device, sampler, nullptr);
+                }
                 return {};
             }
         }
@@ -594,6 +682,9 @@ namespace SasamiRenderer
         if (vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &layout.pipelineLayout) != VK_SUCCESS) {
             if (layout.descriptorSetLayout != VK_NULL_HANDLE) {
                 vkDestroyDescriptorSetLayout(m_device, layout.descriptorSetLayout, nullptr);
+            }
+            for (VkSampler sampler : layout.immutableSamplers) {
+                vkDestroySampler(m_device, sampler, nullptr);
             }
             return {};
         }
@@ -916,11 +1007,12 @@ namespace SasamiRenderer
             return false;
         }
 
-        const std::array<VkDescriptorPoolSize, 4> poolSizes = {{
+        const std::array<VkDescriptorPoolSize, 5> poolSizes = {{
             { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 8192 },
             { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2048 },
             { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4096 },
             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 8192 },
+            { VK_DESCRIPTOR_TYPE_SAMPLER, 2048 },
         }};
         VkDescriptorPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -992,6 +1084,43 @@ namespace SasamiRenderer
         descriptor.resourceId = bufferHandle.id;
         m_rhiDescriptors[destination.ptr] = descriptor;
         return true;
+    }
+
+    bool VulkanGraphicsDevice::CreateRhiUnorderedAccessView(RhiTextureHandle texture,
+                                                            const RhiTextureViewDesc& desc,
+                                                            RhiCpuDescriptorHandle destination)
+    {
+        const auto resourceIt = m_rhiResources.find(texture.id);
+        if (resourceIt == m_rhiResources.end() || resourceIt->second.image == VK_NULL_HANDLE || !destination.IsValid()) return false;
+        VkImageViewCreateInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        info.image = resourceIt->second.image;
+        info.viewType = ToVkImageViewType(desc.dimension);
+        info.format = ToVkFormat(desc.format);
+        info.subresourceRange.aspectMask = ToVkAspectMask(desc.format);
+        info.subresourceRange.baseMipLevel = desc.baseMipLevel;
+        info.subresourceRange.levelCount = desc.mipLevelCount;
+        info.subresourceRange.baseArrayLayer = desc.baseArrayLayer;
+        info.subresourceRange.layerCount = desc.arrayLayerCount;
+        VkImageView view = VK_NULL_HANDLE;
+        if (vkCreateImageView(m_device, &info, nullptr, &view) != VK_SUCCESS) return false;
+        const auto old = m_rhiImageViews.find(destination.ptr);
+        if (old != m_rhiImageViews.end() && old->second != VK_NULL_HANDLE) vkDestroyImageView(m_device, old->second, nullptr);
+        m_rhiImageViews[destination.ptr] = view;
+        m_rhiImageViewResources[destination.ptr] = texture.id;
+        VulkanRhiDescriptor descriptor{};
+        descriptor.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        descriptor.imageView = view;
+        descriptor.resourceId = texture.id;
+        m_rhiDescriptors[destination.ptr] = descriptor;
+        return true;
+    }
+
+    bool VulkanGraphicsDevice::CreateRhiBufferUnorderedAccessView(RhiBufferHandle buffer,
+                                                                  const RhiBufferViewDesc& desc,
+                                                                  RhiCpuDescriptorHandle destination)
+    {
+        return CreateRhiBufferShaderResourceView(buffer, desc, destination);
     }
 
     bool VulkanGraphicsDevice::CreateRhiRenderTargetView(RhiTextureHandle texture,

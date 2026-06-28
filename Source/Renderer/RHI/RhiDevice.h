@@ -24,6 +24,7 @@ namespace SasamiRenderer
         virtual void Draw(const RhiDrawDesc&) {}
         virtual void DrawIndexed(const RhiDrawIndexedDesc&) {}
         virtual void Dispatch(const RhiDispatchDesc&) {}
+        virtual void CopyBuffer(const RhiBufferCopyDesc&) {}
 
         // Pipeline layout (root signature equivalent)
         virtual void SetGraphicsPipelineLayout(RhiPipelineLayoutHandle) {}
@@ -81,6 +82,10 @@ namespace SasamiRenderer
                                      uint64_t offsetInBytes,
                                      const void* data,
                                      uint64_t sizeInBytes) = 0;
+        virtual bool ReadRhiBuffer(RhiBufferHandle buffer,
+                                   uint64_t offsetInBytes,
+                                   void* data,
+                                   uint64_t sizeInBytes) = 0;
         virtual bool DestroyRhiResource(RhiResourceHandle resource) = 0;
         virtual RhiShaderHandle CreateRhiShaderModule(const RhiShaderModuleDesc& desc) = 0;
         virtual RhiPipelineLayoutHandle CreateRhiPipelineLayout(const RhiPipelineLayoutDesc& desc) = 0;
@@ -95,6 +100,12 @@ namespace SasamiRenderer
         virtual bool CreateRhiBufferShaderResourceView(RhiBufferHandle buffer,
                                                        const RhiBufferViewDesc& desc,
                                                        RhiCpuDescriptorHandle destination) = 0;
+        virtual bool CreateRhiUnorderedAccessView(RhiTextureHandle texture,
+                                                  const RhiTextureViewDesc& desc,
+                                                  RhiCpuDescriptorHandle destination) = 0;
+        virtual bool CreateRhiBufferUnorderedAccessView(RhiBufferHandle buffer,
+                                                        const RhiBufferViewDesc& desc,
+                                                        RhiCpuDescriptorHandle destination) = 0;
         virtual bool CreateRhiRenderTargetView(RhiTextureHandle texture,
                                                const RhiRenderTargetViewDesc& desc,
                                                RhiCpuDescriptorHandle destination) = 0;

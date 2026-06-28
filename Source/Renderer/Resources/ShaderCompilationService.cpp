@@ -561,6 +561,18 @@ namespace SasamiRenderer::ShaderCompilationService
             arguments.push_back(L"-spirv");
             arguments.push_back(L"-fvk-use-dx-layout");
             arguments.push_back(L"-fvk-use-dx-position-w");
+            arguments.push_back(L"-fvk-b-shift");
+            arguments.push_back(L"0");
+            arguments.push_back(L"0");
+            arguments.push_back(L"-fvk-t-shift");
+            arguments.push_back(L"100");
+            arguments.push_back(L"0");
+            arguments.push_back(L"-fvk-s-shift");
+            arguments.push_back(L"200");
+            arguments.push_back(L"0");
+            arguments.push_back(L"-fvk-u-shift");
+            arguments.push_back(L"300");
+            arguments.push_back(L"0");
         }
 
 #if defined(_DEBUG)

@@ -3,6 +3,8 @@
 
 #include "Renderer/Backends/DirectX12/Dx12GraphicsDevice.h"
 
+#if RHI_DIRECTX12
+
 #include <algorithm>
 #include <cstring>
 #include <vector>
@@ -573,3 +575,5 @@ namespace SasamiRenderer
     }
 
 } // namespace SasamiRenderer
+
+#endif // RHI_DIRECTX12

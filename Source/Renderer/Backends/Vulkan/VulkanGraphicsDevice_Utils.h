@@ -156,11 +156,24 @@ namespace SasamiRenderer
     {
         switch (binding.type) {
         case RhiBindingType::ConstantBuffer: return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        case RhiBindingType::UnorderedAccess: return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        case RhiBindingType::UnorderedAccess:
+            return binding.bufferResource ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         case RhiBindingType::Sampler: return VK_DESCRIPTOR_TYPE_SAMPLER;
         case RhiBindingType::ShaderResource:
         default:
             return binding.bufferResource ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        }
+    }
+
+    inline uint32_t ToVkBindingNumber(RhiBindingType type, uint32_t shaderRegister)
+    {
+        constexpr uint32_t kRegisterClassSpan = 100;
+        switch (type) {
+        case RhiBindingType::ShaderResource: return kRegisterClassSpan + shaderRegister;
+        case RhiBindingType::Sampler: return kRegisterClassSpan * 2u + shaderRegister;
+        case RhiBindingType::UnorderedAccess: return kRegisterClassSpan * 3u + shaderRegister;
+        case RhiBindingType::ConstantBuffer:
+        default: return shaderRegister;
         }
     }
 

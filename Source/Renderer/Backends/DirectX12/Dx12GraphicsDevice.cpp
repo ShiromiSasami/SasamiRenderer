@@ -483,6 +483,31 @@ namespace SasamiRenderer
                 m_commandList.IASetIndexBuffer(&ibv);
             }
 
+            void CopyBuffer(const RhiBufferCopyDesc& copy) override
+            {
+                if (!m_valid || copy.sizeInBytes == 0) {
+                    return;
+                }
+                Resource* source = m_device.GetD3D12CompatibilityResource(copy.source);
+                Resource* destination = m_device.GetD3D12CompatibilityResource(copy.destination);
+                if (!source || !destination) {
+                    return;
+                }
+                const auto sourceDesc = source->Get()->GetDesc();
+                const auto destinationDesc = destination->Get()->GetDesc();
+                if (copy.sourceOffsetInBytes >= sourceDesc.Width ||
+                    copy.sizeInBytes > sourceDesc.Width - copy.sourceOffsetInBytes ||
+                    copy.destinationOffsetInBytes >= destinationDesc.Width ||
+                    copy.sizeInBytes > destinationDesc.Width - copy.destinationOffsetInBytes) {
+                    return;
+                }
+                m_commandList.Get()->CopyBufferRegion(destination->Get(),
+                                                      copy.destinationOffsetInBytes,
+                                                      source->Get(),
+                                                      copy.sourceOffsetInBytes,
+                                                      copy.sizeInBytes);
+            }
+
         private:
             Dx12GraphicsDevice& m_device;
             RhiQueueType m_queueType = RhiQueueType::Graphics;
@@ -724,6 +749,54 @@ namespace SasamiRenderer
             break;
         }
         CreateShaderResourceView(*resource, &srv, CpuDescriptorHandle{ destination.ptr });
+        return true;
+    }
+
+    bool Dx12GraphicsDevice::CreateRhiUnorderedAccessView(RhiTextureHandle texture,
+                                                          const RhiTextureViewDesc& desc,
+                                                          RhiCpuDescriptorHandle destination)
+    {
+        Resource* resource = FindRhiResource(texture);
+        if (!resource || !destination.IsValid()) return false;
+        D3D12_UNORDERED_ACCESS_VIEW_DESC uav{};
+        uav.Format = ToDxgiFormat(desc.format);
+        if (desc.dimension == RhiTextureViewDimension::Texture2DArray) {
+            uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+            uav.Texture2DArray.MipSlice = desc.baseMipLevel;
+            uav.Texture2DArray.FirstArraySlice = desc.baseArrayLayer;
+            uav.Texture2DArray.ArraySize = desc.arrayLayerCount;
+        } else if (desc.dimension == RhiTextureViewDimension::Texture3D) {
+            uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
+            uav.Texture3D.MipSlice = desc.baseMipLevel;
+            uav.Texture3D.FirstWSlice = desc.baseArrayLayer;
+            uav.Texture3D.WSize = desc.arrayLayerCount;
+        } else if (desc.dimension == RhiTextureViewDimension::Texture2D) {
+            uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+            uav.Texture2D.MipSlice = desc.baseMipLevel;
+        } else return false;
+        m_device->CreateUnorderedAccessView(resource->Get(), nullptr, &uav,
+                                            D3D12_CPU_DESCRIPTOR_HANDLE{ destination.ptr });
+        return true;
+    }
+
+    bool Dx12GraphicsDevice::CreateRhiBufferUnorderedAccessView(RhiBufferHandle bufferHandle,
+                                                                const RhiBufferViewDesc& desc,
+                                                                RhiCpuDescriptorHandle destination)
+    {
+        Resource* resource = FindRhiResource(bufferHandle);
+        if (!resource || !destination.IsValid() || desc.type == RhiBufferViewType::Constant) return false;
+        const uint64_t size = resource->Get()->GetDesc().Width;
+        const uint64_t viewSize = desc.sizeInBytes == 0 && desc.offset < size ? size - desc.offset : desc.sizeInBytes;
+        uint32_t elementSize = desc.strideInBytes;
+        D3D12_UNORDERED_ACCESS_VIEW_DESC uav{}; uav.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+        if (desc.type == RhiBufferViewType::Raw) { elementSize = 4; uav.Format = DXGI_FORMAT_R32_TYPELESS; uav.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW; }
+        else if (desc.type == RhiBufferViewType::Structured) { uav.Format = DXGI_FORMAT_UNKNOWN; uav.Buffer.StructureByteStride = desc.strideInBytes; }
+        else if (desc.type == RhiBufferViewType::Typed) uav.Format = ToDxgiFormat(desc.format);
+        if (!elementSize || desc.offset >= size || !viewSize || viewSize > size - desc.offset || desc.offset % elementSize || viewSize % elementSize) return false;
+        uav.Buffer.FirstElement = desc.offset / elementSize;
+        uav.Buffer.NumElements = static_cast<UINT>(viewSize / elementSize);
+        m_device->CreateUnorderedAccessView(resource->Get(), nullptr, &uav,
+                                            D3D12_CPU_DESCRIPTOR_HANDLE{ destination.ptr });
         return true;
     }
 

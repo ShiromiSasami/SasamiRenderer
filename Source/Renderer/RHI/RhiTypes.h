@@ -596,6 +596,15 @@ namespace SasamiRenderer
         uint32_t groupCountZ = 1;
     };
 
+    struct RhiBufferCopyDesc
+    {
+        RhiBufferHandle source{};
+        RhiBufferHandle destination{};
+        uint64_t sourceOffsetInBytes = 0;
+        uint64_t destinationOffsetInBytes = 0;
+        uint64_t sizeInBytes = 0;
+    };
+
     using RhiDescriptorHeapHandle = RhiHandle;
 
     struct RhiVertexBufferView

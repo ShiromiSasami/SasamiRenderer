@@ -45,6 +45,10 @@ namespace SasamiRenderer
                              uint64_t offsetInBytes,
                              const void* data,
                              uint64_t sizeInBytes) override;
+        bool ReadRhiBuffer(RhiBufferHandle buffer,
+                           uint64_t offsetInBytes,
+                           void* data,
+                           uint64_t sizeInBytes) override;
         bool DestroyRhiResource(RhiResourceHandle resource) override;
         RhiShaderHandle CreateRhiShaderModule(const RhiShaderModuleDesc& desc) override;
         RhiPipelineLayoutHandle CreateRhiPipelineLayout(const RhiPipelineLayoutDesc& desc) override;
@@ -59,6 +63,12 @@ namespace SasamiRenderer
         bool CreateRhiBufferShaderResourceView(RhiBufferHandle buffer,
                                                const RhiBufferViewDesc& desc,
                                                RhiCpuDescriptorHandle destination) override;
+        bool CreateRhiUnorderedAccessView(RhiTextureHandle texture,
+                                          const RhiTextureViewDesc& desc,
+                                          RhiCpuDescriptorHandle destination) override;
+        bool CreateRhiBufferUnorderedAccessView(RhiBufferHandle buffer,
+                                                const RhiBufferViewDesc& desc,
+                                                RhiCpuDescriptorHandle destination) override;
         bool CreateRhiRenderTargetView(RhiTextureHandle texture,
                                        const RhiRenderTargetViewDesc& desc,
                                        RhiCpuDescriptorHandle destination) override;
@@ -105,6 +115,18 @@ namespace SasamiRenderer
             unsigned int program = 0;
         };
 
+        struct OpenGLRhiPipelineLayout
+        {
+            struct StaticSampler
+            {
+                unsigned int sampler = 0;
+                RhiShaderStageFlags visibility = RhiShaderStageFlags::None;
+                uint32_t shaderRegister = 0;
+            };
+            uint32_t bindingCount = 0;
+            std::vector<StaticSampler> staticSamplers;
+        };
+
         struct OpenGLRhiBufferView
         {
             unsigned int buffer = 0;
@@ -133,10 +155,12 @@ namespace SasamiRenderer
         std::unordered_map<uint64_t, uint64_t> m_rhiBufferSizes;
         std::unordered_map<uint64_t, unsigned int> m_rhiBufferTargets;
         std::unordered_map<uint64_t, OpenGLRhiShader> m_rhiShaders;
-        std::unordered_map<uint64_t, uint32_t> m_rhiPipelineLayouts;
+        std::unordered_map<uint64_t, OpenGLRhiPipelineLayout> m_rhiPipelineLayouts;
         std::unordered_map<uint64_t, OpenGLRhiPipeline> m_rhiPipelines;
         std::unordered_map<uint64_t, unsigned int> m_rhiTextureViews;
         std::unordered_map<uint64_t, OpenGLRhiBufferView> m_rhiBufferViews;
+        std::unordered_map<uint64_t, RhiFormat> m_rhiTextureUavs;
+        std::unordered_map<uint64_t, bool> m_rhiBufferUavs;
         unsigned int m_meshProgram = 0;
         int m_meshMvpLocation = -1;
         int m_meshBaseColorLocation = -1;

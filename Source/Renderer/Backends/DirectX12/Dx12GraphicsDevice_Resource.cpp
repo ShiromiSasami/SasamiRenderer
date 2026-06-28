@@ -347,13 +347,15 @@ namespace SasamiRenderer
 
     RhiBufferHandle Dx12GraphicsDevice::CreateRhiBuffer(const RhiBufferDesc& desc, const void* initialData)
     {
-        if (!m_device || desc.sizeInBytes == 0) {
+        if (!m_device || desc.sizeInBytes == 0 ||
+            (initialData && desc.memoryUsage == RhiMemoryUsage::GpuToCpu)) {
             return {};
         }
 
         D3D12_RESOURCE_DESC dxDesc = CD3DX12_RESOURCE_DESC::Buffer(desc.sizeInBytes);
-        if (HasFlag(desc.usage, RhiBufferUsageFlags::UnorderedAccess) ||
-            HasFlag(desc.usage, RhiBufferUsageFlags::AccelerationStructure)) {
+        if (desc.memoryUsage != RhiMemoryUsage::GpuToCpu &&
+            (HasFlag(desc.usage, RhiBufferUsageFlags::UnorderedAccess) ||
+             HasFlag(desc.usage, RhiBufferUsageFlags::AccelerationStructure))) {
             dxDesc.Flags = static_cast<D3D12_RESOURCE_FLAGS>(
                 static_cast<UINT>(dxDesc.Flags) | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
         }
@@ -366,7 +368,9 @@ namespace SasamiRenderer
         const D3D12_RESOURCE_STATES finalState = ToDx12State(desc.initialState);
         const D3D12_RESOURCE_STATES initialState = desc.memoryUsage == RhiMemoryUsage::CpuToGpu
             ? D3D12_RESOURCE_STATE_GENERIC_READ
-            : (needsStagingUpload ? D3D12_RESOURCE_STATE_COPY_DEST : finalState);
+            : (desc.memoryUsage == RhiMemoryUsage::GpuToCpu
+                ? D3D12_RESOURCE_STATE_COPY_DEST
+                : (needsStagingUpload ? D3D12_RESOURCE_STATE_COPY_DEST : finalState));
         const HRESULT hr = CreateCommittedResource(&heap,
                                                    D3D12_HEAP_FLAG_NONE,
                                                    &dxDesc,
@@ -458,6 +462,37 @@ namespace SasamiRenderer
             static_cast<SIZE_T>(offsetInBytes + sizeInBytes),
         };
         resource->Unmap(0, &writtenRange);
+        return true;
+    }
+
+    bool Dx12GraphicsDevice::ReadRhiBuffer(RhiBufferHandle bufferHandle,
+                                           uint64_t offsetInBytes,
+                                           void* data,
+                                           uint64_t sizeInBytes)
+    {
+        Resource* resource = FindRhiResource(bufferHandle);
+        if (!resource || !data || sizeInBytes == 0) {
+            return false;
+        }
+
+        const uint64_t bufferSize = resource->Get()->GetDesc().Width;
+        if (offsetInBytes >= bufferSize || sizeInBytes > bufferSize - offsetInBytes) {
+            return false;
+        }
+
+        void* mapped = nullptr;
+        const D3D12_RANGE readRange{
+            static_cast<SIZE_T>(offsetInBytes),
+            static_cast<SIZE_T>(offsetInBytes + sizeInBytes),
+        };
+        if (FAILED(resource->Map(0, &readRange, &mapped)) || !mapped) {
+            return false;
+        }
+        std::memcpy(data,
+                    static_cast<const uint8_t*>(mapped) + offsetInBytes,
+                    static_cast<size_t>(sizeInBytes));
+        const D3D12_RANGE noWriteRange{ 0, 0 };
+        resource->Unmap(0, &noWriteRange);
         return true;
     }
 

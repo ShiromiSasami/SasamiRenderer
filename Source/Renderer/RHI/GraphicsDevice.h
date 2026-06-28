@@ -398,6 +398,17 @@ namespace SasamiRenderer
             (void)sizeInBytes;
             return false;
         }
+        bool ReadRhiBuffer(RhiBufferHandle buffer,
+                           uint64_t offsetInBytes,
+                           void* data,
+                           uint64_t sizeInBytes) override
+        {
+            (void)buffer;
+            (void)offsetInBytes;
+            (void)data;
+            (void)sizeInBytes;
+            return false;
+        }
         bool DestroyRhiResource(RhiResourceHandle resource) override
         {
             (void)resource;
@@ -448,6 +459,20 @@ namespace SasamiRenderer
             (void)buffer;
             (void)desc;
             (void)destination;
+            return false;
+        }
+        bool CreateRhiUnorderedAccessView(RhiTextureHandle texture,
+                                          const RhiTextureViewDesc& desc,
+                                          RhiCpuDescriptorHandle destination) override
+        {
+            (void)texture; (void)desc; (void)destination;
+            return false;
+        }
+        bool CreateRhiBufferUnorderedAccessView(RhiBufferHandle buffer,
+                                                const RhiBufferViewDesc& desc,
+                                                RhiCpuDescriptorHandle destination) override
+        {
+            (void)buffer; (void)desc; (void)destination;
             return false;
         }
         bool CreateRhiRenderTargetView(RhiTextureHandle texture,

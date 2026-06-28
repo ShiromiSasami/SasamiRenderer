@@ -132,12 +132,31 @@ namespace SasamiRenderer
 #ifndef GL_SHADER_STORAGE_BUFFER
         constexpr GLenum GL_SHADER_STORAGE_BUFFER = 0x90D2;
 #endif
+#ifndef GL_COPY_READ_BUFFER
+        constexpr GLenum GL_COPY_READ_BUFFER = 0x8F36;
+#endif
+#ifndef GL_COPY_WRITE_BUFFER
+        constexpr GLenum GL_COPY_WRITE_BUFFER = 0x8F37;
+#endif
+#ifndef GL_READ_WRITE
+        constexpr GLenum GL_READ_WRITE = 0x88BA;
+#endif
+#ifndef GL_CLAMP_TO_EDGE
+        constexpr GLenum GL_CLAMP_TO_EDGE = 0x812F;
+#endif
 
         using GlGenBuffersFn = void (APIENTRY*)(GLsizei, GLuint*);
         using GlBindBufferFn = void (APIENTRY*)(GLenum, GLuint);
         using GlBindBufferBaseFn = void (APIENTRY*)(GLenum, GLuint, GLuint);
         using GlBufferDataFn = void (APIENTRY*)(GLenum, std::ptrdiff_t, const void*, GLenum);
         using GlBufferSubDataFn = void (APIENTRY*)(GLenum, std::ptrdiff_t, std::ptrdiff_t, const void*);
+        using GlGetBufferSubDataFn = void (APIENTRY*)(GLenum, std::ptrdiff_t, std::ptrdiff_t, void*);
+        using GlCopyBufferSubDataFn = void (APIENTRY*)(GLenum, GLenum, std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t);
+        using GlBindImageTextureFn = void (APIENTRY*)(GLuint, GLuint, GLint, GLboolean, GLint, GLenum, GLenum);
+        using GlGenSamplersFn = void (APIENTRY*)(GLsizei, GLuint*);
+        using GlDeleteSamplersFn = void (APIENTRY*)(GLsizei, const GLuint*);
+        using GlSamplerParameteriFn = void (APIENTRY*)(GLuint, GLenum, GLint);
+        using GlBindSamplerFn = void (APIENTRY*)(GLuint, GLuint);
         using GlDeleteBuffersFn = void (APIENTRY*)(GLsizei, const GLuint*);
         using GlGenFramebuffersFn = void (APIENTRY*)(GLsizei, GLuint*);
         using GlBindFramebufferFn = void (APIENTRY*)(GLenum, GLuint);
@@ -566,6 +585,16 @@ void main()
 
         void SetComputeDescriptorTable(uint32_t slot, RhiGpuDescriptorHandle table) override
         {
+            const auto uavIt = m_device.m_rhiTextureUavs.find(table.ptr);
+            const auto textureIt = m_device.m_rhiTextureViews.find(table.ptr);
+            if (MakeCurrent() && uavIt != m_device.m_rhiTextureUavs.end() && textureIt != m_device.m_rhiTextureViews.end()) {
+                auto bindImageTexture = LoadGlProc<GlBindImageTextureFn>("glBindImageTexture");
+                if (bindImageTexture) {
+                    bindImageTexture(slot, textureIt->second, 0, GL_FALSE, 0, GL_READ_WRITE,
+                                     static_cast<GLenum>(ToGlInternalFormat(uavIt->second)));
+                    return;
+                }
+            }
             SetGraphicsDescriptorTable(slot, table);
         }
 
@@ -695,10 +724,70 @@ void main()
             }
         }
 
+        void CopyBuffer(const RhiBufferCopyDesc& copy) override
+        {
+            if (!MakeCurrent() || copy.sizeInBytes == 0) {
+                return;
+            }
+            const auto sourceIt = m_device.m_rhiBuffers.find(copy.source.id);
+            const auto destinationIt = m_device.m_rhiBuffers.find(copy.destination.id);
+            const auto sourceSizeIt = m_device.m_rhiBufferSizes.find(copy.source.id);
+            const auto destinationSizeIt = m_device.m_rhiBufferSizes.find(copy.destination.id);
+            if (sourceIt == m_device.m_rhiBuffers.end() || destinationIt == m_device.m_rhiBuffers.end() ||
+                sourceSizeIt == m_device.m_rhiBufferSizes.end() || destinationSizeIt == m_device.m_rhiBufferSizes.end() ||
+                copy.sourceOffsetInBytes >= sourceSizeIt->second ||
+                copy.sizeInBytes > sourceSizeIt->second - copy.sourceOffsetInBytes ||
+                copy.destinationOffsetInBytes >= destinationSizeIt->second ||
+                copy.sizeInBytes > destinationSizeIt->second - copy.destinationOffsetInBytes) {
+                return;
+            }
+            auto bindBuffer = LoadGlProc<GlBindBufferFn>("glBindBuffer");
+            auto copyBufferSubData = LoadGlProc<GlCopyBufferSubDataFn>("glCopyBufferSubData");
+            if (!bindBuffer || !copyBufferSubData) {
+                return;
+            }
+            bindBuffer(GL_COPY_READ_BUFFER, sourceIt->second);
+            bindBuffer(GL_COPY_WRITE_BUFFER, destinationIt->second);
+            copyBufferSubData(GL_COPY_READ_BUFFER,
+                              GL_COPY_WRITE_BUFFER,
+                              static_cast<std::ptrdiff_t>(copy.sourceOffsetInBytes),
+                              static_cast<std::ptrdiff_t>(copy.destinationOffsetInBytes),
+                              static_cast<std::ptrdiff_t>(copy.sizeInBytes));
+            bindBuffer(GL_COPY_READ_BUFFER, 0);
+            bindBuffer(GL_COPY_WRITE_BUFFER, 0);
+        }
+
     private:
         bool MakeCurrent() const
         {
             return m_device.m_hdc && m_device.m_context && wglMakeCurrent(m_device.m_hdc, m_device.m_context);
+        }
+
+        void SetGraphicsPipelineLayout(RhiPipelineLayoutHandle handle) override
+        {
+            if (!MakeCurrent()) return;
+            const auto it = m_device.m_rhiPipelineLayouts.find(handle.id);
+            auto bindSampler = LoadGlProc<GlBindSamplerFn>("glBindSampler");
+            if (it == m_device.m_rhiPipelineLayouts.end() || !bindSampler) return;
+            for (const auto& sampler : it->second.staticSamplers) {
+                const uint32_t flags = static_cast<uint32_t>(sampler.visibility);
+                if (flags & static_cast<uint32_t>(RhiShaderStageFlags::AllGraphics)) {
+                    bindSampler(sampler.shaderRegister, sampler.sampler);
+                }
+            }
+        }
+
+        void SetComputePipelineLayout(RhiPipelineLayoutHandle handle) override
+        {
+            if (!MakeCurrent()) return;
+            const auto it = m_device.m_rhiPipelineLayouts.find(handle.id);
+            auto bindSampler = LoadGlProc<GlBindSamplerFn>("glBindSampler");
+            if (it == m_device.m_rhiPipelineLayouts.end() || !bindSampler) return;
+            for (const auto& sampler : it->second.staticSamplers) {
+                if (static_cast<uint32_t>(sampler.visibility) & static_cast<uint32_t>(RhiShaderStageFlags::Compute)) {
+                    bindSampler(sampler.shaderRegister, sampler.sampler);
+                }
+            }
         }
 
         void BindProgram(RhiPipelineHandle pipelineHandle)
@@ -1227,6 +1316,35 @@ void main()
         return true;
     }
 
+    bool OpenGLGraphicsDevice::ReadRhiBuffer(RhiBufferHandle bufferHandle,
+                                             uint64_t offsetInBytes,
+                                             void* data,
+                                             uint64_t sizeInBytes)
+    {
+        const auto bufferIt = m_rhiBuffers.find(bufferHandle.id);
+        const auto sizeIt = m_rhiBufferSizes.find(bufferHandle.id);
+        const auto targetIt = m_rhiBufferTargets.find(bufferHandle.id);
+        if (bufferIt == m_rhiBuffers.end() || sizeIt == m_rhiBufferSizes.end() ||
+            targetIt == m_rhiBufferTargets.end() || !data || sizeInBytes == 0 ||
+            offsetInBytes >= sizeIt->second || sizeInBytes > sizeIt->second - offsetInBytes ||
+            !m_hdc || !m_context || !wglMakeCurrent(m_hdc, m_context)) {
+            return false;
+        }
+
+        auto bindBuffer = LoadGlProc<GlBindBufferFn>("glBindBuffer");
+        auto getBufferSubData = LoadGlProc<GlGetBufferSubDataFn>("glGetBufferSubData");
+        if (!bindBuffer || !getBufferSubData) {
+            return false;
+        }
+        bindBuffer(targetIt->second, bufferIt->second);
+        getBufferSubData(targetIt->second,
+                         static_cast<std::ptrdiff_t>(offsetInBytes),
+                         static_cast<std::ptrdiff_t>(sizeInBytes),
+                         data);
+        bindBuffer(targetIt->second, 0);
+        return true;
+    }
+
     bool OpenGLGraphicsDevice::DestroyRhiResource(RhiResourceHandle resource)
     {
         if (!resource.IsValid() || !m_hdc || !m_context || !wglMakeCurrent(m_hdc, m_context)) {
@@ -1238,6 +1356,7 @@ void main()
             const GLuint texture = textureIt->second;
             for (auto it = m_rhiTextureViews.begin(); it != m_rhiTextureViews.end();) {
                 if (it->second == texture) {
+                    m_rhiTextureUavs.erase(it->first);
                     it = m_rhiTextureViews.erase(it);
                 } else {
                     ++it;
@@ -1257,6 +1376,7 @@ void main()
             const GLuint buffer = bufferIt->second;
             for (auto it = m_rhiBufferViews.begin(); it != m_rhiBufferViews.end();) {
                 if (it->second.resourceId == resource.id) {
+                    m_rhiBufferUavs.erase(it->first);
                     it = m_rhiBufferViews.erase(it);
                 } else {
                     ++it;
@@ -1309,8 +1429,34 @@ void main()
 
     RhiPipelineLayoutHandle OpenGLGraphicsDevice::CreateRhiPipelineLayout(const RhiPipelineLayoutDesc& desc)
     {
+        if (!m_hdc || !m_context || !wglMakeCurrent(m_hdc, m_context) ||
+            (desc.staticSamplerCount > 0 && !desc.staticSamplers)) return {};
+        auto genSamplers = LoadGlProc<GlGenSamplersFn>("glGenSamplers");
+        auto deleteSamplers = LoadGlProc<GlDeleteSamplersFn>("glDeleteSamplers");
+        auto samplerParameteri = LoadGlProc<GlSamplerParameteriFn>("glSamplerParameteri");
+        if (desc.staticSamplerCount > 0 && (!genSamplers || !deleteSamplers || !samplerParameteri)) return {};
+        OpenGLRhiPipelineLayout layout{};
+        layout.bindingCount = desc.bindingCount;
+        layout.staticSamplers.reserve(desc.staticSamplerCount);
+        for (uint32_t i = 0; i < desc.staticSamplerCount; ++i) {
+            const auto& source = desc.staticSamplers[i];
+            if (source.registerSpace != 0) return {};
+            OpenGLRhiPipelineLayout::StaticSampler sampler{};
+            sampler.visibility = source.visibility;
+            sampler.shaderRegister = source.shaderRegister;
+            genSamplers(1, &sampler.sampler);
+            if (sampler.sampler == 0) {
+                for (const auto& created : layout.staticSamplers) deleteSamplers(1, &created.sampler);
+                return {};
+            }
+            samplerParameteri(sampler.sampler, GL_TEXTURE_MIN_FILTER, source.linearFilter ? GL_LINEAR : GL_NEAREST);
+            samplerParameteri(sampler.sampler, GL_TEXTURE_MAG_FILTER, source.linearFilter ? GL_LINEAR : GL_NEAREST);
+            samplerParameteri(sampler.sampler, GL_TEXTURE_WRAP_S, source.clamp ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+            samplerParameteri(sampler.sampler, GL_TEXTURE_WRAP_T, source.clamp ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+            layout.staticSamplers.push_back(sampler);
+        }
         const uint64_t id = m_nextRhiPipelineLayoutHandle++;
-        m_rhiPipelineLayouts[id] = desc.bindingCount;
+        m_rhiPipelineLayouts[id] = std::move(layout);
         return RhiPipelineLayoutHandle{ id };
     }
 
@@ -1447,6 +1593,28 @@ void main()
             : GL_SHADER_STORAGE_BUFFER;
         view.resourceId = buffer.id;
         m_rhiBufferViews[destination.ptr] = view;
+        return true;
+    }
+
+    bool OpenGLGraphicsDevice::CreateRhiUnorderedAccessView(RhiTextureHandle texture,
+                                                            const RhiTextureViewDesc& desc,
+                                                            RhiCpuDescriptorHandle destination)
+    {
+        const auto it = m_rhiTextures.find(texture.id);
+        if (it == m_rhiTextures.end() || !destination.IsValid() ||
+            desc.dimension != RhiTextureViewDimension::Texture2D ||
+            ToGlInternalFormat(desc.format) == 0) return false;
+        m_rhiTextureViews[destination.ptr] = it->second;
+        m_rhiTextureUavs[destination.ptr] = desc.format;
+        return true;
+    }
+
+    bool OpenGLGraphicsDevice::CreateRhiBufferUnorderedAccessView(RhiBufferHandle buffer,
+                                                                  const RhiBufferViewDesc& desc,
+                                                                  RhiCpuDescriptorHandle destination)
+    {
+        if (!CreateRhiBufferShaderResourceView(buffer, desc, destination)) return false;
+        m_rhiBufferUavs[destination.ptr] = true;
         return true;
     }
 
@@ -1611,10 +1779,20 @@ void main()
             m_rhiBufferSizes.clear();
             m_rhiBufferTargets.clear();
             m_rhiShaders.clear();
+            auto deleteSamplers = LoadGlProc<GlDeleteSamplersFn>("glDeleteSamplers");
+            if (deleteSamplers) {
+                for (const auto& layout : m_rhiPipelineLayouts) {
+                    for (const auto& sampler : layout.second.staticSamplers) {
+                        if (sampler.sampler != 0) deleteSamplers(1, &sampler.sampler);
+                    }
+                }
+            }
             m_rhiPipelineLayouts.clear();
             m_rhiPipelines.clear();
             m_rhiTextureViews.clear();
             m_rhiBufferViews.clear();
+            m_rhiTextureUavs.clear();
+            m_rhiBufferUavs.clear();
             m_nextRhiResourceHandle = 1;
             m_nextRhiDescriptorHandle = 1;
             m_nextRhiShaderHandle = 1;

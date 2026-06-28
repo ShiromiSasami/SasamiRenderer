@@ -1234,6 +1234,11 @@ namespace SasamiRenderer
                 if (layout.descriptorSetLayout != VK_NULL_HANDLE) {
                     vkDestroyDescriptorSetLayout(m_device, layout.descriptorSetLayout, nullptr);
                 }
+                for (VkSampler sampler : layout.immutableSamplers) {
+                    if (sampler != VK_NULL_HANDLE) {
+                        vkDestroySampler(m_device, sampler, nullptr);
+                    }
+                }
             }
             for (auto& entry : m_rhiShaders) {
                 if (entry.second.module != VK_NULL_HANDLE) {

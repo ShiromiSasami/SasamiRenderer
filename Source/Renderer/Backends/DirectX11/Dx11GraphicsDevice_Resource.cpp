@@ -206,18 +206,32 @@ namespace SasamiRenderer
 
     RhiBufferHandle Dx11GraphicsDevice::CreateRhiBuffer(const RhiBufferDesc& desc, const void* initialData)
     {
-        if (!m_device || desc.sizeInBytes == 0) {
+        if (!m_device || desc.sizeInBytes == 0 ||
+            (initialData && desc.memoryUsage == RhiMemoryUsage::GpuToCpu)) {
             return {};
         }
 
         D3D11_BUFFER_DESC bufferDesc{};
         bufferDesc.ByteWidth = static_cast<UINT>(desc.sizeInBytes);
-        bufferDesc.Usage = desc.memoryUsage == RhiMemoryUsage::CpuToGpu ? D3D11_USAGE_DYNAMIC : D3D11_USAGE_DEFAULT;
-        bufferDesc.BindFlags = ToDx11BufferBindFlags(desc.usage);
-        bufferDesc.CPUAccessFlags = desc.memoryUsage == RhiMemoryUsage::CpuToGpu ? D3D11_CPU_ACCESS_WRITE : 0;
-        if (HasFlag(desc.usage, RhiBufferUsageFlags::Structured)) {
+        if (desc.memoryUsage == RhiMemoryUsage::CpuToGpu) {
+            bufferDesc.Usage = D3D11_USAGE_DYNAMIC;
+            bufferDesc.BindFlags = ToDx11BufferBindFlags(desc.usage);
+            bufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        } else if (desc.memoryUsage == RhiMemoryUsage::GpuToCpu) {
+            bufferDesc.Usage = D3D11_USAGE_STAGING;
+            bufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        } else {
+            bufferDesc.Usage = D3D11_USAGE_DEFAULT;
+            bufferDesc.BindFlags = ToDx11BufferBindFlags(desc.usage);
+        }
+        if (desc.memoryUsage != RhiMemoryUsage::GpuToCpu &&
+            HasFlag(desc.usage, RhiBufferUsageFlags::Structured)) {
             bufferDesc.MiscFlags |= D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
             bufferDesc.StructureByteStride = desc.strideInBytes;
+        } else if (desc.memoryUsage != RhiMemoryUsage::GpuToCpu &&
+                   (HasFlag(desc.usage, RhiBufferUsageFlags::ShaderResource) ||
+                    HasFlag(desc.usage, RhiBufferUsageFlags::UnorderedAccess))) {
+            bufferDesc.MiscFlags |= D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
         }
 
         D3D11_SUBRESOURCE_DATA data{};
@@ -269,6 +283,9 @@ namespace SasamiRenderer
             m_context->Unmap(buffer.Get(), 0);
             return true;
         }
+        if (desc.Usage == D3D11_USAGE_STAGING) {
+            return false;
+        }
 
         D3D11_BOX box{};
         box.left = static_cast<UINT>(offsetInBytes);
@@ -281,6 +298,39 @@ namespace SasamiRenderer
         return true;
     }
 
+    bool Dx11GraphicsDevice::ReadRhiBuffer(RhiBufferHandle bufferHandle,
+                                           uint64_t offsetInBytes,
+                                           void* data,
+                                           uint64_t sizeInBytes)
+    {
+        const auto resourceIt = m_rhiResources.find(bufferHandle.id);
+        if (resourceIt == m_rhiResources.end() || !m_context || !data || sizeInBytes == 0) {
+            return false;
+        }
+
+        Microsoft::WRL::ComPtr<ID3D11Buffer> buffer;
+        if (FAILED(resourceIt->second.As(&buffer))) {
+            return false;
+        }
+        D3D11_BUFFER_DESC desc{};
+        buffer->GetDesc(&desc);
+        if (desc.Usage != D3D11_USAGE_STAGING ||
+            (desc.CPUAccessFlags & D3D11_CPU_ACCESS_READ) == 0 ||
+            offsetInBytes >= desc.ByteWidth || sizeInBytes > desc.ByteWidth - offsetInBytes) {
+            return false;
+        }
+
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (FAILED(m_context->Map(buffer.Get(), 0, D3D11_MAP_READ, 0, &mapped)) || !mapped.pData) {
+            return false;
+        }
+        std::memcpy(data,
+                    static_cast<const uint8_t*>(mapped.pData) + offsetInBytes,
+                    static_cast<size_t>(sizeInBytes));
+        m_context->Unmap(buffer.Get(), 0);
+        return true;
+    }
+
     bool Dx11GraphicsDevice::DestroyRhiResource(RhiResourceHandle resource)
     {
         if (!resource.IsValid() || m_rhiResources.find(resource.id) == m_rhiResources.end()) {
@@ -290,6 +340,7 @@ namespace SasamiRenderer
         for (auto it = m_rhiViewResources.begin(); it != m_rhiViewResources.end();) {
             if (it->second == resource.id) {
                 m_rhiSrvs.erase(it->first);
+                m_rhiUavs.erase(it->first);
                 m_rhiRtvs.erase(it->first);
                 m_rhiDsvs.erase(it->first);
                 it = m_rhiViewResources.erase(it);
@@ -319,8 +370,27 @@ namespace SasamiRenderer
 
     RhiPipelineLayoutHandle Dx11GraphicsDevice::CreateRhiPipelineLayout(const RhiPipelineLayoutDesc& desc)
     {
+        if (!m_device || (desc.staticSamplerCount > 0 && !desc.staticSamplers)) return {};
+        RhiPipelineLayoutState layout{};
+        layout.bindingCount = desc.bindingCount;
+        layout.staticSamplers.reserve(desc.staticSamplerCount);
+        for (uint32_t i = 0; i < desc.staticSamplerCount; ++i) {
+            const auto& source = desc.staticSamplers[i];
+            if (source.registerSpace != 0 || source.shaderRegister >= D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT) return {};
+            D3D11_SAMPLER_DESC samplerDesc{};
+            samplerDesc.Filter = source.linearFilter ? D3D11_FILTER_MIN_MAG_MIP_LINEAR : D3D11_FILTER_MIN_MAG_MIP_POINT;
+            samplerDesc.AddressU = source.clamp ? D3D11_TEXTURE_ADDRESS_CLAMP : D3D11_TEXTURE_ADDRESS_WRAP;
+            samplerDesc.AddressV = samplerDesc.AddressU;
+            samplerDesc.AddressW = samplerDesc.AddressU;
+            samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+            RhiPipelineLayoutState::StaticSampler sampler{};
+            sampler.visibility = source.visibility;
+            sampler.shaderRegister = source.shaderRegister;
+            if (FAILED(m_device->CreateSamplerState(&samplerDesc, sampler.state.GetAddressOf()))) return {};
+            layout.staticSamplers.push_back(std::move(sampler));
+        }
         const uint64_t id = m_nextRhiPipelineLayoutHandle++;
-        m_rhiPipelineLayouts.emplace(id, desc.bindingCount);
+        m_rhiPipelineLayouts.emplace(id, std::move(layout));
         return RhiPipelineLayoutHandle{ id };
     }
 
@@ -556,6 +626,56 @@ namespace SasamiRenderer
             return false;
         }
         m_rhiSrvs[destination.ptr] = view;
+        m_rhiViewResources[destination.ptr] = bufferHandle.id;
+        return true;
+    }
+
+    bool Dx11GraphicsDevice::CreateRhiUnorderedAccessView(RhiTextureHandle texture,
+                                                          const RhiTextureViewDesc& desc,
+                                                          RhiCpuDescriptorHandle destination)
+    {
+        const auto it = m_rhiResources.find(texture.id);
+        if (it == m_rhiResources.end() || !destination.IsValid()) return false;
+        D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+        uavDesc.Format = ToDx11Format(desc.format);
+        if (desc.dimension == RhiTextureViewDimension::Texture2DArray) {
+            uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2DARRAY;
+            uavDesc.Texture2DArray.MipSlice = desc.baseMipLevel;
+            uavDesc.Texture2DArray.FirstArraySlice = desc.baseArrayLayer;
+            uavDesc.Texture2DArray.ArraySize = desc.arrayLayerCount;
+        } else if (desc.dimension == RhiTextureViewDimension::Texture2D) {
+            uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+            uavDesc.Texture2D.MipSlice = desc.baseMipLevel;
+        } else return false;
+        Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> view;
+        if (FAILED(m_device->CreateUnorderedAccessView(it->second.Get(), &uavDesc, view.GetAddressOf()))) return false;
+        m_rhiUavs[destination.ptr] = view;
+        m_rhiViewResources[destination.ptr] = texture.id;
+        return true;
+    }
+
+    bool Dx11GraphicsDevice::CreateRhiBufferUnorderedAccessView(RhiBufferHandle bufferHandle,
+                                                                const RhiBufferViewDesc& desc,
+                                                                RhiCpuDescriptorHandle destination)
+    {
+        const auto it = m_rhiResources.find(bufferHandle.id);
+        if (it == m_rhiResources.end() || !destination.IsValid() || desc.type == RhiBufferViewType::Constant) return false;
+        Microsoft::WRL::ComPtr<ID3D11Buffer> buffer;
+        if (FAILED(it->second.As(&buffer))) return false;
+        D3D11_BUFFER_DESC bufferDesc{}; buffer->GetDesc(&bufferDesc);
+        uint32_t elementSize = desc.type == RhiBufferViewType::Raw ? 4u : desc.strideInBytes;
+        const uint64_t viewSize = desc.sizeInBytes == 0 && desc.offset < bufferDesc.ByteWidth ? bufferDesc.ByteWidth - desc.offset : desc.sizeInBytes;
+        if (!elementSize || desc.offset >= bufferDesc.ByteWidth || !viewSize || viewSize > bufferDesc.ByteWidth - desc.offset || desc.offset % elementSize || viewSize % elementSize) return false;
+        D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+        uavDesc.Format = desc.type == RhiBufferViewType::Raw ? DXGI_FORMAT_R32_TYPELESS :
+            (desc.type == RhiBufferViewType::Structured ? DXGI_FORMAT_UNKNOWN : ToDx11Format(desc.format));
+        uavDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+        uavDesc.Buffer.FirstElement = static_cast<UINT>(desc.offset / elementSize);
+        uavDesc.Buffer.NumElements = static_cast<UINT>(viewSize / elementSize);
+        if (desc.type == RhiBufferViewType::Raw) uavDesc.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW;
+        Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> view;
+        if (FAILED(m_device->CreateUnorderedAccessView(buffer.Get(), &uavDesc, view.GetAddressOf()))) return false;
+        m_rhiUavs[destination.ptr] = view;
         m_rhiViewResources[destination.ptr] = bufferHandle.id;
         return true;
     }

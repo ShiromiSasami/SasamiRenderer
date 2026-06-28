@@ -403,6 +403,34 @@ float4 PSMain(PSInput input) : SV_TARGET
 
         RhiQueueType QueueType() const { return m_queueType; }
 
+        void SetGraphicsPipelineLayout(RhiPipelineLayoutHandle handle) override
+        {
+            const auto it = m_device.m_rhiPipelineLayouts.find(handle.id);
+            if (!m_device.m_context || it == m_device.m_rhiPipelineLayouts.end()) return;
+            for (const auto& sampler : it->second.staticSamplers) {
+                ID3D11SamplerState* state = sampler.state.Get();
+                const uint32_t flags = static_cast<uint32_t>(sampler.visibility);
+                if (flags & static_cast<uint32_t>(RhiShaderStageFlags::Vertex)) m_device.m_context->VSSetSamplers(sampler.shaderRegister, 1, &state);
+                if (flags & static_cast<uint32_t>(RhiShaderStageFlags::Hull)) m_device.m_context->HSSetSamplers(sampler.shaderRegister, 1, &state);
+                if (flags & static_cast<uint32_t>(RhiShaderStageFlags::Domain)) m_device.m_context->DSSetSamplers(sampler.shaderRegister, 1, &state);
+                if (flags & static_cast<uint32_t>(RhiShaderStageFlags::Geometry)) m_device.m_context->GSSetSamplers(sampler.shaderRegister, 1, &state);
+                if (flags & static_cast<uint32_t>(RhiShaderStageFlags::Pixel)) m_device.m_context->PSSetSamplers(sampler.shaderRegister, 1, &state);
+            }
+        }
+
+        void SetComputePipelineLayout(RhiPipelineLayoutHandle handle) override
+        {
+            const auto it = m_device.m_rhiPipelineLayouts.find(handle.id);
+            if (!m_device.m_context || it == m_device.m_rhiPipelineLayouts.end()) return;
+            for (const auto& sampler : it->second.staticSamplers) {
+                const uint32_t flags = static_cast<uint32_t>(sampler.visibility);
+                if (flags & static_cast<uint32_t>(RhiShaderStageFlags::Compute)) {
+                    ID3D11SamplerState* state = sampler.state.Get();
+                    m_device.m_context->CSSetSamplers(sampler.shaderRegister, 1, &state);
+                }
+            }
+        }
+
         void BeginRenderPass(const RhiRenderPassDesc& desc) override
         {
             if (!m_device.m_device || !m_device.m_context) {
@@ -585,6 +613,13 @@ float4 PSMain(PSInput input) : SV_TARGET
             if (srvIt != m_device.m_rhiSrvs.end()) {
                 ID3D11ShaderResourceView* srv = srvIt->second.Get();
                 m_device.m_context->CSSetShaderResources(slot, 1, &srv);
+                return;
+            }
+            const auto uavIt = m_device.m_rhiUavs.find(table.ptr);
+            if (uavIt != m_device.m_rhiUavs.end()) {
+                ID3D11UnorderedAccessView* uav = uavIt->second.Get();
+                const UINT initialCount = UINT_MAX;
+                m_device.m_context->CSSetUnorderedAccessViews(slot, 1, &uav, &initialCount);
             }
         }
 
@@ -741,6 +776,36 @@ float4 PSMain(PSInput input) : SV_TARGET
                                                      binding.is32Bit ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT,
                                                      static_cast<UINT>(binding.offsetInBytes));
             }
+        }
+
+        void CopyBuffer(const RhiBufferCopyDesc& copy) override
+        {
+            if (!m_device.m_context || copy.sizeInBytes == 0 ||
+                copy.sourceOffsetInBytes > UINT_MAX ||
+                copy.destinationOffsetInBytes > UINT_MAX ||
+                copy.sizeInBytes > UINT_MAX) {
+                return;
+            }
+            const auto sourceIt = m_device.m_rhiResources.find(copy.source.id);
+            const auto destinationIt = m_device.m_rhiResources.find(copy.destination.id);
+            if (sourceIt == m_device.m_rhiResources.end() || destinationIt == m_device.m_rhiResources.end()) {
+                return;
+            }
+            D3D11_BOX sourceBox{};
+            sourceBox.left = static_cast<UINT>(copy.sourceOffsetInBytes);
+            sourceBox.right = static_cast<UINT>(copy.sourceOffsetInBytes + copy.sizeInBytes);
+            sourceBox.top = 0;
+            sourceBox.bottom = 1;
+            sourceBox.front = 0;
+            sourceBox.back = 1;
+            m_device.m_context->CopySubresourceRegion(destinationIt->second.Get(),
+                                                      0,
+                                                      static_cast<UINT>(copy.destinationOffsetInBytes),
+                                                      0,
+                                                      0,
+                                                      sourceIt->second.Get(),
+                                                      0,
+                                                      &sourceBox);
         }
 
     private:

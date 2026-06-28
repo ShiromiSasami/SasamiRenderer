@@ -45,6 +45,10 @@ namespace SasamiRenderer
                              uint64_t offsetInBytes,
                              const void* data,
                              uint64_t sizeInBytes) override;
+        bool ReadRhiBuffer(RhiBufferHandle buffer,
+                           uint64_t offsetInBytes,
+                           void* data,
+                           uint64_t sizeInBytes) override;
         bool DestroyRhiResource(RhiResourceHandle resource) override;
         RhiShaderHandle CreateRhiShaderModule(const RhiShaderModuleDesc& desc) override;
         RhiPipelineLayoutHandle CreateRhiPipelineLayout(const RhiPipelineLayoutDesc& desc) override;
@@ -59,6 +63,12 @@ namespace SasamiRenderer
         bool CreateRhiBufferShaderResourceView(RhiBufferHandle buffer,
                                                const RhiBufferViewDesc& desc,
                                                RhiCpuDescriptorHandle destination) override;
+        bool CreateRhiUnorderedAccessView(RhiTextureHandle texture,
+                                          const RhiTextureViewDesc& desc,
+                                          RhiCpuDescriptorHandle destination) override;
+        bool CreateRhiBufferUnorderedAccessView(RhiBufferHandle buffer,
+                                                const RhiBufferViewDesc& desc,
+                                                RhiCpuDescriptorHandle destination) override;
         bool CreateRhiRenderTargetView(RhiTextureHandle texture,
                                        const RhiRenderTargetViewDesc& desc,
                                        RhiCpuDescriptorHandle destination) override;
@@ -114,6 +124,18 @@ namespace SasamiRenderer
             D3D11_PRIMITIVE_TOPOLOGY topology = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
         };
 
+        struct RhiPipelineLayoutState
+        {
+            struct StaticSampler
+            {
+                Microsoft::WRL::ComPtr<ID3D11SamplerState> state;
+                RhiShaderStageFlags visibility = RhiShaderStageFlags::None;
+                uint32_t shaderRegister = 0;
+            };
+            uint32_t bindingCount = 0;
+            std::vector<StaticSampler> staticSamplers;
+        };
+
         void Cleanup();
         bool CreateBackBufferView();
         bool EnsureRayMarchResources();
@@ -151,9 +173,10 @@ namespace SasamiRenderer
         uint64_t m_nextRhiPipelineHandle = 1;
         std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID3D11Resource>> m_rhiResources;
         std::unordered_map<uint64_t, RhiShaderModule> m_rhiShaders;
-        std::unordered_map<uint64_t, uint32_t> m_rhiPipelineLayouts;
+        std::unordered_map<uint64_t, RhiPipelineLayoutState> m_rhiPipelineLayouts;
         std::unordered_map<uint64_t, RhiPipelineStateObjects> m_rhiPipelines;
         std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>> m_rhiSrvs;
+        std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView>> m_rhiUavs;
         std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID3D11RenderTargetView>> m_rhiRtvs;
         std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID3D11DepthStencilView>> m_rhiDsvs;
         std::unordered_map<uint64_t, uint64_t> m_rhiViewResources;

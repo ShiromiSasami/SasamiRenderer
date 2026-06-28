@@ -183,17 +183,6 @@ namespace SasamiRenderer
             return result != 0 ? result : VK_SHADER_STAGE_ALL;
         }
 
-        VkDescriptorType ToVkDescriptorType(RhiBindingType type)
-        {
-            switch (type) {
-            case RhiBindingType::ConstantBuffer: return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            case RhiBindingType::UnorderedAccess: return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            case RhiBindingType::Sampler: return VK_DESCRIPTOR_TYPE_SAMPLER;
-            case RhiBindingType::ShaderResource:
-            default: return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-            }
-        }
-
         VkPrimitiveTopology ToVkTopology(RhiPrimitiveTopology topology)
         {
             switch (topology) {
@@ -364,12 +353,34 @@ namespace SasamiRenderer
             }
 
             std::vector<VkImageMemoryBarrier> imageBarriers;
+            std::vector<VkBufferMemoryBarrier> bufferBarriers;
             imageBarriers.reserve(count);
+            bufferBarriers.reserve(count);
             VkPipelineStageFlags srcStages = 0;
             VkPipelineStageFlags dstStages = 0;
             for (uint32_t i = 0; i < count; ++i) {
                 const auto resourceIt = m_device.m_rhiResources.find(transitions[i].resource.id);
-                if (resourceIt == m_device.m_rhiResources.end() || resourceIt->second.image == VK_NULL_HANDLE) {
+                if (resourceIt == m_device.m_rhiResources.end()) {
+                    continue;
+                }
+
+                const auto& resource = resourceIt->second;
+                srcStages |= ToVkPipelineStage(transitions[i].before);
+                dstStages |= ToVkPipelineStage(transitions[i].after);
+                if (resource.buffer != VK_NULL_HANDLE) {
+                    VkBufferMemoryBarrier barrier{};
+                    barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+                    barrier.srcAccessMask = ToVkAccessFlags(transitions[i].before);
+                    barrier.dstAccessMask = ToVkAccessFlags(transitions[i].after);
+                    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                    barrier.buffer = resource.buffer;
+                    barrier.offset = 0;
+                    barrier.size = resource.sizeInBytes;
+                    bufferBarriers.push_back(barrier);
+                    continue;
+                }
+                if (resource.image == VK_NULL_HANDLE) {
                     continue;
                 }
 
@@ -381,31 +392,26 @@ namespace SasamiRenderer
                 barrier.newLayout = ToVkImageLayout(transitions[i].after);
                 barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                 barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                barrier.image = resourceIt->second.image;
-                barrier.subresourceRange.aspectMask =
-                    transitions[i].after == RhiResourceState::DepthWrite || transitions[i].after == RhiResourceState::DepthRead
-                        ? VK_IMAGE_ASPECT_DEPTH_BIT
-                        : VK_IMAGE_ASPECT_COLOR_BIT;
+                barrier.image = resource.image;
+                barrier.subresourceRange.aspectMask = ToVkAspectMask(resource.format);
                 barrier.subresourceRange.baseMipLevel = 0;
                 barrier.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS;
                 barrier.subresourceRange.baseArrayLayer = 0;
                 barrier.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
                 imageBarriers.push_back(barrier);
-                srcStages |= ToVkPipelineStage(transitions[i].before);
-                dstStages |= ToVkPipelineStage(transitions[i].after);
             }
 
-            if (!imageBarriers.empty()) {
+            if (!imageBarriers.empty() || !bufferBarriers.empty()) {
                 vkCmdPipelineBarrier(m_commandBuffer,
                                      srcStages ? srcStages : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                                      dstStages ? dstStages : VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
                                      0,
                                      0,
                                      nullptr,
-                                     0,
-                                     nullptr,
+                                     static_cast<uint32_t>(bufferBarriers.size()),
+                                     bufferBarriers.empty() ? nullptr : bufferBarriers.data(),
                                      static_cast<uint32_t>(imageBarriers.size()),
-                                     imageBarriers.data());
+                                     imageBarriers.empty() ? nullptr : imageBarriers.data());
             }
         }
 
@@ -761,6 +767,32 @@ namespace SasamiRenderer
                                      binding.offsetInBytes,
                                      binding.is32Bit ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
             }
+        }
+
+        void CopyBuffer(const RhiBufferCopyDesc& copy) override
+        {
+            if (!IsValid() || copy.sizeInBytes == 0) {
+                return;
+            }
+            const auto sourceIt = m_device.m_rhiResources.find(copy.source.id);
+            const auto destinationIt = m_device.m_rhiResources.find(copy.destination.id);
+            if (sourceIt == m_device.m_rhiResources.end() || destinationIt == m_device.m_rhiResources.end() ||
+                sourceIt->second.buffer == VK_NULL_HANDLE || destinationIt->second.buffer == VK_NULL_HANDLE ||
+                copy.sourceOffsetInBytes >= sourceIt->second.sizeInBytes ||
+                copy.sizeInBytes > sourceIt->second.sizeInBytes - copy.sourceOffsetInBytes ||
+                copy.destinationOffsetInBytes >= destinationIt->second.sizeInBytes ||
+                copy.sizeInBytes > destinationIt->second.sizeInBytes - copy.destinationOffsetInBytes) {
+                return;
+            }
+            VkBufferCopy region{};
+            region.srcOffset = copy.sourceOffsetInBytes;
+            region.dstOffset = copy.destinationOffsetInBytes;
+            region.size = copy.sizeInBytes;
+            vkCmdCopyBuffer(m_commandBuffer,
+                            sourceIt->second.buffer,
+                            destinationIt->second.buffer,
+                            1,
+                            &region);
         }
 
     private:

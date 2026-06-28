@@ -45,6 +45,10 @@ namespace SasamiRenderer
                              uint64_t offsetInBytes,
                              const void* data,
                              uint64_t sizeInBytes) override;
+        bool ReadRhiBuffer(RhiBufferHandle buffer,
+                           uint64_t offsetInBytes,
+                           void* data,
+                           uint64_t sizeInBytes) override;
         bool DestroyRhiResource(RhiResourceHandle resource) override;
         RhiShaderHandle CreateRhiShaderModule(const RhiShaderModuleDesc& desc) override;
         RhiPipelineLayoutHandle CreateRhiPipelineLayout(const RhiPipelineLayoutDesc& desc) override;
@@ -59,6 +63,12 @@ namespace SasamiRenderer
         bool CreateRhiBufferShaderResourceView(RhiBufferHandle buffer,
                                                const RhiBufferViewDesc& desc,
                                                RhiCpuDescriptorHandle destination) override;
+        bool CreateRhiUnorderedAccessView(RhiTextureHandle texture,
+                                          const RhiTextureViewDesc& desc,
+                                          RhiCpuDescriptorHandle destination) override;
+        bool CreateRhiBufferUnorderedAccessView(RhiBufferHandle buffer,
+                                                const RhiBufferViewDesc& desc,
+                                                RhiCpuDescriptorHandle destination) override;
         bool CreateRhiRenderTargetView(RhiTextureHandle texture,
                                        const RhiRenderTargetViewDesc& desc,
                                        RhiCpuDescriptorHandle destination) override;
