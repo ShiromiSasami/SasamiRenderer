@@ -62,13 +62,15 @@ MSBuild 側の `ShaderSourceRoot` も `$(ProjectDir)Shaders` を参照します�
 | Backend | Status |
 | --- | --- |
 | DirectX 12 | 主実装。feature render path、RenderGraph、GBuffer、PBR、SSR、SWRT、DXR 周辺を検証対象にしています。RHI 抽象化層 (BLAS/TLAS ビルド、RT パイプライン、SBT) の DX12 実装完了。 |
-| Vulkan | native fallback path。clear/present、static mesh、D32 depth test、swapchain resize、RGBA8 texture upload、ray march (`RayMarchApp`) を実装済み。RHI ray tracing API はスタブのみ (VK_KHR_ray_tracing_pipeline 未実装)。DX12 feature path と同等ではありません。 |
-| DirectX 11 | native fallback path。clear/present、static mesh、depth test、swapchain resize、RGBA8 texture upload、ray march (`RayMarchApp`) を実装済み。DX12 feature path と同等ではありません。 |
-| OpenGL | native fallback path。clear/present、static mesh、depth test、window resize、albedo texture sampling、ray march (`RayMarchApp`) を実装済み。DX12 feature path と同等ではありません。 |
+| Vulkan | native fallback path。clear/present、static mesh、D32 depth test、swapchain resize、RGBA8 texture upload、ray march (`RayMarchApp`)、compute dispatch を実装済み。拡張機能はランタイムで検出 (VK_KHR_dynamic_rendering / descriptor_indexing / timeline_semaphore / ray_query / ray_tracing_pipeline / acceleration_structure)。BLAS/TLAS ビルド (BuildRhiBlases / BuildRhiTlas) を VK_KHR_acceleration_structure で実装済み。RT パイプライン作成 (CreateRhiRayTracingPipeline) は DXIL→SPIR-V 変換未対応のためスタブ。DX12 feature path と同等ではありません。 |
+| DirectX 11 | native fallback path。clear/present、static mesh、depth test、swapchain resize、RGBA8 texture upload、ray march (`RayMarchApp`)、compute dispatch を実装済み。DX12 feature path と同等ではありません。 |
+| OpenGL | native fallback path。clear/present、static mesh、depth test、window resize、albedo texture sampling、ray march (`RayMarchApp`)、compute dispatch を実装済み。DX12 feature path と同等ではありません。 |
 
 Vulkan / DirectX 11 / OpenGL が灰色画面になる場合は、native fallback の mesh draw 入力、shader compile、vertex/index buffer binding、RHI 実装の順で確認してください。これらのバックエンドは DX12 feature pass ベースの RenderGraph には未対応です。
 
 RayMarch バックエンド対応について: Vulkan は DXC で HLSL を SPIR-V にコンパイルして `RayMarch_VS/PS.hlsl` を再利用します。OpenGL は GLSL 330 core で同等のシェーダーをインライン実装しています。いずれも `RhiBackendRayMarchFrameDesc` 経由で `ExecuteBackendFrame` から呼び出されます。
+
+Vulkan RT インフラについて: GPU が RT 拡張機能をサポートしている場合、`GetCapabilities().supportsHardwareRayTracing`/`supportsRayQuery` が true になります。BLAS/TLAS の構築 API は動作しますが、RT パイプライン (`CreateRhiRayTracingPipeline`) は現在の RHI インターフェースが DXIL バイトコードを期待するため未実装です。将来 SPIR-V シェーダーパスを追加することで完全なVulkan RT が可能になります。
 
 ## Render Pipeline
 
