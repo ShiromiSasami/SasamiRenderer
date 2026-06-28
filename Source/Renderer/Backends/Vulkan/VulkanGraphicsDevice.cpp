@@ -1335,6 +1335,23 @@ namespace SasamiRenderer
 
             if (foundGraphics && foundPresent && foundCompute) {
                 m_physicalDevice = device;
+
+                // Detect optional extensions for capabilities
+                m_hasVkKhrDynamicRendering   = HasExtension(extensions, "VK_KHR_dynamic_rendering");
+                m_hasVkExtDescriptorIndexing = HasExtension(extensions, "VK_EXT_descriptor_indexing");
+                m_hasVkKhrTimelineSemaphore  = HasExtension(extensions, "VK_KHR_timeline_semaphore");
+                m_hasVkKhrBufferDeviceAddress = HasExtension(extensions, "VK_KHR_buffer_device_address");
+                m_hasVkKhrDeferredHostOps    = HasExtension(extensions, "VK_KHR_deferred_host_operations");
+                m_hasVkKhrAccelerationStructure = HasExtension(extensions, "VK_KHR_acceleration_structure")
+                    && m_hasVkKhrBufferDeviceAddress
+                    && m_hasVkExtDescriptorIndexing
+                    && m_hasVkKhrDeferredHostOps;
+                m_hasVkKhrRayTracingPipeline = m_hasVkKhrAccelerationStructure
+                    && HasExtension(extensions, "VK_KHR_ray_tracing_pipeline")
+                    && HasExtension(extensions, "VK_KHR_spirv_1_4");
+                m_hasVkKhrRayQuery           = m_hasVkKhrAccelerationStructure
+                    && HasExtension(extensions, "VK_KHR_ray_query");
+
                 return true;
             }
         }
@@ -1361,13 +1378,59 @@ namespace SasamiRenderer
             queues.push_back(queueInfo);
         }
 
-        const std::array<const char*, 1> extensions = {
-            VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-        };
+        std::vector<const char*> extensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+
+        if (m_hasVkKhrDynamicRendering)      extensions.push_back("VK_KHR_dynamic_rendering");
+        if (m_hasVkExtDescriptorIndexing)    extensions.push_back("VK_EXT_descriptor_indexing");
+        if (m_hasVkKhrTimelineSemaphore)     extensions.push_back("VK_KHR_timeline_semaphore");
+        if (m_hasVkKhrBufferDeviceAddress)   extensions.push_back("VK_KHR_buffer_device_address");
+        if (m_hasVkKhrDeferredHostOps)       extensions.push_back("VK_KHR_deferred_host_operations");
+        if (m_hasVkKhrAccelerationStructure) extensions.push_back("VK_KHR_acceleration_structure");
+        if (m_hasVkKhrRayTracingPipeline) {
+            extensions.push_back("VK_KHR_ray_tracing_pipeline");
+            extensions.push_back("VK_KHR_spirv_1_4");
+        }
+        if (m_hasVkKhrRayQuery) extensions.push_back("VK_KHR_ray_query");
+
+        // Build pNext chain for optional device features
+        void* featureChainHead = nullptr;
+
+        VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures{};
+        if (m_hasVkKhrRayQuery) {
+            rayQueryFeatures.sType    = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+            rayQueryFeatures.rayQuery = VK_TRUE;
+            rayQueryFeatures.pNext    = featureChainHead;
+            featureChainHead          = &rayQueryFeatures;
+        }
+
+        VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{};
+        if (m_hasVkKhrRayTracingPipeline) {
+            rtPipelineFeatures.sType              = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+            rtPipelineFeatures.rayTracingPipeline = VK_TRUE;
+            rtPipelineFeatures.pNext              = featureChainHead;
+            featureChainHead                      = &rtPipelineFeatures;
+        }
+
+        VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeatures{};
+        if (m_hasVkKhrAccelerationStructure) {
+            asFeatures.sType                 = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+            asFeatures.accelerationStructure = VK_TRUE;
+            asFeatures.pNext                 = featureChainHead;
+            featureChainHead                 = &asFeatures;
+        }
+
+        VkPhysicalDeviceBufferDeviceAddressFeaturesKHR bufAddrFeatures{};
+        if (m_hasVkKhrBufferDeviceAddress) {
+            bufAddrFeatures.sType               = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_KHR;
+            bufAddrFeatures.bufferDeviceAddress = VK_TRUE;
+            bufAddrFeatures.pNext               = featureChainHead;
+            featureChainHead                    = &bufAddrFeatures;
+        }
 
         VkPhysicalDeviceFeatures features{};
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        createInfo.pNext = featureChainHead;
         createInfo.queueCreateInfoCount = static_cast<uint32_t>(queues.size());
         createInfo.pQueueCreateInfos = queues.data();
         createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
@@ -1378,6 +1441,32 @@ namespace SasamiRenderer
         if (result != VK_SUCCESS) {
             DebugLog("VulkanGraphicsDevice::CreateDevice: vkCreateDevice failed.\n");
             return false;
+        }
+
+        // Load RT function pointers if extensions are available
+        if (m_hasVkKhrBufferDeviceAddress) {
+            m_pfnGetBufAddr = reinterpret_cast<PFN_vkGetBufferDeviceAddressKHR>(
+                vkGetDeviceProcAddr(m_device, "vkGetBufferDeviceAddressKHR"));
+        }
+        if (m_hasVkKhrAccelerationStructure) {
+            m_pfnGetAsBuildSizes = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(
+                vkGetDeviceProcAddr(m_device, "vkGetAccelerationStructureBuildSizesKHR"));
+            m_pfnCreateAs = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(
+                vkGetDeviceProcAddr(m_device, "vkCreateAccelerationStructureKHR"));
+            m_pfnDestroyAs = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
+                vkGetDeviceProcAddr(m_device, "vkDestroyAccelerationStructureKHR"));
+            m_pfnCmdBuildAs = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(
+                vkGetDeviceProcAddr(m_device, "vkCmdBuildAccelerationStructuresKHR"));
+            m_pfnGetAsAddress = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
+                vkGetDeviceProcAddr(m_device, "vkGetAccelerationStructureDeviceAddressKHR"));
+        }
+        if (m_hasVkKhrRayTracingPipeline) {
+            m_pfnCreateRtPipeline = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(
+                vkGetDeviceProcAddr(m_device, "vkCreateRayTracingPipelinesKHR"));
+            m_pfnGetRtHandles = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(
+                vkGetDeviceProcAddr(m_device, "vkGetRayTracingShaderGroupHandlesKHR"));
+            m_pfnCmdTraceRays = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(
+                vkGetDeviceProcAddr(m_device, "vkCmdTraceRaysKHR"));
         }
 
         vkGetDeviceQueue(m_device, m_graphicsQueueFamily, 0, &m_graphicsQueue);
@@ -1584,15 +1673,14 @@ namespace SasamiRenderer
         m_capabilities.supportsRhiPipelineCreation = true;
         m_capabilities.supportsRhiCommandEncoding = true;
 
-        // Optional Vulkan features are reported only after their device
-        // extensions and feature chains are enabled in CreateDevice().
-        m_capabilities.supportsDynamicRenderPass = false;
-        m_capabilities.supportsVulkanDynamicRendering = false;
-        m_capabilities.supportsRayQuery = false;
-        m_capabilities.supportsRayTracingPipeline = false;
-        m_capabilities.supportsHardwareRayTracing = false;
-        m_capabilities.supportsDescriptorIndexing = false;
-        m_capabilities.supportsTimelineSemaphore = false;
+        // Optional Vulkan features — set from detected extensions
+        m_capabilities.supportsVulkanDynamicRendering = m_hasVkKhrDynamicRendering;
+        m_capabilities.supportsDynamicRenderPass      = m_hasVkKhrDynamicRendering;
+        m_capabilities.supportsDescriptorIndexing     = m_hasVkExtDescriptorIndexing;
+        m_capabilities.supportsTimelineSemaphore      = m_hasVkKhrTimelineSemaphore;
+        m_capabilities.supportsHardwareRayTracing     = m_hasVkKhrAccelerationStructure;
+        m_capabilities.supportsRayTracingPipeline     = m_hasVkKhrRayTracingPipeline;
+        m_capabilities.supportsRayQuery               = m_hasVkKhrRayQuery;
         m_capabilities.supportsMeshShaders = false;
     }
 

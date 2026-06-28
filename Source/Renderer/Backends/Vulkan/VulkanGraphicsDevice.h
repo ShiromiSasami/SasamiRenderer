@@ -187,12 +187,13 @@ namespace SasamiRenderer
 
         struct VulkanRhiDescriptor
         {
-            VkDescriptorType type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
-            VkImageView imageView = VK_NULL_HANDLE;
-            VkBuffer buffer = VK_NULL_HANDLE;
-            VkDeviceSize offset = 0;
-            VkDeviceSize range = 0;
-            uint64_t resourceId = 0;
+            VkDescriptorType           type                = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+            VkImageView                imageView           = VK_NULL_HANDLE;
+            VkBuffer                   buffer              = VK_NULL_HANDLE;
+            VkDeviceSize               offset              = 0;
+            VkDeviceSize               range               = 0;
+            uint64_t                   resourceId          = 0;
+            VkAccelerationStructureKHR accelerationStructure = VK_NULL_HANDLE;
         };
 
         VkInstance m_instance = VK_NULL_HANDLE;
@@ -218,6 +219,28 @@ namespace SasamiRenderer
         UINT m_presentQueueFamily = 0;
         UINT m_currentFrame = 0;
         bool m_hasDedicatedComputeQueue = false;
+
+        // Optional extension availability (detected at PickPhysicalDevice)
+        bool m_hasVkKhrDynamicRendering      = false;
+        bool m_hasVkExtDescriptorIndexing    = false;
+        bool m_hasVkKhrTimelineSemaphore     = false;
+        bool m_hasVkKhrAccelerationStructure = false;
+        bool m_hasVkKhrRayTracingPipeline    = false;
+        bool m_hasVkKhrRayQuery              = false;
+        bool m_hasVkKhrBufferDeviceAddress   = false;
+        bool m_hasVkKhrDeferredHostOps       = false;
+
+        // RT function pointers (loaded after vkCreateDevice when extensions are available)
+        PFN_vkGetAccelerationStructureBuildSizesKHR    m_pfnGetAsBuildSizes  = nullptr;
+        PFN_vkCreateAccelerationStructureKHR           m_pfnCreateAs         = nullptr;
+        PFN_vkDestroyAccelerationStructureKHR          m_pfnDestroyAs        = nullptr;
+        PFN_vkCmdBuildAccelerationStructuresKHR        m_pfnCmdBuildAs       = nullptr;
+        PFN_vkGetAccelerationStructureDeviceAddressKHR m_pfnGetAsAddress     = nullptr;
+        PFN_vkCreateRayTracingPipelinesKHR             m_pfnCreateRtPipeline = nullptr;
+        PFN_vkGetRayTracingShaderGroupHandlesKHR       m_pfnGetRtHandles     = nullptr;
+        PFN_vkCmdTraceRaysKHR                          m_pfnCmdTraceRays     = nullptr;
+        PFN_vkGetBufferDeviceAddressKHR                m_pfnGetBufAddr       = nullptr;
+
         RhiBackendCapabilities m_capabilities{};
         CommandQueue m_emptyGraphicsQueue;
         CommandQueue m_emptyComputeQueue;
@@ -231,6 +254,14 @@ namespace SasamiRenderer
         std::unordered_map<uint64_t, VulkanRhiShader> m_rhiShaders;
         std::unordered_map<uint64_t, VulkanRhiPipelineLayout> m_rhiPipelineLayouts;
         std::unordered_map<uint64_t, VulkanRhiPipeline> m_rhiPipelines;
+        struct VulkanAccelStruct {
+            VkAccelerationStructureKHR as            = VK_NULL_HANDLE;
+            VkBuffer                   buffer        = VK_NULL_HANDLE;
+            VkDeviceMemory             memory        = VK_NULL_HANDLE;
+            VkDeviceAddress            deviceAddress = 0;
+        };
+        std::unordered_map<uint64_t, VulkanAccelStruct> m_accelStructures;
+
         std::unordered_map<uint64_t, VkImageView> m_rhiImageViews;
         std::unordered_map<uint64_t, uint64_t> m_rhiImageViewResources;
         std::unordered_map<uint64_t, VulkanRhiDescriptor> m_rhiDescriptors;

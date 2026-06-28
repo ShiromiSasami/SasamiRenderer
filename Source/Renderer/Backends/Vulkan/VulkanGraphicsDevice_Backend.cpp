@@ -839,9 +839,15 @@ namespace SasamiRenderer
             std::vector<VkWriteDescriptorSet> writes;
             std::vector<VkDescriptorImageInfo> imageInfos;
             std::vector<VkDescriptorBufferInfo> bufferInfos;
+            // AS write infos and handles must stay alive until vkUpdateDescriptorSets.
+            // Reserve up front to prevent reallocation (which would invalidate pNext pointers).
+            std::vector<VkWriteDescriptorSetAccelerationStructureKHR> asWriteInfos;
+            std::vector<VkAccelerationStructureKHR> asHandles;
             writes.reserve(state.tables.size());
             imageInfos.reserve(descriptorCount);
             bufferInfos.reserve(descriptorCount);
+            asWriteInfos.reserve(descriptorCount);
+            asHandles.reserve(descriptorCount);
 
             for (const auto& table : state.tables) {
                 if (table.first >= layout.bindings.size()) {
@@ -870,6 +876,11 @@ namespace SasamiRenderer
                             ? VK_IMAGE_LAYOUT_GENERAL
                             : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
                         imageInfos.push_back(imageInfo);
+                    } else if (descriptor.type == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR) {
+                        // AS descriptors are handled with a pNext write; break after one.
+                        asHandles.push_back(descriptor.accelerationStructure);
+                        validCount = 1; // force single-descriptor write
+                        break;
                     } else {
                         VkDescriptorBufferInfo bufferInfo{};
                         bufferInfo.buffer = descriptor.buffer;
@@ -891,6 +902,14 @@ namespace SasamiRenderer
                 if (binding.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ||
                     binding.descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
                     write.pImageInfo = imageInfos.data() + imageStart;
+                } else if (binding.descriptorType == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR) {
+                    // pNext carries the AS write; pImageInfo/pBufferInfo are null.
+                    VkWriteDescriptorSetAccelerationStructureKHR asWrite{};
+                    asWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+                    asWrite.accelerationStructureCount = 1;
+                    asWrite.pAccelerationStructures = &asHandles.back();
+                    asWriteInfos.push_back(asWrite);
+                    write.pNext = &asWriteInfos.back();
                 } else {
                     write.pBufferInfo = bufferInfos.data() + bufferStart;
                 }

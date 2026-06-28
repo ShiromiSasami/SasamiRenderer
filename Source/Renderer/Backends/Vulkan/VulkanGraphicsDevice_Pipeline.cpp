@@ -304,6 +304,11 @@ namespace SasamiRenderer
             bufferInfo.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
         }
         bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        // When buffer device address is available, every buffer gets the flag so callers
+        // can obtain VkDeviceAddress for BLAS/TLAS geometry descriptors.
+        if (m_hasVkKhrBufferDeviceAddress) {
+            bufferInfo.usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        }
         if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &resource.buffer) != VK_SUCCESS) {
             return {};
         }
@@ -311,8 +316,13 @@ namespace SasamiRenderer
         VkMemoryRequirements requirements{};
         vkGetBufferMemoryRequirements(m_device, resource.buffer, &requirements);
 
+        VkMemoryAllocateFlagsInfo allocFlagsInfo{};
+        allocFlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+        allocFlagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+
         VkMemoryAllocateInfo allocateInfo{};
         allocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocateInfo.pNext = m_hasVkKhrBufferDeviceAddress ? &allocFlagsInfo : nullptr;
         allocateInfo.allocationSize = requirements.size;
         allocateInfo.memoryTypeIndex = FindMemoryType(requirements.memoryTypeBits, ToVkMemoryProperties(desc.memoryUsage));
         if (allocateInfo.memoryTypeIndex == UINT32_MAX ||

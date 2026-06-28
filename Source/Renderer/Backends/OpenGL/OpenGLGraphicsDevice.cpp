@@ -1300,6 +1300,7 @@ void main()
         m_capabilities = {};
         m_capabilities.api = RhiBackendApi::OpenGL;
         m_capabilities.supportsGraphicsQueue = true;
+        m_capabilities.supportsComputeQueue = true;
         m_capabilities.supportsSwapChain = true;
         m_capabilities.supportsNativeFrame = true;
         m_capabilities.supportsFeatureRenderPasses = false;
