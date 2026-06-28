@@ -131,6 +131,12 @@ namespace SasamiRenderer
                              VkCommandBuffer cmd,
                              const RhiBackendMeshFrameDesc& desc,
                              const RhiClearColor& clearColor);
+        bool EnsureRayMarchResources();
+        void DestroyRayMarchResources();
+        bool RenderRayMarchFrame(uint32_t imageIndex,
+                                 VkCommandBuffer cmd,
+                                 const RhiBackendRayMarchFrameDesc& desc,
+                                 const RhiClearColor& clearColor);
         void QueryCapabilities();
         uint32_t FindMemoryType(uint32_t typeBits, VkMemoryPropertyFlags properties) const;
         void DestroyFrameResources();
@@ -236,6 +242,17 @@ namespace SasamiRenderer
         std::vector<VkImage> m_nativeMeshDepthImages;
         std::vector<VkDeviceMemory> m_nativeMeshDepthMemory;
         std::vector<VkImageView> m_nativeMeshDepthViews;
+
+        VkRenderPass            m_nativeRayMarchRenderPass     = VK_NULL_HANDLE;
+        VkDescriptorSetLayout   m_nativeRayMarchDescSetLayout  = VK_NULL_HANDLE;
+        VkDescriptorPool        m_nativeRayMarchDescPool       = VK_NULL_HANDLE;
+        VkDescriptorSet         m_nativeRayMarchDescSet        = VK_NULL_HANDLE;
+        VkPipelineLayout        m_nativeRayMarchPipelineLayout = VK_NULL_HANDLE;
+        VkPipeline              m_nativeRayMarchPipeline       = VK_NULL_HANDLE;
+        VkBuffer                m_nativeRayMarchUbo            = VK_NULL_HANDLE;
+        VkDeviceMemory          m_nativeRayMarchUboMemory      = VK_NULL_HANDLE;
+        void*                   m_nativeRayMarchUboMapped      = nullptr;
+        std::vector<VkFramebuffer> m_nativeRayMarchFramebuffers;
 
         friend class VulkanRhiCommandEncoder;
     };

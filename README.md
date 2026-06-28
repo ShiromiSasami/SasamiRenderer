@@ -62,13 +62,13 @@ MSBuild 側の `ShaderSourceRoot` も `$(ProjectDir)Shaders` を参照します�
 | Backend | Status |
 | --- | --- |
 | DirectX 12 | 主実装。feature render path、RenderGraph、GBuffer、PBR、SSR、SWRT、DXR 周辺を検証対象にしています。RHI 抽象化層 (BLAS/TLAS ビルド、RT パイプライン、SBT) の DX12 実装完了。 |
-| Vulkan | native fallback path。clear/present、static mesh、D32 depth test、swapchain resize、RGBA8 texture upload を実装済み。RHI ray tracing API はスタブのみ (VK_KHR_ray_tracing_pipeline 未実装)。DX12 feature path と同等ではありません。 |
-| DirectX 11 | native fallback path。clear/present、static mesh、depth test、swapchain resize、RGBA8 texture upload を実装済み。DX12 feature path と同等ではありません。 |
-| OpenGL | native fallback path。clear/present、static mesh、depth test、window resize、albedo texture sampling を実装済み。DX12 feature path と同等ではありません。 |
+| Vulkan | native fallback path。clear/present、static mesh、D32 depth test、swapchain resize、RGBA8 texture upload、ray march (`RayMarchApp`) を実装済み。RHI ray tracing API はスタブのみ (VK_KHR_ray_tracing_pipeline 未実装)。DX12 feature path と同等ではありません。 |
+| DirectX 11 | native fallback path。clear/present、static mesh、depth test、swapchain resize、RGBA8 texture upload、ray march (`RayMarchApp`) を実装済み。DX12 feature path と同等ではありません。 |
+| OpenGL | native fallback path。clear/present、static mesh、depth test、window resize、albedo texture sampling、ray march (`RayMarchApp`) を実装済み。DX12 feature path と同等ではありません。 |
 
 Vulkan / DirectX 11 / OpenGL が灰色画面になる場合は、native fallback の mesh draw 入力、shader compile、vertex/index buffer binding、RHI 実装の順で確認してください。これらのバックエンドは DX12 feature pass ベースの RenderGraph には未対応です。
 
-2026-06-28 のローカル検証では、DX12 / DX11 / Vulkan / OpenGL の renderer library が x64 Debug / Release の全 8 構成でビルド成功しています。4 backend の Debug PBRApp も再ビルドし、hidden で 5 秒間の startup smoke を通過しました。今回の変更後の resize、描画内容、GPU validation は未検証です。
+RayMarch バックエンド対応について: Vulkan は DXC で HLSL を SPIR-V にコンパイルして `RayMarch_VS/PS.hlsl` を再利用します。OpenGL は GLSL 330 core で同等のシェーダーをインライン実装しています。いずれも `RhiBackendRayMarchFrameDesc` 経由で `ExecuteBackendFrame` から呼び出されます。
 
 ## Render Pipeline
 

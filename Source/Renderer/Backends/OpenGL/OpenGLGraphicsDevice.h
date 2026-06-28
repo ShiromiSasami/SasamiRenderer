@@ -137,6 +137,8 @@ namespace SasamiRenderer
         void Cleanup();
         bool EnsureMeshFrameResources();
         bool RenderMeshFrame(const RhiBackendMeshFrameDesc& desc);
+        bool EnsureRayMarchFrameResources();
+        bool RenderRayMarchFrame(const RhiBackendRayMarchFrameDesc& desc);
 
         HWND m_hwnd = nullptr;
         HDC m_hdc = nullptr;
@@ -169,6 +171,22 @@ namespace SasamiRenderer
         int m_meshEmissiveRoughnessLocation = -1;
         int m_meshAlbedoTextureLocation = -1;
         int m_meshHasAlbedoTextureLocation = -1;
+
+        unsigned int m_rayMarchProgram   = 0;
+        int m_rmLocInvVP                 = -1;
+        int m_rmLocCamPos                = -1;
+        int m_rmLocTime                  = -1;
+        int m_rmLocSunDir                = -1;
+        int m_rmLocSunI                  = -1;
+        int m_rmLocSunColor              = -1;
+        int m_rmLocCloudCover            = -1;
+        int m_rmLocRenderW               = -1;
+        int m_rmLocRenderH               = -1;
+        int m_rmLocFluidMode             = -1;
+        int m_rmLocCloudDensity          = -1;
+        int m_rmLocExtra0                = -1;
+        int m_rmLocExtra1                = -1;
+        int m_rmLocExtra2                = -1;
 
         friend class OpenGLRhiCommandEncoder;
     };

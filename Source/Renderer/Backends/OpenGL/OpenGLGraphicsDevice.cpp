@@ -183,6 +183,8 @@ namespace SasamiRenderer
         using GlGetUniformLocationFn = GLint (APIENTRY*)(GLuint, const char*);
         using GlUniformMatrix4fvFn = void (APIENTRY*)(GLint, GLsizei, GLboolean, const GLfloat*);
         using GlUniform4fvFn = void (APIENTRY*)(GLint, GLsizei, const GLfloat*);
+        using GlUniform3fvFn = void (APIENTRY*)(GLint, GLsizei, const GLfloat*);
+        using GlUniform1fFn  = void (APIENTRY*)(GLint, GLfloat);
         using GlUniform1iFn = void (APIENTRY*)(GLint, GLint);
         using GlEnableVertexAttribArrayFn = void (APIENTRY*)(GLuint);
         using GlDisableVertexAttribArrayFn = void (APIENTRY*)(GLuint);
@@ -346,6 +348,439 @@ void main()
     lit = lit / (lit + vec3(1.0));
     lit = pow(clamp(lit, 0.0, 1.0), vec3(1.0 / 2.2));
     gl_FragColor = vec4(lit, surface.a);
+}
+)GLSL";
+
+        // ---- Ray march shaders ----
+        const char* kOpenGLRayMarchVS = R"GLSL(
+#version 330 core
+void main()
+{
+    float x = (gl_VertexID == 1) ?  3.0 : -1.0;
+    float y = (gl_VertexID == 2) ?  3.0 : -1.0;
+    gl_Position = vec4(x, y, 0.0, 1.0);
+}
+)GLSL";
+
+        const char* kOpenGLRayMarchFS = R"GLSL(
+#version 330 core
+out vec4 fragColor;
+
+// Uniforms matching RayMarchCB layout (row-major matrix uploaded un-transposed;
+// GLSL reads it as column-major = transposed, so M*v == HLSL mul(v,M_rowmajor))
+uniform mat4  u_invVP;
+uniform vec3  u_camPos;     uniform float u_time;
+uniform vec3  u_sunDir;     uniform float u_sunI;
+uniform vec3  u_sunColor;   uniform float u_cloudCover;
+uniform float u_renderW;    uniform float u_renderH;
+uniform float u_fluidMode;  uniform float u_cloudDensity;
+uniform vec4  u_extra0;
+uniform vec4  u_extra1;
+uniform vec4  u_extra2;
+
+const float kEps      = 0.0005;
+const float kMaxDist  = 300.0;
+const int   kMaxSteps = 512;
+const float PI        = 3.14159265;
+const float kFloatOriginCell = 1024.0;
+
+// ---------------------------------------------------------------------------
+// Floating Origin helpers
+// ---------------------------------------------------------------------------
+vec2 CamOrigin()  { return floor(u_camPos.xz / kFloatOriginCell) * kFloatOriginCell; }
+vec2 MakeStableXZ(vec2 pWS_xz) { return pWS_xz - CamOrigin(); }
+vec2 CamLocalXZ()  { return u_camPos.xz - CamOrigin(); }
+
+// ---------------------------------------------------------------------------
+// Wave / fluid helpers
+// ---------------------------------------------------------------------------
+void waveLod(vec2 p_stable, out float midW, out float hiW)
+{
+    float dist = length(p_stable - CamLocalXZ());
+    midW = clamp(1.0 - (dist - 160.0) / 160.0, 0.0, 1.0);
+    hiW  = clamp(1.0 - (dist -  80.0) /  80.0, 0.0, 1.0);
+}
+
+float waveHeight(vec2 p, float t)
+{
+    float midW, hiW;
+    waveLod(p, midW, hiW);
+    float h = 0.0;
+    h += sin(p.x * 1.40 + t * 1.80) * 0.180;
+    h += sin(p.y * 1.90 + t * 1.40) * 0.140;
+    h += sin(p.x * 0.70 - p.y * 1.10 + t * 0.90) * 0.090;
+    h += sin(p.x * 2.80 + p.y * 2.10 - t * 2.30) * 0.048 * midW;
+    h += sin(p.x * 4.10 - p.y * 3.30 + t * 3.10) * 0.024 * hiW;
+    h += sin(p.x * 6.50 + p.y * 5.20 - t * 4.20) * 0.012 * hiW;
+    return h;
+}
+
+float sdWater(vec3 p)
+{
+    return (p.y - waveHeight(MakeStableXZ(p.xz), u_time)) * 0.75;
+}
+
+vec3 waveNormal(vec2 p, float t)
+{
+    float midW, hiW;
+    waveLod(p, midW, hiW);
+    float dhdx = 0.0, dhdz = 0.0;
+    dhdx += cos(p.x * 1.40 + t * 1.80) * 1.40 * 0.180;
+    dhdz += cos(p.y * 1.90 + t * 1.40) * 1.90 * 0.140;
+    dhdx += cos(p.x * 0.70 - p.y * 1.10 + t * 0.90) *  0.70 * 0.090;
+    dhdz += cos(p.x * 0.70 - p.y * 1.10 + t * 0.90) * -1.10 * 0.090;
+    dhdx += cos(p.x * 2.80 + p.y * 2.10 - t * 2.30) *  2.80 * 0.048 * midW;
+    dhdz += cos(p.x * 2.80 + p.y * 2.10 - t * 2.30) *  2.10 * 0.048 * midW;
+    dhdx += cos(p.x * 4.10 - p.y * 3.30 + t * 3.10) *  4.10 * 0.024 * hiW;
+    dhdz += cos(p.x * 4.10 - p.y * 3.30 + t * 3.10) * -3.30 * 0.024 * hiW;
+    dhdx += cos(p.x * 6.50 + p.y * 5.20 - t * 4.20) *  6.50 * 0.012 * hiW;
+    dhdz += cos(p.x * 6.50 + p.y * 5.20 - t * 4.20) *  5.20 * 0.012 * hiW;
+    return normalize(vec3(-dhdx, 1.0, -dhdz));
+}
+
+// ---------------------------------------------------------------------------
+// SDF primitives
+// ---------------------------------------------------------------------------
+float sdSphere(vec3 p, float r) { return length(p) - r; }
+
+float sdRoundBox(vec3 p, vec3 b, float r)
+{
+    vec3 q = abs(p) - b;
+    return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - r;
+}
+
+float sdCapsule(vec3 p, vec3 a, vec3 b, float r)
+{
+    vec3 pa = p - a, ba = b - a;
+    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(pa - ba * h) - r;
+}
+
+// ---------------------------------------------------------------------------
+// Scene map
+// ---------------------------------------------------------------------------
+vec2 map(vec3 p)
+{
+    float bob = sin(u_time * 0.6) * 0.18;
+    float dWater  = sdWater(p);
+    vec3  pSphere = p - vec3(-1.8, 2.0 + bob, 0.5);
+    float dSphere = sdSphere(pSphere, 1.0);
+    float angle   = u_time * 0.3;
+    vec3  pBox    = p - vec3(2.5, 1.2, -0.3);
+    pBox.xz = vec2(pBox.x * cos(angle) + pBox.z * sin(angle),
+                  -pBox.x * sin(angle) + pBox.z * cos(angle));
+    float dBox    = sdRoundBox(pBox, vec3(0.75, 0.65, 0.75), 0.12);
+    vec3  capA    = vec3(-4.2, -0.3,  0.8);
+    vec3  capB    = vec3(-4.2,  2.8,  0.8);
+    float dCap    = sdCapsule(p, capA, capB, 0.38);
+    vec2  res     = vec2(dWater, 0.0);
+    if (dSphere < res.x) res = vec2(dSphere, 1.0);
+    if (dBox    < res.x) res = vec2(dBox,    2.0);
+    if (dCap    < res.x) res = vec2(dCap,    3.0);
+    return res;
+}
+
+vec3 calcNormal(vec3 p)
+{
+    vec2 e = vec2(kEps, 0.0);
+    return normalize(vec3(
+        map(p + e.xyy).x - map(p - e.xyy).x,
+        map(p + e.yxy).x - map(p - e.yxy).x,
+        map(p + e.yyx).x - map(p - e.yyx).x));
+}
+
+float softShadow(vec3 ro, vec3 rd, float mint, float maxt, float k)
+{
+    float res = 1.0, t = mint;
+    for (int i = 0; i < 32; ++i) {
+        float h = map(ro + rd * t).x;
+        if (h < 0.001) return 0.0;
+        res = min(res, k * h / t);
+        t  += clamp(h, 0.01, 0.4);
+        if (t > maxt) break;
+    }
+    return clamp(res, 0.0, 1.0);
+}
+
+float calcAO(vec3 pos, vec3 nor)
+{
+    float occ = 0.0, sca = 1.0;
+    for (int i = 0; i < 5; i++) {
+        float h = 0.01 + 0.12 * float(i) / 4.0;
+        float d = map(pos + h * nor).x;
+        occ    += (h - d) * sca;
+        sca    *= 0.95;
+    }
+    return clamp(1.0 - 3.0 * occ, 0.0, 1.0);
+}
+
+// ---------------------------------------------------------------------------
+// Cloud / sky
+// ---------------------------------------------------------------------------
+vec3 GradHash3(vec3 p)
+{
+    p = vec3(dot(p, vec3(127.1, 311.7,  74.7)),
+             dot(p, vec3(269.5, 183.3, 246.1)),
+             dot(p, vec3(113.5, 271.9, 124.6)));
+    vec3 g = fract(sin(p) * 43758.5453) * 2.0 - 1.0;
+    return g / (length(g) + 1e-5);
+}
+
+float GradNoise(vec3 p)
+{
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    return mix(
+        mix(mix(dot(GradHash3(i),                 f),
+                dot(GradHash3(i + vec3(1,0,0)), f - vec3(1,0,0)), u.x),
+            mix(dot(GradHash3(i + vec3(0,1,0)), f - vec3(0,1,0)),
+                dot(GradHash3(i + vec3(1,1,0)), f - vec3(1,1,0)), u.x), u.y),
+        mix(mix(dot(GradHash3(i + vec3(0,0,1)), f - vec3(0,0,1)),
+                dot(GradHash3(i + vec3(1,0,1)), f - vec3(1,0,1)), u.x),
+            mix(dot(GradHash3(i + vec3(0,1,1)), f - vec3(0,1,1)),
+                dot(GradHash3(i + vec3(1,1,1)), f - vec3(1,1,1)), u.x), u.y), u.z);
+}
+
+float FBM5(vec3 p)
+{
+    float v = 0.0, a = 0.5;
+    for (int i = 0; i < 5; i++) {
+        v += a * (GradNoise(p) * 0.5 + 0.5);
+        p  = p * 2.02 + vec3(73.1, 61.4, 53.7);
+        a *= 0.5;
+    }
+    return v;
+}
+
+float SampleCloudDensity(vec3 worldPos, float time, float cloudCover, float cloudDensity)
+{
+    const float heightScale = 4.0;
+    vec3 p = vec3(worldPos.x, worldPos.y * heightScale, worldPos.z) * 0.0001;
+    p.x += time * 0.008;
+    p.z += time * 0.003;
+    float base   = FBM5(p * 0.8);
+    float detail = FBM5(p * 2.5 + vec3(1.4, 2.1, 0.9) + time * 0.002) * 0.35;
+    float raw    = base + detail - (1.0 - cloudCover);
+    return max(raw * cloudDensity, 0.0);
+}
+
+vec4 MarchClouds(vec3 rd, vec3 sunDir, vec3 sunColor, float sunIntensity,
+                 float time, float cloudCover, float cloudDensity, float jitter)
+{
+    const float kCloudBaseY = 1500.0;
+    const float kCloudTopY  = 5000.0;
+    if (rd.y < 0.005) return vec4(0.0);
+    float tBase = (kCloudBaseY - u_camPos.y) / rd.y;
+    float tTop  = (kCloudTopY  - u_camPos.y) / rd.y;
+    if (tTop <= 0.0) return vec4(0.0);
+    tBase = max(tBase, 0.0);
+    if (tBase > 300000.0) return vec4(0.0);
+
+    const int kSteps = 48;
+    float dt = (tTop - tBase) / float(kSteps);
+    float g = 0.6, g2 = g * g;
+    float cosSun = dot(rd, sunDir);
+    float denom  = max(1.0 + g2 - 2.0 * g * cosSun, 1e-6);
+    float phaseHG = (1.0 - g2) / (4.0 * PI * pow(denom, 1.5));
+
+    float transmittance = 1.0;
+    vec3  scattered     = vec3(0.0);
+
+    for (int i = 0; i < kSteps; i++) {
+        if (transmittance < 0.02) break;
+        float  t       = tBase + (float(i) + jitter) * dt;
+        vec3   pos     = u_camPos + rd * t;
+        float  density = SampleCloudDensity(pos, time, cloudCover, cloudDensity);
+        if (density < 1e-4) continue;
+        float sigmaE   = density * 0.0008;
+        float sampleT  = exp(-sigmaE * dt);
+        float sunAtten = exp(-density * 1.2);
+        vec3  sunLit   = sunColor * sunIntensity * sunAtten * phaseHG;
+        vec3  ambient  = vec3(0.35, 0.50, 0.72) * 0.28;
+        vec3  inScatter = (sunLit + ambient) * density;
+        scattered += inScatter * transmittance * (1.0 - sampleT) / max(sigmaE, 1e-6);
+        transmittance *= sampleT;
+    }
+    return vec4(scattered, 1.0 - transmittance);
+}
+
+vec3 ComputeSkyColor(vec3 rd, vec3 sunDir, vec3 sunColor, float sunIntensity)
+{
+    float cosTheta  = dot(rd, sunDir);
+    float elevation = rd.y;
+    vec3 zenithColor  = vec3(0.05, 0.15, 0.65) * 2.0;
+    vec3 horizonColor = vec3(0.50, 0.68, 0.88) * 1.5;
+    vec3 groundColor  = vec3(0.08, 0.06, 0.04);
+    vec3 skyBase;
+    if (elevation >= 0.0)
+        skyBase = mix(horizonColor, zenithColor, pow(clamp(elevation, 0.0, 1.0), 0.4));
+    else
+        skyBase = mix(horizonColor, groundColor, clamp(-elevation * 5.0, 0.0, 1.0));
+    float sunInfluence = clamp(cosTheta * 0.5 + 0.5, 0.0, 1.0);
+    vec3  warmTint = mix(vec3(1.0), sunColor * vec3(1.1, 0.9, 0.7), sunInfluence * 0.4);
+    skyBase *= warmTint;
+    float mie      = pow(max(cosTheta, 0.0), 6.0) * 0.3;
+    vec3  mieColor = sunColor * mie * sunIntensity;
+    float horizonFactor = pow(clamp(1.0 - abs(elevation), 0.0, 1.0), 3.0);
+    vec3  horizGlow = sunColor
+        * mix(vec3(1.0, 0.7, 0.4), vec3(1.0, 0.9, 0.7), sunIntensity)
+        * horizonFactor * max(cosTheta, 0.0) * 0.4 * sunIntensity;
+    float sunDisc = smoothstep(0.9996, 1.0, cosTheta);
+    vec3  disc    = sunColor * sunDisc * 12.0 * sunIntensity;
+    return max(skyBase + mieColor + horizGlow + disc, vec3(0.0));
+}
+
+vec3 skyColor(vec3 rd)
+{
+    return ComputeSkyColor(rd, normalize(u_sunDir), u_sunColor, u_sunI);
+}
+
+// ---------------------------------------------------------------------------
+// Shading
+// ---------------------------------------------------------------------------
+vec3 shadeWater(vec3 pos, vec3 rd, float tHit)
+{
+    vec2  stableXZ = CamLocalXZ() + rd.xz * tHit;
+    vec3  N        = waveNormal(stableXZ, u_time);
+    vec3  V        = -rd;
+    vec3  sunDir   = normalize(u_sunDir);
+    float NdotV    = clamp(dot(N, V), 0.0, 1.0);
+    float fresnel  = 0.02 + 0.98 * pow(1.0 - NdotV, 5.0);
+    vec3  reflDir  = reflect(rd, N);
+    vec3  reflColor = skyColor(reflDir);
+    vec3  deepColor    = vec3(0.00, 0.08, 0.18);
+    vec3  shallowColor = vec3(0.04, 0.28, 0.42);
+    vec3  waterColor   = mix(deepColor, shallowColor, pow(NdotV, 1.5));
+    float wh   = waveHeight(stableXZ, u_time);
+    float foam = smoothstep(0.22, 0.40, wh);
+    vec3  skyAmb = skyColor(vec3(0.0, 1.0, 0.0)) * 0.20;
+    waterColor  += skyAmb * (1.0 - fresnel);
+    float caustic = pow(clamp(dot(N, vec3(0.0, 1.0, 0.0)), 0.0, 1.0), 32.0)
+                  * smoothstep(0.0, 0.06, wh + 0.06) * 0.4;
+    waterColor  += vec3(0.3, 0.6, 0.8) * caustic;
+    vec3  H     = normalize(sunDir + V);
+    float spec  = pow(max(0.0, dot(N, H)), 512.0) * u_sunI;
+    float shadow = softShadow(pos + vec3(0.0, 0.01, 0.0), sunDir, 0.05, 15.0, 8.0);
+    vec3  color  = mix(waterColor, reflColor, fresnel);
+    color  = mix(color, vec3(0.92, 0.96, 1.0), foam * 0.7);
+    color += u_sunColor * spec * 3.5;
+    float sunDiff = max(0.0, dot(N, sunDir)) * shadow * u_sunI * (1.0 - foam);
+    color += u_sunColor * sunDiff * waterColor * 0.12;
+    return color;
+}
+
+vec3 solidAlbedo(float matId, vec3 pos)
+{
+    if (matId < 1.5) return vec3(0.90, 0.35, 0.10);
+    if (matId < 2.5) return vec3(0.20, 0.40, 0.75);
+    return vec3(0.22, 0.52, 0.18);
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+void main()
+{
+    vec2 uv  = gl_FragCoord.xy / vec2(u_renderW, u_renderH);
+    vec2 ndc = uv * 2.0 - 1.0;
+    ndc.y    = -ndc.y;
+
+    vec3 ro = u_camPos;
+    vec3 rd;
+    vec3 right   = u_extra1.xyz;
+    vec3 up      = u_extra2.xyz;
+    vec3 forward = normalize(cross(right, up));
+    if (u_extra0.w > 0.5) {
+        rd = normalize(forward + right * (ndc.x * u_extra0.y) + up * (ndc.y * u_extra0.z));
+    } else {
+        vec4 near4  = u_invVP * vec4(ndc, 0.0, 1.0);
+        vec4 far4   = u_invVP * vec4(ndc, 1.0, 1.0);
+        vec3 nearWS = near4.xyz / near4.w;
+        vec3 farWS  = far4.xyz  / far4.w;
+        rd = normalize(farWS - nearWS);
+    }
+
+    // Cone marching pixel footprint
+    vec2 adjNdc = vec2(ndc.x, ndc.y + 2.0 / u_renderH);
+    vec3 adjRd;
+    if (u_extra0.w > 0.5) {
+        adjRd = normalize(forward + right * (adjNdc.x * u_extra0.y) + up * (adjNdc.y * u_extra0.z));
+    } else {
+        vec4 near4   = u_invVP * vec4(ndc,    0.0, 1.0);
+        vec4 adjFar4 = u_invVP * vec4(adjNdc, 1.0, 1.0);
+        vec3 nearWS  = near4.xyz / near4.w;
+        adjRd = normalize(adjFar4.xyz / adjFar4.w - nearWS);
+    }
+    float pixelConeAngle = max(length(rd - adjRd), 1e-5);
+
+    // Ray march
+    vec2  camLocal = CamLocalXZ();
+    float t        = 0.02;
+    float matId    = -1.0;
+    for (int i = 0; i < kMaxSteps; ++i) {
+        vec3  p        = ro + rd * t;
+        vec2  h        = map(p);
+        vec2  stableXZ = camLocal + rd.xz * t;
+        float dWaterP  = (p.y - waveHeight(stableXZ, u_time)) * 0.75;
+        if (h.y < 0.5 || dWaterP < h.x) h = vec2(dWaterP, 0.0);
+        bool  isWater  = (h.y < 0.5);
+        float epsilon  = isWater ? kEps : max(pixelConeAngle * t * 0.2, kEps);
+        if (h.x < epsilon) { matId = h.y; break; }
+        t += h.x;
+        if (t > kMaxDist) break;
+    }
+
+    // Miss: sky + clouds
+    if (matId < 0.0) {
+        if (u_extra0.x > 0.5) { fragColor = vec4(1.0); return; }
+        vec3 sunDir = normalize(u_sunDir);
+        vec3 col    = ComputeSkyColor(rd, sunDir, u_sunColor, u_sunI);
+        if (rd.y > 0.01 && u_cloudCover > 0.01) {
+            float cloudDensity = max(u_cloudDensity, 0.5);
+            float jitter = fract(sin(dot(gl_FragCoord.xy, vec2(127.1, 311.7))) * 43758.5453);
+            vec4  clouds = MarchClouds(rd, sunDir, u_sunColor, u_sunI,
+                                       u_time, u_cloudCover, cloudDensity, jitter);
+            col = mix(col, clouds.rgb / max(clouds.a, 1e-4), clamp(clouds.a, 0.0, 1.0));
+        }
+        fragColor = vec4(col, 1.0);
+        return;
+    }
+
+    vec3 pos   = ro + rd * t;
+    vec3 color;
+    if (matId < 0.5) {
+        color = shadeWater(pos, rd, t);
+    } else {
+        vec3  N      = calcNormal(pos);
+        vec3  V      = -rd;
+        vec3  sunDir = normalize(u_sunDir);
+        float ao     = calcAO(pos, N);
+        float shadow = softShadow(pos + N * 0.002, sunDir, 0.01, 20.0, 8.0);
+        vec3  albedo = solidAlbedo(matId, pos);
+        float NdotL  = max(0.0, dot(N, sunDir));
+        vec3  diffuse = albedo * u_sunColor * u_sunI * NdotL * shadow;
+        vec3  ambient = albedo * skyColor(N) * 0.15 * ao;
+        vec3  H      = normalize(sunDir + V);
+        vec3  spec   = u_sunColor * u_sunI * pow(max(0.0, dot(N, H)), 48.0) * shadow * 0.3;
+        color = diffuse + ambient + spec;
+    }
+
+    float fogFactor = 1.0 - exp(-t * 0.007);
+    color = mix(color, skyColor(rd) * 0.55, fogFactor);
+
+    if (u_extra0.x > 0.5) {
+        float tn = clamp(t / kMaxDist, 0.0, 1.0);
+        vec3 dbgCol;
+        if      (tn < 0.25) { float s = tn / 0.25;           dbgCol = mix(vec3(0,0,1), vec3(0,1,1), s); }
+        else if (tn < 0.50) { float s = (tn - 0.25) / 0.25;  dbgCol = mix(vec3(0,1,1), vec3(0,1,0), s); }
+        else if (tn < 0.75) { float s = (tn - 0.50) / 0.25;  dbgCol = mix(vec3(0,1,0), vec3(1,1,0), s); }
+        else                { float s = (tn - 0.75) / 0.25;  dbgCol = mix(vec3(1,1,0), vec3(1,0,0), s); }
+        fragColor = vec4(dbgCol, 1.0);
+        return;
+    }
+
+    fragColor = vec4(color, 1.0);
 }
 )GLSL";
     }
@@ -1034,6 +1469,159 @@ void main()
         return true;
     }
 
+    bool OpenGLGraphicsDevice::EnsureRayMarchFrameResources()
+    {
+        if (m_rayMarchProgram != 0) {
+            return true;
+        }
+        if (!m_hdc || !m_context || !wglMakeCurrent(m_hdc, m_context)) {
+            return false;
+        }
+
+        auto createShader     = LoadGlProc<GlCreateShaderFn>("glCreateShader");
+        auto shaderSource     = LoadGlProc<GlShaderSourceFn>("glShaderSource");
+        auto compileShader    = LoadGlProc<GlCompileShaderFn>("glCompileShader");
+        auto getShaderiv      = LoadGlProc<GlGetShaderivFn>("glGetShaderiv");
+        auto getShaderInfoLog = LoadGlProc<GlGetShaderInfoLogFn>("glGetShaderInfoLog");
+        auto deleteShader     = LoadGlProc<GlDeleteShaderFn>("glDeleteShader");
+        auto createProgram    = LoadGlProc<GlCreateProgramFn>("glCreateProgram");
+        auto attachShader     = LoadGlProc<GlAttachShaderFn>("glAttachShader");
+        auto linkProgram      = LoadGlProc<GlLinkProgramFn>("glLinkProgram");
+        auto getProgramiv     = LoadGlProc<GlGetProgramivFn>("glGetProgramiv");
+        auto getProgramInfoLog= LoadGlProc<GlGetProgramInfoLogFn>("glGetProgramInfoLog");
+        auto getUniformLocation = LoadGlProc<GlGetUniformLocationFn>("glGetUniformLocation");
+        if (!createShader || !shaderSource || !compileShader || !getShaderiv || !deleteShader ||
+            !createProgram || !attachShader || !linkProgram ||
+            !getProgramiv || !getUniformLocation) {
+            DebugLog("OpenGLGraphicsDevice::EnsureRayMarchFrameResources: required GL shader functions unavailable.\n");
+            return false;
+        }
+
+        auto compile = [&](GLenum stage, const char* source) -> GLuint {
+            GLuint shader = createShader(stage);
+            shaderSource(shader, 1, &source, nullptr);
+            compileShader(shader);
+            GLint ok = GL_FALSE;
+            getShaderiv(shader, GL_COMPILE_STATUS, &ok);
+            if (ok == GL_FALSE) {
+                if (getShaderInfoLog) {
+                    char log[2048] = {};
+                    GLsizei len = 0;
+                    getShaderInfoLog(shader, static_cast<GLsizei>(sizeof(log)), &len, log);
+                    DebugLog(log);
+                    DebugLog("\n");
+                }
+                deleteShader(shader);
+                return 0;
+            }
+            return shader;
+        };
+
+        const GLuint vs = compile(GL_VERTEX_SHADER,   kOpenGLRayMarchVS);
+        const GLuint fs = compile(GL_FRAGMENT_SHADER, kOpenGLRayMarchFS);
+        if (vs == 0 || fs == 0) {
+            if (vs != 0) deleteShader(vs);
+            if (fs != 0) deleteShader(fs);
+            return false;
+        }
+
+        const GLuint program = createProgram();
+        attachShader(program, vs);
+        attachShader(program, fs);
+        linkProgram(program);
+        deleteShader(fs);
+        deleteShader(vs);
+
+        GLint linked = GL_FALSE;
+        getProgramiv(program, GL_LINK_STATUS, &linked);
+        if (linked == GL_FALSE) {
+            if (getProgramInfoLog) {
+                char log[2048] = {};
+                GLsizei len = 0;
+                getProgramInfoLog(program, static_cast<GLsizei>(sizeof(log)), &len, log);
+                DebugLog(log);
+                DebugLog("\n");
+            }
+            auto deleteProgram = LoadGlProc<GlDeleteProgramFn>("glDeleteProgram");
+            if (deleteProgram) {
+                deleteProgram(program);
+            }
+            return false;
+        }
+
+        m_rayMarchProgram    = program;
+        m_rmLocInvVP         = getUniformLocation(program, "u_invVP");
+        m_rmLocCamPos        = getUniformLocation(program, "u_camPos");
+        m_rmLocTime          = getUniformLocation(program, "u_time");
+        m_rmLocSunDir        = getUniformLocation(program, "u_sunDir");
+        m_rmLocSunI          = getUniformLocation(program, "u_sunI");
+        m_rmLocSunColor      = getUniformLocation(program, "u_sunColor");
+        m_rmLocCloudCover    = getUniformLocation(program, "u_cloudCover");
+        m_rmLocRenderW       = getUniformLocation(program, "u_renderW");
+        m_rmLocRenderH       = getUniformLocation(program, "u_renderH");
+        m_rmLocFluidMode     = getUniformLocation(program, "u_fluidMode");
+        m_rmLocCloudDensity  = getUniformLocation(program, "u_cloudDensity");
+        m_rmLocExtra0        = getUniformLocation(program, "u_extra0");
+        m_rmLocExtra1        = getUniformLocation(program, "u_extra1");
+        m_rmLocExtra2        = getUniformLocation(program, "u_extra2");
+        return true;
+    }
+
+    bool OpenGLGraphicsDevice::RenderRayMarchFrame(const RhiBackendRayMarchFrameDesc& desc)
+    {
+        if (!EnsureRayMarchFrameResources()) {
+            return false;
+        }
+
+        auto useProgram         = LoadGlProc<GlUseProgramFn>("glUseProgram");
+        auto uniformMatrix4fv   = LoadGlProc<GlUniformMatrix4fvFn>("glUniformMatrix4fv");
+        auto uniform4fv         = LoadGlProc<GlUniform4fvFn>("glUniform4fv");
+        auto uniform3fv         = LoadGlProc<GlUniform3fvFn>("glUniform3fv");
+        auto uniform1f          = LoadGlProc<GlUniform1fFn>("glUniform1f");
+        if (!useProgram || !uniformMatrix4fv || !uniform4fv || !uniform3fv || !uniform1f) {
+            return false;
+        }
+
+        const GLsizei w = desc.renderWidth  > 0.0f ? static_cast<GLsizei>(desc.renderWidth)  : 1;
+        const GLsizei h = desc.renderHeight > 0.0f ? static_cast<GLsizei>(desc.renderHeight) : 1;
+        glViewport(0, 0, w, h);
+        glDisable(GL_DEPTH_TEST);
+
+        useProgram(m_rayMarchProgram);
+
+        // Upload matrix — row-major data; GL reads as col-major = transposed;
+        // GLSL M*v then == HLSL mul(v, M_rowmajor)
+        if (m_rmLocInvVP >= 0) {
+            uniformMatrix4fv(m_rmLocInvVP, 1, GL_FALSE, desc.invViewProjection);
+        }
+        if (m_rmLocCamPos >= 0)     { uniform3fv(m_rmLocCamPos,    1, desc.cameraPos); }
+        if (m_rmLocTime   >= 0)     { uniform1f (m_rmLocTime,         desc.sceneTimeSec); }
+        if (m_rmLocSunDir >= 0)     { uniform3fv(m_rmLocSunDir,    1, desc.sunDir); }
+        if (m_rmLocSunI   >= 0)     { uniform1f (m_rmLocSunI,         desc.sunIntensity); }
+        if (m_rmLocSunColor >= 0)   { uniform3fv(m_rmLocSunColor,  1, desc.sunColor); }
+        if (m_rmLocCloudCover >= 0) { uniform1f (m_rmLocCloudCover,   desc.cloudCover); }
+        if (m_rmLocRenderW >= 0)    { uniform1f (m_rmLocRenderW,      desc.renderWidth); }
+        if (m_rmLocRenderH >= 0)    { uniform1f (m_rmLocRenderH,      desc.renderHeight); }
+        if (m_rmLocFluidMode >= 0)  { uniform1f (m_rmLocFluidMode,    desc.fluidMode); }
+        if (m_rmLocCloudDensity >= 0) { uniform1f(m_rmLocCloudDensity, desc.cloudDensity); }
+
+        const float extra0[4] = {
+            desc.debugMode,
+            desc.tanHalfFovY * desc.aspectRatio,
+            desc.tanHalfFovY,
+            desc.explicitCameraBasis ? 1.0f : 0.0f,
+        };
+        const float extra1[4] = { desc.cameraRight[0], desc.cameraRight[1], desc.cameraRight[2], 0.0f };
+        const float extra2[4] = { desc.cameraUp[0],    desc.cameraUp[1],    desc.cameraUp[2],    0.0f };
+        if (m_rmLocExtra0 >= 0) { uniform4fv(m_rmLocExtra0, 1, extra0); }
+        if (m_rmLocExtra1 >= 0) { uniform4fv(m_rmLocExtra1, 1, extra1); }
+        if (m_rmLocExtra2 >= 0) { uniform4fv(m_rmLocExtra2, 1, extra2); }
+
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        useProgram(0);
+        return true;
+    }
+
     bool OpenGLGraphicsDevice::RenderMeshFrame(const RhiBackendMeshFrameDesc& desc)
     {
         if (!desc.draws || desc.drawCount == 0 || !EnsureMeshFrameResources()) {
@@ -1145,7 +1733,9 @@ void main()
                      frameDesc.clearColor.b,
                      frameDesc.clearColor.a);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        if (frameDesc.mesh.enabled) {
+        if (frameDesc.rayMarch.enabled) {
+            (void)RenderRayMarchFrame(frameDesc.rayMarch);
+        } else if (frameDesc.mesh.enabled) {
             (void)RenderMeshFrame(frameDesc.mesh);
         }
         glFlush();
@@ -1758,6 +2348,10 @@ void main()
                     m_meshEmissiveRoughnessLocation = -1;
                     m_meshAlbedoTextureLocation = -1;
                     m_meshHasAlbedoTextureLocation = -1;
+                }
+                if (m_rayMarchProgram != 0) {
+                    glDeleteProgramPtr(m_rayMarchProgram);
+                    m_rayMarchProgram = 0;
                 }
                 for (const auto& entry : m_rhiPipelines) {
                     if (entry.second.program != 0) {
