@@ -2,7 +2,7 @@
 
 Sasami Renderer は C++20 のレンダラー実験プロジェクトです。DirectX 12 の feature render path を主軸に、RenderGraph、PBR、GBuffer、shadow、Screen Space Reflection、Software Ray Tracing、DXR、GI、複数 RHI バックエンドの検証を同じコードベースで進めています。
 
-この README は 2026-06-27 時点の実装状態を基準にしています。未検証または部分実装の項目は明示します。
+この README は 2026-06-29 時点の実装状態を基準にしています。未検証または部分実装の項目は明示します。
 
 ## Project Layout
 
