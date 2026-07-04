@@ -356,13 +356,6 @@ namespace SasamiRenderer
                 float deltaTime = static_cast<float>(currentTime - lastTime) * 0.001f;
                 lastTime = currentTime;
 
-                if (m_renderer && !m_renderer->SupportsD3D12OverlayRendering()) {
-                    m_deltaTime = deltaTime;
-                    m_renderer->SetDeltaTime(deltaTime);
-                    m_renderer->Render();
-                    continue;
-                }
-
                 OnUpdate(deltaTime);
                 OnRender();
             } catch (const std::exception& ex) {

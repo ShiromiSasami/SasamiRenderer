@@ -2,7 +2,7 @@
 
 Sasami Renderer は C++20 のレンダラー実験プロジェクトです。DirectX 12 の feature render path を主軸に、RenderGraph、PBR、GBuffer、shadow、Screen Space Reflection、Software Ray Tracing、DXR、GI、複数 RHI バックエンドの検証を同じコードベースで進めています。
 
-この README は 2026-06-29 時点の実装状態を基準にしています。未検証または部分実装の項目は明示します。
+この README は 2026-07-04 時点の実装状態を基準にしています。未検証または部分実装の項目は明示します。
 
 ## Project Layout
 
@@ -66,7 +66,7 @@ MSBuild 側の `ShaderSourceRoot` も `$(ProjectDir)Shaders` を参照します�
 | DirectX 11 | native fallback path。clear/present、static mesh、depth test、swapchain resize、RGBA8 texture upload、ray march (`RayMarchApp`)、compute dispatch を実装済み。DX12 feature path と同等ではありません。 |
 | OpenGL | native fallback path。clear/present、static mesh、depth test、window resize、albedo texture sampling、ray march (`RayMarchApp`)、compute dispatch を実装済み。DX12 feature path と同等ではありません。 |
 
-Vulkan / DirectX 11 / OpenGL が灰色画面になる場合は、native fallback の mesh draw 入力、shader compile、vertex/index buffer binding、RHI 実装の順で確認してください。これらのバックエンドは DX12 feature pass ベースの RenderGraph には未対応です。
+Vulkan / DirectX 11 / OpenGL では、メインループが `OnUpdate` / `OnRender` を経由して `SyncModelsToRenderer` と `UpdateCameraCB` を正しく呼び出すため、DX12 と同一のゲームループパスを使用します。これらのバックエンドは DX12 feature pass ベースの RenderGraph には未対応です。
 
 RayMarch バックエンド対応について: Vulkan は DXC で HLSL を SPIR-V にコンパイルして `RayMarch_VS/PS.hlsl` を再利用します。OpenGL は GLSL 330 core で同等のシェーダーをインライン実装しています。いずれも `RhiBackendRayMarchFrameDesc` 経由で `ExecuteBackendFrame` から呼び出されます。
 
