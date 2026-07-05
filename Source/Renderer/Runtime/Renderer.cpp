@@ -1106,7 +1106,10 @@ namespace SasamiRenderer
 
     void Renderer::SubmitSkinnedRenderProxies(std::vector<SkinnedRenderProxy>&& proxies)
     {
-        const UINT backIndex = m_device ? m_device->GetSwapChain()->GetCurrentBackBufferIndex() : 0;
+        if (!m_device || UsesNativeBackendFrame(*m_device)) {
+            return;
+        }
+        const UINT backIndex = m_device->GetSwapChain()->GetCurrentBackBufferIndex();
         auto* frame = m_frameCoordinator.GetFrameContext(backIndex);
         if (!frame) return;
         m_sceneSubmitter.SubmitSkinnedRenderProxies(std::move(proxies), m_frameCoordinator, *frame);
