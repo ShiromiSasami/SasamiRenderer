@@ -62,9 +62,9 @@ MSBuild 側の `ShaderSourceRoot` も `$(ProjectDir)Shaders` を参照します�
 | Backend | Status |
 | --- | --- |
 | DirectX 12 | 主実装。feature render path、RenderGraph、GBuffer、PBR、SSR、SWRT、DXR 周辺を検証対象にしています。RHI 抽象化層 (BLAS/TLAS ビルド、RT パイプライン、SBT) の DX12 実装完了。 |
-| Vulkan | native fallback path。clear/present、static mesh、D32 depth test、swapchain resize、RGBA8 texture upload、ray march (`RayMarchApp`)、compute dispatch を実装済み。拡張機能はランタイムで検出 (VK_KHR_dynamic_rendering / descriptor_indexing / timeline_semaphore / ray_query / ray_tracing_pipeline / acceleration_structure)。BLAS/TLAS ビルド (BuildRhiBlases / BuildRhiTlas) を VK_KHR_acceleration_structure で実装済み。RT パイプライン作成 (CreateRhiRayTracingPipeline) は DXIL→SPIR-V 変換未対応のためスタブ。DX12 feature path と同等ではありません。 |
+| Vulkan | native fallback path。clear/present、static mesh (Y-flip viewport、albedo texture、DX-compatible projection)、D32 depth test、swapchain resize、RGBA8 texture upload、ray march (`RayMarchApp`)、compute dispatch を実装済み。拡張機能はランタイムで検出 (VK_KHR_dynamic_rendering / descriptor_indexing / timeline_semaphore / ray_query / ray_tracing_pipeline / acceleration_structure)。BLAS/TLAS ビルド (BuildRhiBlases / BuildRhiTlas) を VK_KHR_acceleration_structure で実装済み。RT パイプライン作成 (CreateRhiRayTracingPipeline) は DXIL→SPIR-V 変換未対応のためスタブ。DX12 feature path と同等ではありません。 |
 | DirectX 11 | native fallback path。clear/present、static mesh、depth test、swapchain resize、RGBA8 texture upload、ray march (`RayMarchApp`)、compute dispatch を実装済み。DX12 feature path と同等ではありません。 |
-| OpenGL | native fallback path。clear/present、static mesh、depth test、window resize、albedo texture sampling、ray march (`RayMarchApp`)、compute dispatch を実装済み。DX12 feature path と同等ではありません。 |
+| OpenGL | native fallback path。clear/present、static mesh (行列の行列の列優先変換修正済み)、depth test、window resize、albedo texture sampling、ray march (`RayMarchApp`)、compute dispatch を実装済み。DX12 feature path と同等ではありません。 |
 
 Vulkan / DirectX 11 / OpenGL では、メインループが `OnUpdate` / `OnRender` を経由して `SyncModelsToRenderer` と `UpdateCameraCB` を正しく呼び出すため、DX12 と同一のゲームループパスを使用します。これらのバックエンドは DX12 feature pass ベースの RenderGraph には未対応です。
 

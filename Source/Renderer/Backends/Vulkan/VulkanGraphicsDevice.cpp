@@ -262,6 +262,25 @@ namespace SasamiRenderer
             if (m_nativeMeshPipelineLayout != VK_NULL_HANDLE) {
                 vkDestroyPipelineLayout(m_device, m_nativeMeshPipelineLayout, nullptr);
             }
+            // Destroy descriptor pool first (implicitly frees all descriptor sets)
+            if (m_nativeMeshDescPool != VK_NULL_HANDLE) {
+                vkDestroyDescriptorPool(m_device, m_nativeMeshDescPool, nullptr);
+            }
+            if (m_nativeMeshDescSetLayout != VK_NULL_HANDLE) {
+                vkDestroyDescriptorSetLayout(m_device, m_nativeMeshDescSetLayout, nullptr);
+            }
+            if (m_nativeMeshSampler != VK_NULL_HANDLE) {
+                vkDestroySampler(m_device, m_nativeMeshSampler, nullptr);
+            }
+            if (m_nativeMeshDummyImageView != VK_NULL_HANDLE) {
+                vkDestroyImageView(m_device, m_nativeMeshDummyImageView, nullptr);
+            }
+            if (m_nativeMeshDummyImage != VK_NULL_HANDLE) {
+                vkDestroyImage(m_device, m_nativeMeshDummyImage, nullptr);
+            }
+            if (m_nativeMeshDummyMemory != VK_NULL_HANDLE) {
+                vkFreeMemory(m_device, m_nativeMeshDummyMemory, nullptr);
+            }
             for (VkFramebuffer framebuffer : m_nativeMeshFramebuffers) {
                 if (framebuffer != VK_NULL_HANDLE) {
                     vkDestroyFramebuffer(m_device, framebuffer, nullptr);
@@ -287,9 +306,16 @@ namespace SasamiRenderer
             }
         }
 
-        m_nativeMeshPipeline = VK_NULL_HANDLE;
-        m_nativeMeshPipelineLayout = VK_NULL_HANDLE;
-        m_nativeMeshRenderPass = VK_NULL_HANDLE;
+        m_nativeMeshPipeline         = VK_NULL_HANDLE;
+        m_nativeMeshPipelineLayout   = VK_NULL_HANDLE;
+        m_nativeMeshDescPool         = VK_NULL_HANDLE;
+        m_nativeMeshDescSetLayout    = VK_NULL_HANDLE;
+        m_nativeMeshSampler          = VK_NULL_HANDLE;
+        m_nativeMeshDummyImageView   = VK_NULL_HANDLE;
+        m_nativeMeshDummyImage       = VK_NULL_HANDLE;
+        m_nativeMeshDummyMemory      = VK_NULL_HANDLE;
+        m_nativeMeshDescSets.clear();
+        m_nativeMeshRenderPass       = VK_NULL_HANDLE;
         m_nativeMeshFramebuffers.clear();
         m_nativeMeshDepthImages.clear();
         m_nativeMeshDepthMemory.clear();
@@ -355,15 +381,210 @@ namespace SasamiRenderer
             return false;
         }
 
+        // --- default linear-repeat sampler ---
+        {
+            VkSamplerCreateInfo samplerInfo{};
+            samplerInfo.sType        = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+            samplerInfo.magFilter    = VK_FILTER_LINEAR;
+            samplerInfo.minFilter    = VK_FILTER_LINEAR;
+            samplerInfo.mipmapMode   = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+            samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+            samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+            samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+            samplerInfo.maxLod       = VK_LOD_CLAMP_NONE;
+            if (vkCreateSampler(m_device, &samplerInfo, nullptr, &m_nativeMeshSampler) != VK_SUCCESS) {
+                DebugLog("VulkanGraphicsDevice::EnsureNativeMeshResources: sampler creation failed.\n");
+                DestroyNativeMeshResources();
+                return false;
+            }
+        }
+
+        // --- 1×1 white dummy texture (fallback when no albedo SRV is provided) ---
+        {
+            constexpr uint32_t w = 1, h = 1;
+            const uint8_t whitePixel[4] = { 0xFF, 0xFF, 0xFF, 0xFF };
+            const VkDeviceSize uploadSize = 4;
+
+            VkImageCreateInfo dummyImageInfo{};
+            dummyImageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+            dummyImageInfo.imageType     = VK_IMAGE_TYPE_2D;
+            dummyImageInfo.format        = VK_FORMAT_R8G8B8A8_UNORM;
+            dummyImageInfo.extent        = { w, h, 1u };
+            dummyImageInfo.mipLevels     = 1;
+            dummyImageInfo.arrayLayers   = 1;
+            dummyImageInfo.samples       = VK_SAMPLE_COUNT_1_BIT;
+            dummyImageInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
+            dummyImageInfo.usage         = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+            dummyImageInfo.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+            dummyImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            if (vkCreateImage(m_device, &dummyImageInfo, nullptr, &m_nativeMeshDummyImage) != VK_SUCCESS) {
+                DebugLog("VulkanGraphicsDevice::EnsureNativeMeshResources: dummy image create failed.\n");
+                DestroyNativeMeshResources();
+                return false;
+            }
+
+            VkMemoryRequirements dummyReqs{};
+            vkGetImageMemoryRequirements(m_device, m_nativeMeshDummyImage, &dummyReqs);
+            VkMemoryAllocateInfo dummyAllocInfo{};
+            dummyAllocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+            dummyAllocInfo.allocationSize  = dummyReqs.size;
+            dummyAllocInfo.memoryTypeIndex = FindMemoryType(dummyReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            if (dummyAllocInfo.memoryTypeIndex == UINT32_MAX ||
+                vkAllocateMemory(m_device, &dummyAllocInfo, nullptr, &m_nativeMeshDummyMemory) != VK_SUCCESS ||
+                vkBindImageMemory(m_device, m_nativeMeshDummyImage, m_nativeMeshDummyMemory, 0) != VK_SUCCESS) {
+                DebugLog("VulkanGraphicsDevice::EnsureNativeMeshResources: dummy image memory failed.\n");
+                DestroyNativeMeshResources();
+                return false;
+            }
+
+            // Upload via staging buffer
+            VkBuffer stagingBuf = VK_NULL_HANDLE;
+            VkDeviceMemory stagingMem = VK_NULL_HANDLE;
+            VkBufferCreateInfo stagingBufInfo{};
+            stagingBufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+            stagingBufInfo.size        = uploadSize;
+            stagingBufInfo.usage       = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+            stagingBufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            if (vkCreateBuffer(m_device, &stagingBufInfo, nullptr, &stagingBuf) != VK_SUCCESS) {
+                DebugLog("VulkanGraphicsDevice::EnsureNativeMeshResources: dummy staging buffer failed.\n");
+                DestroyNativeMeshResources();
+                return false;
+            }
+            VkMemoryRequirements stagingReqs{};
+            vkGetBufferMemoryRequirements(m_device, stagingBuf, &stagingReqs);
+            VkMemoryAllocateInfo stagingAllocInfo{};
+            stagingAllocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+            stagingAllocInfo.allocationSize  = stagingReqs.size;
+            stagingAllocInfo.memoryTypeIndex = FindMemoryType(stagingReqs.memoryTypeBits,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            bool stagingOk =
+                stagingAllocInfo.memoryTypeIndex != UINT32_MAX &&
+                vkAllocateMemory(m_device, &stagingAllocInfo, nullptr, &stagingMem) == VK_SUCCESS &&
+                vkBindBufferMemory(m_device, stagingBuf, stagingMem, 0) == VK_SUCCESS;
+            if (stagingOk) {
+                void* mapped = nullptr;
+                stagingOk = vkMapMemory(m_device, stagingMem, 0, uploadSize, 0, &mapped) == VK_SUCCESS && mapped;
+                if (stagingOk) {
+                    std::memcpy(mapped, whitePixel, 4);
+                    vkUnmapMemory(m_device, stagingMem);
+                }
+            }
+            if (stagingOk) {
+                VkCommandBuffer uploadCmd = VK_NULL_HANDLE;
+                VkCommandBufferAllocateInfo uploadAllocInfo{};
+                uploadAllocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+                uploadAllocInfo.commandPool        = m_commandPool;
+                uploadAllocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+                uploadAllocInfo.commandBufferCount = 1;
+                stagingOk = vkAllocateCommandBuffers(m_device, &uploadAllocInfo, &uploadCmd) == VK_SUCCESS;
+                if (stagingOk) {
+                    VkCommandBufferBeginInfo uploadBegin{};
+                    uploadBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+                    uploadBegin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+                    stagingOk = vkBeginCommandBuffer(uploadCmd, &uploadBegin) == VK_SUCCESS;
+                    if (stagingOk) {
+                        VkImageMemoryBarrier toTransfer{};
+                        toTransfer.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                        toTransfer.dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
+                        toTransfer.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
+                        toTransfer.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                        toTransfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                        toTransfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                        toTransfer.image               = m_nativeMeshDummyImage;
+                        toTransfer.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+                        vkCmdPipelineBarrier(uploadCmd,
+                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                            0, 0, nullptr, 0, nullptr, 1, &toTransfer);
+
+                        VkBufferImageCopy copyRegion{};
+                        copyRegion.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+                        copyRegion.imageExtent      = { w, h, 1u };
+                        vkCmdCopyBufferToImage(uploadCmd, stagingBuf, m_nativeMeshDummyImage,
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+                        VkImageMemoryBarrier toRead{};
+                        toRead.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                        toRead.srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
+                        toRead.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT;
+                        toRead.oldLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                        toRead.newLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                        toRead.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                        toRead.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                        toRead.image               = m_nativeMeshDummyImage;
+                        toRead.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+                        vkCmdPipelineBarrier(uploadCmd,
+                            VK_PIPELINE_STAGE_TRANSFER_BIT,
+                            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                            0, 0, nullptr, 0, nullptr, 1, &toRead);
+
+                        stagingOk = vkEndCommandBuffer(uploadCmd) == VK_SUCCESS;
+                    }
+                    if (stagingOk) {
+                        VkSubmitInfo uploadSubmit{};
+                        uploadSubmit.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+                        uploadSubmit.commandBufferCount = 1;
+                        uploadSubmit.pCommandBuffers    = &uploadCmd;
+                        stagingOk =
+                            vkQueueSubmit(m_graphicsQueue, 1, &uploadSubmit, VK_NULL_HANDLE) == VK_SUCCESS &&
+                            vkQueueWaitIdle(m_graphicsQueue) == VK_SUCCESS;
+                    }
+                    vkFreeCommandBuffers(m_device, m_commandPool, 1, &uploadCmd);
+                }
+            }
+            if (stagingMem != VK_NULL_HANDLE) vkFreeMemory(m_device, stagingMem, nullptr);
+            if (stagingBuf != VK_NULL_HANDLE) vkDestroyBuffer(m_device, stagingBuf, nullptr);
+            if (!stagingOk) {
+                DebugLog("VulkanGraphicsDevice::EnsureNativeMeshResources: dummy texture upload failed.\n");
+                DestroyNativeMeshResources();
+                return false;
+            }
+
+            VkImageViewCreateInfo dummyViewInfo{};
+            dummyViewInfo.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            dummyViewInfo.image            = m_nativeMeshDummyImage;
+            dummyViewInfo.viewType         = VK_IMAGE_VIEW_TYPE_2D;
+            dummyViewInfo.format           = VK_FORMAT_R8G8B8A8_UNORM;
+            dummyViewInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+            if (vkCreateImageView(m_device, &dummyViewInfo, nullptr, &m_nativeMeshDummyImageView) != VK_SUCCESS) {
+                DebugLog("VulkanGraphicsDevice::EnsureNativeMeshResources: dummy image view failed.\n");
+                DestroyNativeMeshResources();
+                return false;
+            }
+        }
+
+        // --- descriptor set layout (t0=binding100 sampled image, s0=binding200 sampler) ---
+        {
+            VkDescriptorSetLayoutBinding bindings[2]{};
+            bindings[0].binding         = 100;
+            bindings[0].descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            bindings[0].descriptorCount = 1;
+            bindings[0].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
+            bindings[1].binding         = 200;
+            bindings[1].descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLER;
+            bindings[1].descriptorCount = 1;
+            bindings[1].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
+            VkDescriptorSetLayoutCreateInfo descLayoutInfo{};
+            descLayoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+            descLayoutInfo.bindingCount = 2;
+            descLayoutInfo.pBindings    = bindings;
+            if (vkCreateDescriptorSetLayout(m_device, &descLayoutInfo, nullptr, &m_nativeMeshDescSetLayout) != VK_SUCCESS) {
+                DebugLog("VulkanGraphicsDevice::EnsureNativeMeshResources: descriptor set layout failed.\n");
+                DestroyNativeMeshResources();
+                return false;
+            }
+        }
+
         VkPushConstantRange pushRange{};
         pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         pushRange.offset = 0;
         pushRange.size = sizeof(VulkanNativeMeshPushConstants);
 
         VkPipelineLayoutCreateInfo layoutInfo{};
-        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layoutInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layoutInfo.setLayoutCount         = 1;
+        layoutInfo.pSetLayouts            = &m_nativeMeshDescSetLayout;
         layoutInfo.pushConstantRangeCount = 1;
-        layoutInfo.pPushConstantRanges = &pushRange;
+        layoutInfo.pPushConstantRanges    = &pushRange;
         if (vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &m_nativeMeshPipelineLayout) != VK_SUCCESS) {
             DebugLog("VulkanGraphicsDevice::EnsureNativeMeshResources: vkCreatePipelineLayout failed.\n");
             return false;
@@ -572,6 +793,60 @@ namespace SasamiRenderer
                 DestroyNativeMeshResources();
                 return false;
             }
+        }
+
+        // --- descriptor pool (1024 sets for unique textures) ---
+        {
+            VkDescriptorPoolSize poolSizes[2]{};
+            poolSizes[0].type            = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            poolSizes[0].descriptorCount = 1024;
+            poolSizes[1].type            = VK_DESCRIPTOR_TYPE_SAMPLER;
+            poolSizes[1].descriptorCount = 1024;
+            VkDescriptorPoolCreateInfo poolInfo{};
+            poolInfo.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+            poolInfo.maxSets       = 1024;
+            poolInfo.poolSizeCount = 2;
+            poolInfo.pPoolSizes    = poolSizes;
+            if (vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_nativeMeshDescPool) != VK_SUCCESS) {
+                DebugLog("VulkanGraphicsDevice::EnsureNativeMeshResources: descriptor pool failed.\n");
+                DestroyNativeMeshResources();
+                return false;
+            }
+        }
+
+        // Pre-allocate descriptor set for key=0 (no-texture / dummy fallback)
+        {
+            VkDescriptorSetAllocateInfo dummyAlloc{};
+            dummyAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            dummyAlloc.descriptorPool     = m_nativeMeshDescPool;
+            dummyAlloc.descriptorSetCount = 1;
+            dummyAlloc.pSetLayouts        = &m_nativeMeshDescSetLayout;
+            VkDescriptorSet dummySet = VK_NULL_HANDLE;
+            if (vkAllocateDescriptorSets(m_device, &dummyAlloc, &dummySet) != VK_SUCCESS) {
+                DebugLog("VulkanGraphicsDevice::EnsureNativeMeshResources: dummy descriptor set alloc failed.\n");
+                DestroyNativeMeshResources();
+                return false;
+            }
+            VkDescriptorImageInfo dummyImageInfo{};
+            dummyImageInfo.imageView   = m_nativeMeshDummyImageView;
+            dummyImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            VkDescriptorImageInfo dummySamplerInfo{};
+            dummySamplerInfo.sampler = m_nativeMeshSampler;
+            VkWriteDescriptorSet writes[2]{};
+            writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[0].dstSet          = dummySet;
+            writes[0].dstBinding      = 100;
+            writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            writes[0].descriptorCount = 1;
+            writes[0].pImageInfo      = &dummyImageInfo;
+            writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[1].dstSet          = dummySet;
+            writes[1].dstBinding      = 200;
+            writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLER;
+            writes[1].descriptorCount = 1;
+            writes[1].pImageInfo      = &dummySamplerInfo;
+            vkUpdateDescriptorSets(m_device, 2, writes, 0, nullptr);
+            m_nativeMeshDescSets[0] = dummySet;
         }
 
         return true;
@@ -1096,18 +1371,20 @@ namespace SasamiRenderer
         beginInfo.pClearValues = clearValues;
         vkCmdBeginRenderPass(cmd, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
+        const float renderW = desc.renderWidth  > 0.0f ? desc.renderWidth  : static_cast<float>(m_swapchainExtent.width);
+        const float renderH = desc.renderHeight > 0.0f ? desc.renderHeight : static_cast<float>(m_swapchainExtent.height);
         VkViewport viewport{};
-        viewport.x = 0.0f;
-        viewport.y = 0.0f;
-        viewport.width = desc.renderWidth > 0.0f ? desc.renderWidth : static_cast<float>(m_swapchainExtent.width);
-        viewport.height = desc.renderHeight > 0.0f ? desc.renderHeight : static_cast<float>(m_swapchainExtent.height);
+        viewport.x        = 0.0f;
+        viewport.y        = renderH;    // Y-flip: start at bottom of image
+        viewport.width    = renderW;
+        viewport.height   = -renderH;   // negative height flips NDC Y (VK_KHR_maintenance1, core in 1.1)
         viewport.minDepth = 0.0f;
         viewport.maxDepth = 1.0f;
         VkRect2D scissor{};
         scissor.offset = { 0, 0 };
         scissor.extent = {
-            static_cast<uint32_t>(viewport.width),
-            static_cast<uint32_t>(viewport.height),
+            static_cast<uint32_t>(renderW),
+            static_cast<uint32_t>(renderH),
         };
         vkCmdSetViewport(cmd, 0, 1, &viewport);
         vkCmdSetScissor(cmd, 0, 1, &scissor);
@@ -1118,6 +1395,49 @@ namespace SasamiRenderer
             const auto vbIt = m_rhiResources.find(draw.vertexBufferHandle);
             if (vbIt == m_rhiResources.end() || vbIt->second.buffer == VK_NULL_HANDLE) {
                 continue;
+            }
+
+            // Bind texture descriptor set (create and cache on first use per SRV handle)
+            {
+                auto dsIt = m_nativeMeshDescSets.find(draw.albedoSrv);
+                if (dsIt == m_nativeMeshDescSets.end() && draw.albedoSrv != 0) {
+                    VkDescriptorSetAllocateInfo texAlloc{};
+                    texAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+                    texAlloc.descriptorPool     = m_nativeMeshDescPool;
+                    texAlloc.descriptorSetCount = 1;
+                    texAlloc.pSetLayouts        = &m_nativeMeshDescSetLayout;
+                    VkDescriptorSet newSet = VK_NULL_HANDLE;
+                    if (vkAllocateDescriptorSets(m_device, &texAlloc, &newSet) == VK_SUCCESS) {
+                        const auto viewIt = m_rhiImageViews.find(draw.albedoSrv);
+                        VkImageView view = (viewIt != m_rhiImageViews.end())
+                            ? viewIt->second : m_nativeMeshDummyImageView;
+                        VkDescriptorImageInfo imgInfo{};
+                        imgInfo.imageView   = view;
+                        imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                        VkDescriptorImageInfo smpInfo{};
+                        smpInfo.sampler = m_nativeMeshSampler;
+                        VkWriteDescriptorSet writes[2]{};
+                        writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                        writes[0].dstSet          = newSet;
+                        writes[0].dstBinding      = 100;
+                        writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+                        writes[0].descriptorCount = 1;
+                        writes[0].pImageInfo      = &imgInfo;
+                        writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                        writes[1].dstSet          = newSet;
+                        writes[1].dstBinding      = 200;
+                        writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLER;
+                        writes[1].descriptorCount = 1;
+                        writes[1].pImageInfo      = &smpInfo;
+                        vkUpdateDescriptorSets(m_device, 2, writes, 0, nullptr);
+                        m_nativeMeshDescSets[draw.albedoSrv] = newSet;
+                        dsIt = m_nativeMeshDescSets.find(draw.albedoSrv);
+                    }
+                }
+                const VkDescriptorSet bindSet = (dsIt != m_nativeMeshDescSets.end())
+                    ? dsIt->second : m_nativeMeshDescSets[0];
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    m_nativeMeshPipelineLayout, 0, 1, &bindSet, 0, nullptr);
             }
 
             VulkanNativeMeshPushConstants constants{};

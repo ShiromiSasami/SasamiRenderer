@@ -10,6 +10,9 @@ struct MeshPushConstants
 [[vk::push_constant]]
 ConstantBuffer<MeshPushConstants> g_mesh : register(b0);
 
+Texture2D<float4> g_albedo  : register(t0);
+SamplerState      g_sampler : register(s0);
+
 struct VSInput
 {
     float3 position : POSITION;
@@ -23,6 +26,7 @@ struct PSInput
     float4 position : SV_POSITION;
     float3 normal   : NORMAL;
     float4 color    : COLOR0;
+    float2 uv       : TEXCOORD0;
 };
 
 PSInput VSMain(VSInput input)
@@ -31,6 +35,7 @@ PSInput VSMain(VSInput input)
     output.position = mul(float4(input.position, 1.0f), g_mesh.modelViewProjection);
     output.normal = normalize(input.normal);
     output.color = input.color * g_mesh.baseColor;
+    output.uv = input.uv;
     return output;
 }
 
@@ -40,9 +45,11 @@ float4 PSMain(PSInput input) : SV_TARGET
     float3 l = normalize(-g_mesh.lightDirIntensity.xyz);
     float ndotl = saturate(dot(n, l));
     float ambient = 0.16f;
-    float3 lit = input.color.rgb * g_mesh.lightColor.rgb * (ambient + ndotl * g_mesh.lightDirIntensity.w);
+    float4 texSample = g_albedo.Sample(g_sampler, input.uv);
+    float4 surface = input.color * texSample;
+    float3 lit = surface.rgb * g_mesh.lightColor.rgb * (ambient + ndotl * g_mesh.lightDirIntensity.w);
     lit += g_mesh.emissiveRoughness.rgb;
     lit = lit / (lit + 1.0f);
     lit = pow(saturate(lit), 1.0f / 2.2f);
-    return float4(lit, input.color.a);
+    return float4(lit, surface.a);
 }

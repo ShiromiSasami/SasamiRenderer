@@ -1663,7 +1663,7 @@ void main()
 
             float mvp[16] = {};
             Math::Mul4x4(draw.model, desc.viewProjection, mvp);
-            uniformMatrix4fv(m_meshMvpLocation, 1, GL_TRUE, mvp);
+            uniformMatrix4fv(m_meshMvpLocation, 1, GL_FALSE, mvp);
             uniform4fv(m_meshBaseColorLocation, 1, draw.baseColor);
 
             const float lightDirIntensity[4] = {
