@@ -51,6 +51,11 @@ namespace SasamiRenderer
         void ClearModel();
         void SetTranslation(float x, float y, float z);
 
+        const std::string& GetModelPath() const    { return MeshComponentRef().GetAssetPath(); }
+        ModelFormat GetModelFormat() const          { return MeshComponentRef().GetLoadedFormat(); }
+        float GetModelUniformScale() const          { return MeshComponentRef().GetLoadedUniformScale(); }
+        Vector3 GetModelTranslation() const         { return MeshComponentRef().GetTranslation(); }
+
         MeshComponent& MeshComponentRef()
         {
             MeshComponent* component = GetComponent<MeshComponent>();

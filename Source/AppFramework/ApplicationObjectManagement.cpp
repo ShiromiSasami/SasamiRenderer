@@ -104,6 +104,21 @@ namespace SasamiRenderer
         return out;
     }
 
+    std::vector<StaticModel*> ApplicationCore::GetStaticModels() const
+    {
+        std::vector<StaticModel*> out;
+        const auto entities = m_ecsRegistry.ViewPreset(EcsRegistry::EntityPreset::StaticModel);
+        out.reserve(entities.size());
+        for (const EntityId entity : entities) {
+            const auto* objectRef = m_ecsRegistry.GetComponent<ObjectRefComponent>(entity);
+            if (!objectRef || !objectRef->object) {
+                continue;
+            }
+            out.push_back(static_cast<StaticModel*>(objectRef->object));
+        }
+        return out;
+    }
+
     bool ApplicationCore::SetMainCamera(Camera* camera)
     {
         if (!camera) {

@@ -89,6 +89,8 @@ namespace SasamiRenderer
 
         if (!m_staticMeshes.empty()) {
             m_debugAssetPath = assetPath;
+            m_loadedFormat = format;
+            m_loadedUniformScale = uniformScale;
         }
         return !m_staticMeshes.empty();
     }

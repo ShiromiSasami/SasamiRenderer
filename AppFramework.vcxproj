@@ -77,6 +77,7 @@
     <ClCompile Include="Source\AppFramework\ApplicationResourcePaths.cpp" />
     <ClCompile Include="Source\AppFramework\ApplicationCore_Properties.cpp" />
     <ClCompile Include="Source\AppFramework\ApplicationObjectManagement.cpp" />
+    <ClCompile Include="Source\AppFramework\ApplicationCoreScene.cpp" />
     <ClCompile Include="Source\AppFramework\Component\MeshComponent.cpp" />
     <ClCompile Include="Source\AppFramework\Component\SkinnedMeshComponent.cpp" />
     <ClCompile Include="Source\AppFramework\Object\Camera.cpp" />

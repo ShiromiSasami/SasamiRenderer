@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "AppFramework/Component/IComponent.h"
+#include "Foundation/Math/Vector3.h"
 #include "Renderer/Scene/RenderProxy.h"
 #include "Renderer/Structures/Mesh.h"
 
@@ -36,6 +37,11 @@ namespace SasamiRenderer
         void Clear();
         void SetTranslation(float x, float y, float z);
 
+        const std::string& GetAssetPath() const { return m_debugAssetPath; }
+        ModelFormat GetLoadedFormat() const      { return m_loadedFormat; }
+        float GetLoadedUniformScale() const      { return m_loadedUniformScale; }
+        Vector3 GetTranslation() const           { return { m_model[12], m_model[13], m_model[14] }; }
+
     private:
         struct StaticMeshSource
         {
@@ -54,6 +60,8 @@ namespace SasamiRenderer
 
         std::vector<StaticMeshSource> m_staticMeshes;
         std::string m_debugAssetPath;
+        ModelFormat m_loadedFormat = ModelFormat::Gltf;
+        float m_loadedUniformScale = 1.0f;
         float m_model[16] = {
             1,0,0,0,
             0,1,0,0,

@@ -197,6 +197,9 @@ namespace SasamiRenderer
         SpotLight* CreateSpotLightObject() { return CreateObject<SpotLight>(); }
         std::vector<PointLight*> GetPointLightObjects() const;
         std::vector<SpotLight*> GetSpotLightObjects() const;
+        std::vector<StaticModel*> GetStaticModels() const;
+        bool SaveScene(const std::string& path) const;
+        bool LoadScene(const std::string& path);
         Camera* CreateCameraObject();
         bool SetMainCamera(Camera* camera);
         Camera* GetMainCamera() const { return m_activeCamera; }
