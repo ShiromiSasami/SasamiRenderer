@@ -34,6 +34,11 @@ namespace SasamiRenderer
         void BindInputEvents(ApplicationCore& app);
         void RegisterUi(ApplicationCore& app);
 
+        // Session persistence: render settings + GI toggles + app UI settings.
+        // Camera and lights are persisted separately via ApplicationCore SaveScene/ApplyCameraAndLights.
+        void SaveSessionState(ApplicationCore& app) const;
+        void LoadSessionState(ApplicationCore& app);
+
         Camera* m_camera = nullptr;
         StaticModel* m_sphereModel = nullptr;
         StaticModel* m_boxModel = nullptr;

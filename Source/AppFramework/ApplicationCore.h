@@ -200,6 +200,10 @@ namespace SasamiRenderer
         std::vector<StaticModel*> GetStaticModels() const;
         bool SaveScene(const std::string& path) const;
         bool LoadScene(const std::string& path);
+        // Non-destructive: applies [camera]/[directional_light]/[point_light]/[spot_light]
+        // onto existing objects without clearing the scene. Ignores [static_model] and
+        // unknown sections. Intended for restoring saved view/light state at startup.
+        bool ApplyCameraAndLights(const std::string& path);
         Camera* CreateCameraObject();
         bool SetMainCamera(Camera* camera);
         Camera* GetMainCamera() const { return m_activeCamera; }

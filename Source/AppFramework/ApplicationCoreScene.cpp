@@ -39,6 +39,55 @@ namespace SasamiRenderer
         }
 
         static const char* kHeader = "# SasamiRenderer Scene v1\n";
+
+        // Parses an INI-like stream. Invokes onSection(sectionName, kv) at every
+        // section boundary and once at EOF for the final section.
+        template <typename OnSection>
+        void ParseIniStream(std::istream& in, OnSection&& onSection)
+        {
+            std::string currentSection;
+            std::unordered_map<std::string, std::string> kv;
+
+            const auto flush = [&]() {
+                onSection(currentSection, kv);
+                kv.clear();
+            };
+
+            std::string line;
+            while (std::getline(in, line)) {
+                if (line.empty() || line[0] == '#') continue;
+
+                if (line[0] == '[') {
+                    flush();
+                    const auto close = line.find(']');
+                    currentSection = (close != std::string::npos)
+                        ? line.substr(1, close - 1) : "";
+                    continue;
+                }
+
+                const auto eq = line.find('=');
+                if (eq == std::string::npos) continue;
+
+                std::string key = line.substr(0, eq);
+                std::string val = line.substr(eq + 1);
+
+                const auto ltrim = [](std::string& s) {
+                    const auto it = s.find_first_not_of(" \t\r\n");
+                    if (it != std::string::npos) s = s.substr(it);
+                    else s.clear();
+                };
+                const auto rtrim = [](std::string& s) {
+                    const auto it = s.find_last_not_of(" \t\r\n");
+                    if (it != std::string::npos) s = s.substr(0, it + 1);
+                    else s.clear();
+                };
+                ltrim(key); rtrim(key);
+                ltrim(val); rtrim(val);
+
+                if (!key.empty()) kv[key] = val;
+            }
+            flush(); // handle last section
+        }
     }
 
     bool ApplicationCore::SaveScene(const std::string& path) const
@@ -137,10 +186,8 @@ namespace SasamiRenderer
 
         ClearObjects();
 
-        std::string currentSection;
-        std::unordered_map<std::string, std::string> kv;
-
-        auto flush = [&]() {
+        ParseIniStream(in, [&](const std::string& currentSection,
+                               const std::unordered_map<std::string, std::string>& kv) {
             if (currentSection == "directional_light") {
                 DirectionalLight dl = GetDirectionalLight();
                 dl.yaw       = ParseFloat(kv, "yaw",       dl.yaw);
@@ -216,44 +263,82 @@ namespace SasamiRenderer
                 sl->ColorData()[1] = ParseFloat(kv, "g", 1.0f);
                 sl->ColorData()[2] = ParseFloat(kv, "b", 1.0f);
             }
-            kv.clear();
-        };
+        });
 
-        std::string line;
-        while (std::getline(in, line)) {
-            if (line.empty() || line[0] == '#') continue;
+        InvalidateRenderObjects();
+        return true;
+    }
 
-            if (line[0] == '[') {
-                flush();
-                const auto close = line.find(']');
-                currentSection = (close != std::string::npos)
-                    ? line.substr(1, close - 1) : "";
-                continue;
+    bool ApplicationCore::ApplyCameraAndLights(const std::string& path)
+    {
+        std::ifstream in(path);
+        if (!in.is_open()) return false;
+
+        // Non-destructive: apply onto the currently active camera and existing
+        // directional light; point/spot lights from the file are appended. The
+        // procedural scene geometry created by the app is left untouched.
+        ParseIniStream(in, [&](const std::string& currentSection,
+                               const std::unordered_map<std::string, std::string>& kv) {
+            if (currentSection == "directional_light") {
+                DirectionalLight dl = GetDirectionalLight();
+                dl.yaw       = ParseFloat(kv, "yaw",       dl.yaw);
+                dl.pitch     = ParseFloat(kv, "pitch",     dl.pitch);
+                dl.distance  = ParseFloat(kv, "distance",  dl.distance);
+                dl.orthoHalf = ParseFloat(kv, "ortho_half",dl.orthoHalf);
+                dl.nearZ     = ParseFloat(kv, "near_z",    dl.nearZ);
+                dl.farZ      = ParseFloat(kv, "far_z",     dl.farZ);
+                dl.intensity = ParseFloat(kv, "intensity", dl.intensity);
+                dl.color.r   = ParseFloat(kv, "r",         dl.color.r);
+                dl.color.g   = ParseFloat(kv, "g",         dl.color.g);
+                dl.color.b   = ParseFloat(kv, "b",         dl.color.b);
+                SetDirectionalLight(dl);
             }
-
-            const auto eq = line.find('=');
-            if (eq == std::string::npos) continue;
-
-            std::string key = line.substr(0, eq);
-            std::string val = line.substr(eq + 1);
-
-            // trim leading/trailing whitespace
-            const auto ltrim = [](std::string& s) {
-                const auto it = s.find_first_not_of(" \t\r\n");
-                if (it != std::string::npos) s = s.substr(it);
-                else s.clear();
-            };
-            const auto rtrim = [](std::string& s) {
-                const auto it = s.find_last_not_of(" \t\r\n");
-                if (it != std::string::npos) s = s.substr(0, it + 1);
-                else s.clear();
-            };
-            ltrim(key); rtrim(key);
-            ltrim(val); rtrim(val);
-
-            if (!key.empty()) kv[key] = val;
-        }
-        flush(); // handle last section
+            else if (currentSection == "camera") {
+                Camera* cam = GetActiveCamera();
+                if (!cam) cam = CreateCameraObject();
+                if (!cam) return;
+                cam->SetTarget(
+                    ParseFloat(kv, "target_x"),
+                    ParseFloat(kv, "target_y"),
+                    ParseFloat(kv, "target_z"));
+                cam->SetYawPitch(
+                    ParseFloat(kv, "yaw"),
+                    ParseFloat(kv, "pitch"));
+                cam->SetDistance(ParseFloat(kv, "distance", 2.5f));
+                cam->SetClipPlanes(
+                    ParseFloat(kv, "near_clip", 0.0005f),
+                    ParseFloat(kv, "far_clip",  500.0f));
+                cam->SetMoveSpeed(ParseFloat(kv, "move_speed", 1.0f));
+                SetMainCamera(cam);
+            }
+            else if (currentSection == "point_light") {
+                PointLight* pl = CreatePointLightObject();
+                pl->Transform().position.x = ParseFloat(kv, "x");
+                pl->Transform().position.y = ParseFloat(kv, "y");
+                pl->Transform().position.z = ParseFloat(kv, "z");
+                pl->SetRange(ParseFloat(kv, "range", 5.0f));
+                pl->SetIntensity(ParseFloat(kv, "intensity", 1.0f));
+                pl->ColorData()[0] = ParseFloat(kv, "r", 1.0f);
+                pl->ColorData()[1] = ParseFloat(kv, "g", 1.0f);
+                pl->ColorData()[2] = ParseFloat(kv, "b", 1.0f);
+            }
+            else if (currentSection == "spot_light") {
+                SpotLight* sl = CreateSpotLightObject();
+                sl->Transform().position.x      = ParseFloat(kv, "x");
+                sl->Transform().position.y      = ParseFloat(kv, "y");
+                sl->Transform().position.z      = ParseFloat(kv, "z");
+                sl->Transform().rotation.pitch  = ParseFloat(kv, "pitch");
+                sl->Transform().rotation.yaw    = ParseFloat(kv, "yaw");
+                sl->SetRange(ParseFloat(kv, "range", 6.0f));
+                sl->SetIntensity(ParseFloat(kv, "intensity", 1.0f));
+                sl->SetInnerAngle(ParseFloat(kv, "inner_angle", 0.261799f));
+                sl->SetOuterAngle(ParseFloat(kv, "outer_angle", 0.436332f));
+                sl->ColorData()[0] = ParseFloat(kv, "r", 1.0f);
+                sl->ColorData()[1] = ParseFloat(kv, "g", 1.0f);
+                sl->ColorData()[2] = ParseFloat(kv, "b", 1.0f);
+            }
+            // [static_model] and unknown sections are intentionally ignored.
+        });
 
         InvalidateRenderObjects();
         return true;

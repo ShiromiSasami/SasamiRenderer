@@ -186,6 +186,12 @@ namespace SasamiRenderer
         void SetGraphicsBackend(GraphicsBackend backend) { SetRHIBackend(backend); }
         GraphicsBackend GetGraphicsBackend() const { return GetRHIBackend(); }
 
+        // Whole-struct access for persistence (save/restore the full render config).
+        // m_settings is a RenderFeatureSettings (adds clamping helpers, no extra data),
+        // so assigning through the RenderSettings base copies all persisted fields.
+        const RenderSettings& GetRenderSettings() const { return m_settings; }
+        void SetRenderSettings(const RenderSettings& settings) { static_cast<RenderSettings&>(m_settings) = settings; }
+
         float GetIblIntensity() const { return m_settings.iblIntensity; }
         void SetIblIntensity(float intensity) { m_settings.SetIblIntensity(intensity); }
         void ResizeViewport(UINT width, UINT height);

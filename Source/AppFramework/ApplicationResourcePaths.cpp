@@ -101,6 +101,14 @@ namespace SasamiRenderer
         return {};
     }
 
+    std::string ApplicationResourcePaths::ResolveConfigPathString(const std::string& fileName)
+    {
+        const std::filesystem::path projectRoot = FindProjectRootWithAssets(GetExecutableDir());
+        const std::filesystem::path baseDir =
+            !projectRoot.empty() ? projectRoot : GetExecutableDir();
+        return (baseDir / std::filesystem::path(fileName)).string();
+    }
+
     bool ApplicationResourcePaths::ResolveCubemapFacePaths(const std::string& directoryPath,
                                                            std::array<std::wstring, 6>& outPaths)
     {

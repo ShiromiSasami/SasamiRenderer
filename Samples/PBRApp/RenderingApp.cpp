@@ -6,6 +6,8 @@
 #include "ApplicationEntryPoint.h"
 #include "Foundation/Tools/DebugOutput.h"
 #include "Renderer/Structures/RendererEnums.h"
+#include "Renderer/Runtime/Renderer.h"
+#include "ApplicationResourcePaths.h"
 #include "imgui.h"
 
 #include <windows.h>
@@ -13,6 +15,10 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <map>
+#include <string>
 #include <vector>
 
 namespace SasamiRenderer
@@ -29,6 +35,10 @@ namespace SasamiRenderer
             return std::fmin(std::fmax(strength, 0.0f), 1.0f);
         }
         constexpr const char* kSponzaPath = "Models/Sponza/glTF/Sponza.gltf";
+
+        // Session persistence file names (resolved to project root / exe dir at runtime).
+        constexpr const char* kSceneStateFile    = "PBRApp.scene";
+        constexpr const char* kSettingsStateFile = "PBRApp.settings.ini";
 
         struct RenderPassBuilderUiEntry
         {
@@ -276,6 +286,207 @@ namespace SasamiRenderer
         }
     }
 
+    void RenderingApp::SaveSessionState(ApplicationCore& app) const
+    {
+        // Camera + lights via the framework scene writer.
+        app.SaveScene(ApplicationResourcePaths::ResolveConfigPathString(kSceneStateFile));
+
+        // Render settings + GI toggles + app UI settings.
+        const std::string path = ApplicationResourcePaths::ResolveConfigPathString(kSettingsStateFile);
+        std::ofstream out(path);
+        if (!out.is_open()) {
+            DebugLog("PBRApp: failed to open settings state file for writing.\n");
+            return;
+        }
+
+        Renderer& renderer = app.GetRenderer();
+        const RenderSettings& s = renderer.GetRenderSettings();
+
+        out << "# SasamiRenderer PBRApp settings v1\n";
+        out << "[render_settings]\n";
+#define WRITE_F(field) out << #field " = " << s.field << '\n'
+#define WRITE_U(field) out << #field " = " << s.field << '\n'
+#define WRITE_B(field) out << #field " = " << (s.field ? 1 : 0) << '\n'
+#define WRITE_E(field) out << #field " = " << static_cast<int>(s.field) << '\n'
+        WRITE_F(iblIntensity);
+        WRITE_B(useTessellation);
+        WRITE_B(tessWireframeEnabled);
+        WRITE_B(tessDebugColorsEnabled);
+        WRITE_B(meshletDebugViewEnabled);
+        WRITE_B(useMeshShader);
+        WRITE_E(rasterShaderMode);
+        WRITE_E(renderPathMode);
+        WRITE_E(rayTracingPerformancePreset);
+        WRITE_B(rayTracingDynamicResolutionEnabled);
+        WRITE_U(rayTracingMaxBounceCount);
+        WRITE_B(rasterSoftwareRayTracedDirectionalShadowEnabled);
+        WRITE_B(rasterSoftwareRayTracedReflectionEnabled);
+        WRITE_B(rasterScreenSpaceReflectionEnabled);
+        WRITE_B(rasterSoftwareRayTracedAmbientOcclusionEnabled);
+        WRITE_E(ambientOcclusionMode);
+        WRITE_E(runtimeAoMethod);
+        WRITE_B(swrtUseReSTIR);
+        WRITE_U(swrtSamplingMode);
+        WRITE_U(swrtSamplesPerPixel);
+        WRITE_U(swrtMaxBounces);
+        WRITE_B(swrtDenoiserEnabled);
+        WRITE_F(swrtReflectionTemporalAlpha);
+        WRITE_U(swrtReflectionAtrousIterations);
+        WRITE_F(swrtReflectionAtrousPhiDepth);
+        WRITE_B(volumetricCloudEnabled);
+        WRITE_F(cloudCover);
+        WRITE_F(cloudDensity);
+        WRITE_F(cloudWindSpeed);
+        WRITE_F(cloudBaseAlt);
+        WRITE_F(cloudTopAlt);
+        WRITE_B(runtimeAoEnabled);
+        WRITE_F(runtimeAoRadius);
+        WRITE_F(runtimeAoBias);
+        WRITE_F(runtimeAoIntensity);
+        WRITE_F(aoMinOcclusion);
+        WRITE_F(runtimeAoThickness);
+        WRITE_U(runtimeAoQuality);
+        WRITE_U(swrtAoSampleCount);
+        WRITE_E(gBufferDebugView);
+        WRITE_F(hardwareRayTracingResolutionScale);
+        WRITE_B(vsmBlurEnabled);
+#undef WRITE_F
+#undef WRITE_U
+#undef WRITE_B
+#undef WRITE_E
+
+        out << "[gi]\n";
+        out << "enabled = "   << (renderer.GetGIEnabled() ? 1 : 0) << '\n';
+        out << "intensity = " << renderer.GetGIIntensity()         << '\n';
+        out << "ema_alpha = " << renderer.GetGIEmaAlpha()          << '\n';
+
+        out << "[app]\n";
+        out << "probe_preset = "      << m_probeGridPreset            << '\n';
+        out << "show_light_gizmo = "  << (m_showLightGizmo ? 1 : 0)   << '\n';
+        out << "show_light_gizmos = " << (m_showLightGizmos ? 1 : 0)  << '\n';
+    }
+
+    void RenderingApp::LoadSessionState(ApplicationCore& app)
+    {
+        const std::string settingsPath =
+            ApplicationResourcePaths::ResolveConfigPathString(kSettingsStateFile);
+        std::ifstream in(settingsPath);
+        if (in.is_open()) {
+            std::map<std::string, std::map<std::string, std::string>> sections;
+            std::string section;
+            std::string line;
+            while (std::getline(in, line)) {
+                const auto trim = [](std::string& v) {
+                    const auto b = v.find_first_not_of(" \t\r\n");
+                    const auto e = v.find_last_not_of(" \t\r\n");
+                    v = (b == std::string::npos) ? std::string{} : v.substr(b, e - b + 1);
+                };
+                trim(line);
+                if (line.empty() || line[0] == '#') continue;
+                if (line[0] == '[') {
+                    const auto close = line.find(']');
+                    section = (close != std::string::npos) ? line.substr(1, close - 1) : "";
+                    continue;
+                }
+                const auto eq = line.find('=');
+                if (eq == std::string::npos) continue;
+                std::string key = line.substr(0, eq);
+                std::string val = line.substr(eq + 1);
+                trim(key);
+                trim(val);
+                if (!key.empty()) sections[section][key] = val;
+            }
+
+            const auto find = [&](const std::string& sec, const char* key) -> const std::string* {
+                auto si = sections.find(sec);
+                if (si == sections.end()) return nullptr;
+                auto ki = si->second.find(key);
+                return (ki == si->second.end()) ? nullptr : &ki->second;
+            };
+            const auto getF = [&](const std::string& sec, const char* key, float def) {
+                const std::string* v = find(sec, key);
+                if (!v) return def;
+                try { return std::stof(*v); } catch (...) { return def; }
+            };
+            const auto getI = [&](const std::string& sec, const char* key, long def) {
+                const std::string* v = find(sec, key);
+                if (!v) return def;
+                try { return std::stol(*v); } catch (...) { return def; }
+            };
+            const auto getB = [&](const std::string& sec, const char* key, bool def) {
+                return getI(sec, key, def ? 1 : 0) != 0;
+            };
+
+            Renderer& renderer = app.GetRenderer();
+            RenderSettings s = renderer.GetRenderSettings(); // start from current defaults
+#define READ_F(field) s.field = getF("render_settings", #field, s.field)
+#define READ_U(field) s.field = static_cast<uint32_t>(getI("render_settings", #field, static_cast<long>(s.field)))
+#define READ_B(field) s.field = getB("render_settings", #field, s.field)
+#define READ_E(field) s.field = static_cast<decltype(s.field)>(getI("render_settings", #field, static_cast<long>(s.field)))
+            READ_F(iblIntensity);
+            READ_B(useTessellation);
+            READ_B(tessWireframeEnabled);
+            READ_B(tessDebugColorsEnabled);
+            READ_B(meshletDebugViewEnabled);
+            READ_B(useMeshShader);
+            READ_E(rasterShaderMode);
+            READ_E(renderPathMode);
+            READ_E(rayTracingPerformancePreset);
+            READ_B(rayTracingDynamicResolutionEnabled);
+            READ_U(rayTracingMaxBounceCount);
+            READ_B(rasterSoftwareRayTracedDirectionalShadowEnabled);
+            READ_B(rasterSoftwareRayTracedReflectionEnabled);
+            READ_B(rasterScreenSpaceReflectionEnabled);
+            READ_B(rasterSoftwareRayTracedAmbientOcclusionEnabled);
+            READ_E(ambientOcclusionMode);
+            READ_E(runtimeAoMethod);
+            READ_B(swrtUseReSTIR);
+            READ_U(swrtSamplingMode);
+            READ_U(swrtSamplesPerPixel);
+            READ_U(swrtMaxBounces);
+            READ_B(swrtDenoiserEnabled);
+            READ_F(swrtReflectionTemporalAlpha);
+            READ_U(swrtReflectionAtrousIterations);
+            READ_F(swrtReflectionAtrousPhiDepth);
+            READ_B(volumetricCloudEnabled);
+            READ_F(cloudCover);
+            READ_F(cloudDensity);
+            READ_F(cloudWindSpeed);
+            READ_F(cloudBaseAlt);
+            READ_F(cloudTopAlt);
+            READ_B(runtimeAoEnabled);
+            READ_F(runtimeAoRadius);
+            READ_F(runtimeAoBias);
+            READ_F(runtimeAoIntensity);
+            READ_F(aoMinOcclusion);
+            READ_F(runtimeAoThickness);
+            READ_U(runtimeAoQuality);
+            READ_U(swrtAoSampleCount);
+            READ_E(gBufferDebugView);
+            READ_F(hardwareRayTracingResolutionScale);
+            READ_B(vsmBlurEnabled);
+#undef READ_F
+#undef READ_U
+#undef READ_B
+#undef READ_E
+            renderer.SetRenderSettings(s);
+
+            renderer.SetGIEnabled(getB("gi", "enabled", renderer.GetGIEnabled()));
+            renderer.SetGIIntensity(getF("gi", "intensity", renderer.GetGIIntensity()));
+            renderer.SetGIEmaAlpha(getF("gi", "ema_alpha", renderer.GetGIEmaAlpha()));
+
+            m_probeGridPreset = static_cast<int>(getI("app", "probe_preset", m_probeGridPreset));
+            m_showLightGizmo  = getB("app", "show_light_gizmo", m_showLightGizmo);
+            m_showLightGizmos = getB("app", "show_light_gizmos", m_showLightGizmos);
+            ApplyProbeGridPreset(app, m_probeGridPreset);
+        }
+
+        // Camera + lights (non-destructive: applied onto existing objects; overrides
+        // the default view/lights when a saved scene file is present).
+        app.ApplyCameraAndLights(
+            ApplicationResourcePaths::ResolveConfigPathString(kSceneStateFile));
+    }
+
     void RenderingApp::OnInit(ApplicationCore& app)
     {
         m_camera = app.CreateCameraObject();
@@ -390,6 +601,10 @@ namespace SasamiRenderer
 
         BindInputEvents(app);
         RegisterUi(app);
+
+        // Restore camera, lights and settings saved from a previous run (if any).
+        // Applied last so it overrides the default view/lights/settings above.
+        LoadSessionState(app);
     }
 
     void RenderingApp::OnUpdate(ApplicationCore& app, float deltaTime)
@@ -410,6 +625,9 @@ namespace SasamiRenderer
 
     void RenderingApp::OnShutdown(ApplicationCore& app)
     {
+        // Persist camera, lights and settings before the scene objects are destroyed.
+        SaveSessionState(app);
+
         app.ClearObjects();
         m_camera = nullptr;
         m_sphereModel = nullptr;

@@ -388,3 +388,7 @@ ia/
 
 # VS Code Local History extension
 .history/
+
+# Per-user runtime session state (saved camera / lights / render settings)
+PBRApp.scene
+PBRApp.settings.ini

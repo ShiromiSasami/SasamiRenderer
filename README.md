@@ -187,6 +187,16 @@ Status as of 2026-06-28:
 - Non-DX12 configurations exclude the DX12 RHI ray-tracing implementation at translation-unit scope. This prevents Vulkan, DX11, and OpenGL builds from compiling definitions for the macro-hidden `Dx12GraphicsDevice` class.
 - Remaining limitation: several DX12 feature-path systems still expose GPU virtual addresses for constant buffers, shader resource buffers, and ray tracing structures. SWRT/DXR BVH, acceleration structure, scratch/result buffers, and upload-helper staging resources remain direct DX12 allocations where the current RHI contract does not yet represent the required build/copy/state semantics. Future work should move these resource owners to RHI handles where the backend contract can represent the required binding type and synchronization requirements.
 
+## セッション永続化 (PBRApp)
+
+PBRApp は終了時にカメラ・ライト・描画設定を保存し、次回起動時に自動復元します。手続き生成される球/箱シーンは破壊されません。
+
+- 保存対象: メインカメラ (`target`/`yaw`/`pitch`/`distance`/`clip`/`move_speed`)、directional light、ユーザーが追加した point/spot light、`RenderSettings` 構造体全フィールド、GI トグル (enabled/intensity/ema)、probe grid preset、ライトギズモ表示フラグ。
+- 保存先 (プロジェクトルート、per-user・git 管理外): `PBRApp.scene`（カメラ+ライト）と `PBRApp.settings.ini`（描画/アプリ設定）。パスは `ApplicationResourcePaths::ResolveConfigPathString()` が解決。
+- 復元は非破壊: `ApplicationCore::ApplyCameraAndLights()` が `ClearObjects()` を呼ばず、既存のアクティブカメラ・directional light へ in-place 適用し、保存済み point/spot light のみ再構築します（`[static_model]` と未知セクションは無視）。破壊的なフルロードが必要な用途向けに `LoadScene()` は従来どおり残しています。
+- レンダラは `Renderer::GetRenderSettings()/SetRenderSettings()` で `RenderSettings` を一括 round-trip します。
+- 保存されないもの: GI のベイク結果データ（トグルのみ保存し、起動後に再ベイク）、skybox パス、ImGui ウィンドウレイアウト（`imgui.ini` が別管理）。
+
 Implementation references for the portable buffer copy/readback contract:
 
 - Microsoft `D3D12_HEAP_TYPE`: readback-heap resources must remain in `D3D12_RESOURCE_STATE_COPY_DEST`: https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ne-d3d12-d3d12_heap_type
