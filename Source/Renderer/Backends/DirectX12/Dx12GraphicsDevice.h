@@ -47,6 +47,8 @@ namespace SasamiRenderer
         RhiPipelineLayoutHandle CreateRhiPipelineLayout(const RhiPipelineLayoutDesc& desc) override;
         RhiPipelineHandle CreateRhiGraphicsPipeline(const RhiGraphicsPipelineDesc& desc) override;
         RhiPipelineHandle CreateRhiComputePipeline(const RhiComputePipelineDesc& desc) override;
+        RhiPipelineLayoutHandle GetBindablePipelineLayoutHandle(RhiPipelineLayoutHandle handle) override;
+        RhiPipelineHandle GetBindablePipelineHandle(RhiPipelineHandle handle) override;
         RhiDescriptorAllocation AllocateRhiDescriptors(RhiDescriptorHeapType type,
                                                       uint32_t count,
                                                       bool shaderVisible) override;

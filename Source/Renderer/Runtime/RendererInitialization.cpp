@@ -396,13 +396,7 @@ namespace SasamiRenderer
 
         // Insert the debug probe grid after sky composition so deferred lighting has already
         // produced SceneColor. Transparent passes still come later and can draw over it.
-        if (m_debugProbeGridRenderPass && m_debugProbeGridRenderPass->IsInitialized()) {
-            if (!AddPassAfter("Skybox", m_debugProbeGridRenderPass).IsValid()) {
-                if (!AddPassAfter("Lighting", m_debugProbeGridRenderPass).IsValid()) {
-                    AddPass(m_debugProbeGridRenderPass);
-                }
-            }
-        }
+        EnsureDebugProbeGridPassInserted();
 
         return true;
     }

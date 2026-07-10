@@ -838,6 +838,7 @@ namespace SasamiRenderer
     void Renderer::UseDefaultRenderNodePreset()
     {
         m_passRegistry.UseDefaultRenderNodePreset();
+        EnsureDebugProbeGridPassInserted();
         EnsureVolumetricCloudPassInserted();
     }
 
@@ -1076,22 +1077,26 @@ namespace SasamiRenderer
         // Re-insert non-builtin nodes that were previously added via AddPassBefore/AddPassAfter.
         // SetRenderPassSequence calls ClearPasses() internally, which removes them.
         // Keep the probe grid after Lighting/Skybox so deferred PBR has already produced SceneColor.
-        if (m_debugProbeGridRenderPass && m_debugProbeGridRenderPass->IsInitialized()) {
-            if (!AddPassAfter("Skybox", m_debugProbeGridRenderPass).IsValid()) {
-                if (!AddPassAfter("Lighting", m_debugProbeGridRenderPass).IsValid()) {
-                    AddPass(m_debugProbeGridRenderPass);
-                }
-            }
-        }
+        EnsureDebugProbeGridPassInserted();
         EnsureVolumetricCloudPassInserted();
+    }
+
+    void Renderer::EnsureDebugProbeGridPassInserted()
+    {
+        if (!m_debugProbeGridRenderPass ||
+            !m_debugProbeGridRenderPass->IsInitialized() ||
+            HasRenderPass("DebugProbeGrid")) {
+            return;
+        }
+        // After Lighting/Skybox so deferred PBR has already produced SceneColor.
+        if (AddPassAfter("Skybox", m_debugProbeGridRenderPass).IsValid()) return;
+        if (AddPassAfter("Lighting", m_debugProbeGridRenderPass).IsValid()) return;
+        AddPass(m_debugProbeGridRenderPass);
     }
 
     void Renderer::ReinsertDebugProbeGrid()
     {
-        if (!m_debugProbeGridRenderPass || !m_debugProbeGridRenderPass->IsInitialized()) return;
-        if (AddPassAfter("Skybox", m_debugProbeGridRenderPass).IsValid()) return;
-        if (AddPassAfter("Lighting", m_debugProbeGridRenderPass).IsValid()) return;
-        AddPass(m_debugProbeGridRenderPass);
+        EnsureDebugProbeGridPassInserted();
     }
 
     void Renderer::UpdateCameraCB(const RenderCameraProxy* camera)

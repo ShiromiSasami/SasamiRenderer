@@ -91,6 +91,13 @@ namespace SasamiRenderer
         virtual RhiPipelineLayoutHandle CreateRhiPipelineLayout(const RhiPipelineLayoutDesc& desc) = 0;
         virtual RhiPipelineHandle CreateRhiGraphicsPipeline(const RhiGraphicsPipelineDesc& desc) = 0;
         virtual RhiPipelineHandle CreateRhiComputePipeline(const RhiComputePipelineDesc& desc) = 0;
+        // Create*Pipeline handles carry a backend-internal id (e.g. a map key). Command-encoder
+        // binding, however, expects a handle whose id is the raw native object pointer (see
+        // RenderPipelineStateCache::MakeLayoutHandle/MakePipelineHandle). These convert a created
+        // handle into the encoder-bindable form. Default: identity (backends whose create handles
+        // are already bindable, or which do not use these create paths).
+        virtual RhiPipelineLayoutHandle GetBindablePipelineLayoutHandle(RhiPipelineLayoutHandle handle) { return handle; }
+        virtual RhiPipelineHandle GetBindablePipelineHandle(RhiPipelineHandle handle) { return handle; }
         virtual RhiDescriptorAllocation AllocateRhiDescriptors(RhiDescriptorHeapType type,
                                                               uint32_t count,
                                                               bool shaderVisible) = 0;

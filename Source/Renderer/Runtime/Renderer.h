@@ -331,7 +331,7 @@ namespace SasamiRenderer
         void  SetCloudTopAlt(float v) { m_settings.cloudTopAlt = v; if (m_volumetricCloudRenderPass) m_volumetricCloudRenderPass->SetCloudTopAlt(v); }
 
         bool GetDebugProbeGridEnabled()      const { return m_debugProbeGridRenderPass ? m_debugProbeGridRenderPass->IsEnabled() : false; }
-        void SetDebugProbeGridEnabled(bool e)      { if (m_debugProbeGridRenderPass) m_debugProbeGridRenderPass->SetEnabled(e); }
+        void SetDebugProbeGridEnabled(bool e)      { if (m_debugProbeGridRenderPass) { m_debugProbeGridRenderPass->SetEnabled(e); if (e) EnsureDebugProbeGridPassInserted(); } }
         float GetDebugProbeRadius()          const { return m_debugProbeGridRenderPass ? m_debugProbeGridRenderPass->GetProbeRadius() : 0.2f; }
         void SetDebugProbeRadius(float r)          { if (m_debugProbeGridRenderPass) m_debugProbeGridRenderPass->SetProbeRadius(r); }
         // Re-inserts the debug probe grid node into the current pass list.
@@ -432,6 +432,9 @@ namespace SasamiRenderer
                                                                      const DrawShadowItemsCallback& drawShadowItems);
         bool HasRenderPass(std::string_view tag) const;
         void EnsureVolumetricCloudPassInserted();
+        // Inserts the debug probe-grid pass into the graph after Skybox/Lighting if it is
+        // initialized and not already present. Idempotent; safe to call before init (no-op).
+        void EnsureDebugProbeGridPassInserted();
 
         void TransitionBackBufferToRenderTarget(CommandList* cmdList, UINT backIndex);
         void ClearAndBindMainTargets(CommandList* cmdList, UINT backIndex);

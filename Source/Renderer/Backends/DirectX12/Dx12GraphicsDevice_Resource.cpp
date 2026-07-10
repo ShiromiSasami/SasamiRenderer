@@ -605,6 +605,28 @@ namespace SasamiRenderer
         return RhiPipelineLayoutHandle{ id };
     }
 
+    // Create*Pipeline returns handles whose id is an internal map key. Command encoders bind by
+    // treating handle.id as the raw native pointer (ID3D12RootSignature*/ID3D12PipelineState*),
+    // matching RenderPipelineStateCache::MakeLayoutHandle/MakePipelineHandle. Translate here so
+    // callers that create via the device path can still bind through the encoder.
+    RhiPipelineLayoutHandle Dx12GraphicsDevice::GetBindablePipelineLayoutHandle(RhiPipelineLayoutHandle handle)
+    {
+        const auto it = m_rhiPipelineLayouts.find(handle.id);
+        if (it == m_rhiPipelineLayouts.end()) {
+            return {};
+        }
+        return RhiPipelineLayoutHandle{ reinterpret_cast<uint64_t>(it->second.Get()) };
+    }
+
+    RhiPipelineHandle Dx12GraphicsDevice::GetBindablePipelineHandle(RhiPipelineHandle handle)
+    {
+        const auto it = m_rhiPipelines.find(handle.id);
+        if (it == m_rhiPipelines.end()) {
+            return {};
+        }
+        return RhiPipelineHandle{ reinterpret_cast<uint64_t>(it->second.Get()) };
+    }
+
 
 #endif
 } // namespace SasamiRenderer
