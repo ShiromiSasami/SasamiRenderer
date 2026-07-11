@@ -333,6 +333,26 @@ namespace SasamiRenderer
         RhiQueueType QueueType() const { return m_queueType; }
         VkCommandBuffer CommandBuffer() const { return m_commandBuffer; }
 
+        // Ray tracing dispatch: records vkCmdTraceRaysKHR for the SBT's pipeline into
+        // this encoder's command buffer. RhiDispatchRaysDesc carries no resource
+        // bindings, so the descriptor set stored on the pipeline record (populated by
+        // the caller) is used. Shares the device's RecordTraceRays helper.
+        void DispatchRays(const RhiDispatchRaysDesc& desc) override
+        {
+            if (!m_recording || m_commandBuffer == VK_NULL_HANDLE) return;
+            if (!m_device.m_pfnCmdTraceRays) return;
+            const auto sit = m_device.m_shaderBindingTables.find(desc.sbt.id);
+            if (sit == m_device.m_shaderBindingTables.end()) return;
+            const auto pit = m_device.m_rtPipelines.find(sit->second.pipelineId);
+            if (pit == m_device.m_rtPipelines.end()) return;
+            m_device.RecordTraceRays(m_commandBuffer,
+                                     pit->second.pipeline, pit->second.pipelineLayout,
+                                     pit->second.boundSet,
+                                     sit->second.raygen, sit->second.miss,
+                                     sit->second.hit, sit->second.callable,
+                                     desc.width, desc.height, desc.depth);
+        }
+
         bool Finish()
         {
             if (!m_recording || m_commandBuffer == VK_NULL_HANDLE) {
@@ -1007,7 +1027,25 @@ namespace SasamiRenderer
 
         QueryCapabilities();
         DebugLog("VulkanGraphicsDevice::Initialize: Vulkan backend initialized. Full render-pass parity still requires RHI resource/pipeline migration.\n");
+
+        // Optional self-test of the HW ray-tracing RHI path. Gated on an env var so
+        // it never affects normal startup; runs once here where the command pool and
+        // queues are ready. Enable with SASAMI_VK_RT_SMOKETEST=1.
+        RunRayTracingSmokeTestIfRequested();
         return true;
+    }
+
+    void VulkanGraphicsDevice::RunRayTracingSmokeTestIfRequested()
+    {
+#if defined(_WIN32)
+        char value[8] = {};
+        if (GetEnvironmentVariableA("SASAMI_VK_RT_SMOKETEST", value, sizeof(value)) == 0)
+            return;
+        if (value[0] == '0' || value[0] == '\0')
+            return;
+        std::string message;
+        RunRayTracingSmokeTest(&message);
+#endif
     }
 
     GraphicsRuntime VulkanGraphicsDevice::GetBackend() const

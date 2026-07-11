@@ -62,7 +62,7 @@ MSBuild 側の `ShaderSourceRoot` も `$(ProjectDir)Shaders` を参照します�
 | Backend | Status |
 | --- | --- |
 | DirectX 12 | 主実装。feature render path、RenderGraph、GBuffer、PBR、SSR、SWRT、DXR 周辺を検証対象にしています。RHI 抽象化層 (BLAS/TLAS ビルド、RT パイプライン、SBT) の DX12 実装完了。 |
-| Vulkan | native fallback path。clear/present、static mesh (Y-flip viewport、albedo texture、DX-compatible projection)、D32 depth test、swapchain resize、RGBA8 texture upload、ray march (`RayMarchApp`)、compute dispatch を実装済み。拡張機能はランタイムで検出 (VK_KHR_dynamic_rendering / descriptor_indexing / timeline_semaphore / ray_query / ray_tracing_pipeline / acceleration_structure)。BLAS/TLAS ビルド (BuildRhiBlases / BuildRhiTlas) を VK_KHR_acceleration_structure で実装済み。RT パイプライン作成 (CreateRhiRayTracingPipeline) は DXIL→SPIR-V 変換未対応のためスタブ。DX12 feature path と同等ではありません。 |
+| Vulkan | native fallback path。clear/present、static mesh (Y-flip viewport、albedo texture、DX-compatible projection)、D32 depth test、swapchain resize、RGBA8 texture upload、ray march (`RayMarchApp`)、compute dispatch を実装済み。拡張機能はランタイムで検出 (VK_KHR_dynamic_rendering / descriptor_indexing / timeline_semaphore / ray_query / ray_tracing_pipeline / acceleration_structure)。BLAS/TLAS ビルド (BuildRhiBlases / BuildRhiTlas)、RT パイプライン (CreateRhiRayTracingPipeline)、SBT (CreateRhiShaderBindingTable)、trace dispatch (command encoder の DispatchRays / vkCmdTraceRaysKHR) を VK_KHR_ray_tracing_pipeline で実装済み。RT パイプラインは `RhiRayTracingPipelineDesc::spirvBytecode` に SPIR-V を渡す (DX12 は並列の DXIL フィールドを使用)。ただし DxrRayTracer と render graph は DX12 専用のため、これらの RHI プリミティブはまだ Vulkan の描画パスには結線されていません。DX12 feature path と同等ではありません。 |
 | DirectX 11 | native fallback path。clear/present、static mesh、depth test、swapchain resize、RGBA8 texture upload、ray march (`RayMarchApp`)、compute dispatch を実装済み。DX12 feature path と同等ではありません。 |
 | OpenGL | native fallback path。clear/present、static mesh (行列の行列の列優先変換修正済み)、depth test、window resize、albedo texture sampling、ray march (`RayMarchApp`)、compute dispatch を実装済み。DX12 feature path と同等ではありません。 |
 
@@ -70,7 +70,11 @@ Vulkan / DirectX 11 / OpenGL では、メインループが `OnUpdate` / `OnRend
 
 RayMarch バックエンド対応について: Vulkan は DXC で HLSL を SPIR-V にコンパイルして `RayMarch_VS/PS.hlsl` を再利用します。OpenGL は GLSL 330 core で同等のシェーダーをインライン実装しています。いずれも `RhiBackendRayMarchFrameDesc` 経由で `ExecuteBackendFrame` から呼び出されます。
 
-Vulkan RT インフラについて: GPU が RT 拡張機能をサポートしている場合、`GetCapabilities().supportsHardwareRayTracing`/`supportsRayQuery` が true になります。BLAS/TLAS の構築 API は動作しますが、RT パイプライン (`CreateRhiRayTracingPipeline`) は現在の RHI インターフェースが DXIL バイトコードを期待するため未実装です。将来 SPIR-V シェーダーパスを追加することで完全なVulkan RT が可能になります。
+Vulkan RT インフラについて: GPU が RT 拡張機能をサポートしている場合、`GetCapabilities().supportsHardwareRayTracing`/`supportsRayQuery` が true になります。BLAS/TLAS 構築に加え、RT パイプライン (`CreateRhiRayTracingPipeline`)、SBT (`CreateRhiShaderBindingTable`)、trace dispatch (`VulkanRhiCommandEncoder::DispatchRays` → `vkCmdTraceRaysKHR`) を実装済みです。SPIR-V は `RhiRayTracingPipelineDesc::spirvBytecode` で供給し (DX12 の DXIL フィールドと並列、非破壊)、パイプラインは内部固定の descriptor set layout (binding 0 = acceleration structure、binding 1 = storage image) を構築します。SPIR-V の各 export は OpEntryPoint の execution model からステージを解決するため、追加のステージメタデータは不要です。
+
+このパスは `RunRayTracingSmokeTest` で検証できます。環境変数 `SASAMI_VK_RT_SMOKETEST=1` を設定して Vulkan 構成の `PBRApp` を起動すると、初期化時に三角形 1 枚の BLAS/TLAS を構築し、`VulkanRtSmokeTest.hlsl` を SPIR-V にコンパイルして RT パイプライン + SBT を作成し、64×64 の storage image に 1 ピクセル 1 レイでトレースして、中心ピクセル = 赤 (hit) / 端 = 青 (miss) を読み戻し検証します。結果は `PBRApp.exe.log` に `Vulkan RT smoke test: PASS` として記録されます。
+
+制限事項: `DxrRayTracer` と render graph の RT パス、および DXR シェーダの `ResourceDescriptorHeap` bindless モデルは DX12 専用です。これらの RHI プリミティブを Vulkan の描画パスに結線し、実画面へ HW RT を出力するには、Vulkan 互換の binding モデルを持つシェーダ改修を含む追加作業が必要です。
 
 ## Render Pipeline
 

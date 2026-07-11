@@ -697,6 +697,12 @@ namespace SasamiRenderer
         const uint8_t* libraryBytecode              = nullptr;
         uint64_t       libraryBytecodeSizeInBytes   = 0;
 
+        // Optional pre-compiled SPIR-V library bytecode (for Vulkan). When null the
+        // DX12 backend uses libraryBytecode (DXIL); the Vulkan backend requires this.
+        // DX12 ignores these fields, so setting them does not affect the DXIL path.
+        const uint8_t* spirvBytecode                = nullptr;
+        size_t         spirvBytecodeSizeInBytes     = 0;
+
         const RhiRayTracingShaderGroupDesc* shaderGroups     = nullptr;
         uint32_t                            shaderGroupCount = 0;
 

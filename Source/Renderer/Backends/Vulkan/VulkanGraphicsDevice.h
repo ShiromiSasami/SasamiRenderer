@@ -78,7 +78,7 @@ namespace SasamiRenderer
         std::unique_ptr<IRhiCommandEncoder> CreateCommandEncoder(RhiQueueType queueType) override;
         bool SubmitCommandEncoder(IRhiCommandEncoder& encoder, RhiQueueType queueType) override;
 
-        // Ray tracing (Vulkan stubs — VK_KHR_ray_tracing_pipeline not yet implemented)
+        // Ray tracing (VK_KHR_acceleration_structure + VK_KHR_ray_tracing_pipeline)
         bool BuildRhiBlases(const RhiBlasDesc* descs, uint32_t count,
                              RhiAccelerationStructureHandle* outHandles) override;
         RhiAccelerationStructureHandle BuildRhiTlas(const RhiTlasDesc& desc) override;
@@ -90,6 +90,15 @@ namespace SasamiRenderer
             const RhiRayTracingPipelineDesc& desc) override;
         RhiShaderBindingTableHandle CreateRhiShaderBindingTable(
             const RhiShaderBindingTableDesc& desc) override;
+
+        // Self-contained validation of the Vulkan HW ray-tracing path: builds a
+        // one-triangle BLAS/TLAS, an RT pipeline + SBT, traces one ray per pixel
+        // into a storage image, and verifies hit=red / miss=blue on readback.
+        // Returns true on success; details are written to outMessage when provided.
+        bool RunRayTracingSmokeTest(std::string* outMessage);
+
+        // Runs RunRayTracingSmokeTest once at init when SASAMI_VK_RT_SMOKETEST=1.
+        void RunRayTracingSmokeTestIfRequested();
 
         HRESULT CreateDescriptorHeap(const DescriptorHeapDesc& desc, DescriptorHeap& out) override;
         HRESULT CreateCommittedResource(const HeapProperties* heapProps,
@@ -241,6 +250,13 @@ namespace SasamiRenderer
         PFN_vkCmdTraceRaysKHR                          m_pfnCmdTraceRays     = nullptr;
         PFN_vkGetBufferDeviceAddressKHR                m_pfnGetBufAddr       = nullptr;
 
+        // Ray-tracing pipeline properties (queried when VK_KHR_ray_tracing_pipeline
+        // is available). Used to size and align the shader binding table.
+        uint32_t m_rtShaderGroupHandleSize      = 0;
+        uint32_t m_rtShaderGroupBaseAlignment   = 0;
+        uint32_t m_rtShaderGroupHandleAlignment = 0;
+        uint32_t m_rtMaxRayRecursionDepth       = 0;
+
         RhiBackendCapabilities m_capabilities{};
         CommandQueue m_emptyGraphicsQueue;
         CommandQueue m_emptyComputeQueue;
@@ -261,6 +277,36 @@ namespace SasamiRenderer
             VkDeviceAddress            deviceAddress = 0;
         };
         std::unordered_map<uint64_t, VulkanAccelStruct> m_accelStructures;
+
+        // Ray-tracing pipeline record. Owns the VkPipeline plus an internal fixed
+        // descriptor set layout (binding 0 = acceleration structure, binding 1 =
+        // storage image) and its pipeline layout — mirroring how the DX12 backend
+        // creates an internal root signature for RT pipelines.
+        struct VulkanRtPipeline {
+            VkPipeline            pipeline      = VK_NULL_HANDLE;
+            VkPipelineLayout      pipelineLayout= VK_NULL_HANDLE;
+            VkDescriptorSetLayout descSetLayout = VK_NULL_HANDLE;
+            VkShaderModule        module        = VK_NULL_HANDLE;
+            uint32_t              groupCount    = 0;
+            // Descriptor set bound at dispatch time. RhiDispatchRaysDesc carries no
+            // resource bindings (full render-graph binding is a later step), so the
+            // caller (e.g. the RT smoke test) populates this before DispatchRays.
+            VkDescriptorSet       boundSet      = VK_NULL_HANDLE;
+        };
+        std::unordered_map<uint64_t, VulkanRtPipeline> m_rtPipelines;
+
+        // Shader binding table record. Holds the SBT buffer plus the strided
+        // device-address regions passed to vkCmdTraceRaysKHR.
+        struct VulkanShaderBindingTable {
+            VkBuffer        buffer     = VK_NULL_HANDLE;
+            VkDeviceMemory  memory     = VK_NULL_HANDLE;
+            uint64_t        pipelineId = 0;
+            VkStridedDeviceAddressRegionKHR raygen{};
+            VkStridedDeviceAddressRegionKHR miss{};
+            VkStridedDeviceAddressRegionKHR hit{};
+            VkStridedDeviceAddressRegionKHR callable{};
+        };
+        std::unordered_map<uint64_t, VulkanShaderBindingTable> m_shaderBindingTables;
 
         std::unordered_map<uint64_t, VkImageView> m_rhiImageViews;
         std::unordered_map<uint64_t, uint64_t> m_rhiImageViewResources;
@@ -291,6 +337,18 @@ namespace SasamiRenderer
         VkDeviceMemory          m_nativeRayMarchUboMemory      = VK_NULL_HANDLE;
         void*                   m_nativeRayMarchUboMapped      = nullptr;
         std::vector<VkFramebuffer> m_nativeRayMarchFramebuffers;
+
+        // Records pipeline bind + descriptor bind + vkCmdTraceRaysKHR. Shared by the
+        // command encoder's DispatchRays and the RT smoke test. Takes raw Vulkan
+        // handles so it can be declared before the RT record structs.
+        void RecordTraceRays(VkCommandBuffer cmd,
+                             VkPipeline pipeline, VkPipelineLayout layout,
+                             VkDescriptorSet descriptorSet,
+                             const VkStridedDeviceAddressRegionKHR& raygen,
+                             const VkStridedDeviceAddressRegionKHR& miss,
+                             const VkStridedDeviceAddressRegionKHR& hit,
+                             const VkStridedDeviceAddressRegionKHR& callable,
+                             uint32_t width, uint32_t height, uint32_t depth);
 
         friend class VulkanRhiCommandEncoder;
     };

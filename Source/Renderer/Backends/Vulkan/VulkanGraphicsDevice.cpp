@@ -1787,6 +1787,19 @@ namespace SasamiRenderer
                 vkGetDeviceProcAddr(m_device, "vkGetRayTracingShaderGroupHandlesKHR"));
             m_pfnCmdTraceRays = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(
                 vkGetDeviceProcAddr(m_device, "vkCmdTraceRaysKHR"));
+
+            // Query ray-tracing pipeline properties (SBT handle sizes / alignments)
+            // needed to lay out the shader binding table correctly.
+            VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{};
+            rtProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+            VkPhysicalDeviceProperties2 props2{};
+            props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+            props2.pNext = &rtProps;
+            vkGetPhysicalDeviceProperties2(m_physicalDevice, &props2);
+            m_rtShaderGroupHandleSize      = rtProps.shaderGroupHandleSize;
+            m_rtShaderGroupBaseAlignment   = rtProps.shaderGroupBaseAlignment;
+            m_rtShaderGroupHandleAlignment = rtProps.shaderGroupHandleAlignment;
+            m_rtMaxRayRecursionDepth       = rtProps.maxRayRecursionDepth;
         }
 
         vkGetDeviceQueue(m_device, m_graphicsQueueFamily, 0, &m_graphicsQueue);
