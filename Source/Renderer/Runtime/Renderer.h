@@ -310,6 +310,8 @@ namespace SasamiRenderer
         bool  IsGIBaked()         const { return m_probeGrid.IsBaked(); }
         float GetGIBakeProgress() const { return GetGIBakeStatus().progress; }
         GIBakeStatus GetGIBakeStatus() const;
+        bool  SaveGIProbeCache(const std::string& path, uint64_t stateHash);
+        bool  LoadGIProbeCache(const std::string& path, uint64_t stateHash);
 
         // Fits the probe grid to the given world AABB and reallocates the buffer.
         // Safe to call after Initialize()  Euse before first rendered frame.

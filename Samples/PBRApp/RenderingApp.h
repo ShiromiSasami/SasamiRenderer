@@ -34,7 +34,7 @@ namespace SasamiRenderer
         void BindInputEvents(ApplicationCore& app);
         void RegisterUi(ApplicationCore& app);
 
-        // Session persistence: render settings + GI toggles + app UI settings.
+        // Session persistence: render settings + GI toggles/cache + app UI settings.
         // Camera and lights are persisted separately via ApplicationCore SaveScene/ApplyCameraAndLights.
         void SaveSessionState(ApplicationCore& app) const;
         void LoadSessionState(ApplicationCore& app);

@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <string>
@@ -358,6 +359,31 @@ namespace SasamiRenderer
                    view == RendererEnums::GBufferDebugView::ReflectionAlpha ||
                    view == RendererEnums::GBufferDebugView::SwrtReflectionHitDistance ||
                    view == RendererEnums::GBufferDebugView::SwrtReflectionComposite;
+        }
+
+        constexpr uint32_t kGIProbeCacheMagic = 0x43504753u; // "SGPC", little endian
+        constexpr uint32_t kGIProbeCacheVersion = 1u;
+        constexpr uint32_t kGIProbeCacheCoeffCount = 9u;
+
+        struct GIProbeCacheFileHeader
+        {
+            uint32_t magic = kGIProbeCacheMagic;
+            uint32_t version = kGIProbeCacheVersion;
+            uint32_t headerSize = 0u;
+            uint32_t coeffCount = kGIProbeCacheCoeffCount;
+            uint32_t countX = 0u;
+            uint32_t countY = 0u;
+            uint32_t countZ = 0u;
+            uint32_t reserved = 0u;
+            float origin[3] = {};
+            float spacing[3] = {};
+            uint64_t stateHash = 0u;
+            uint64_t dataSizeBytes = 0u;
+        };
+
+        bool NearlyEqual(float a, float b)
+        {
+            return std::fabs(a - b) <= 1.0e-4f;
         }
     }
 
@@ -1053,6 +1079,95 @@ namespace SasamiRenderer
         RefreshGIBakeStatus(m_probeGrid.IsBaked()
             ? GIBakeState::Completed
             : GIBakeState::Idle);
+    }
+
+    bool Renderer::SaveGIProbeCache(const std::string& path, uint64_t stateHash)
+    {
+        if (!m_device || path.empty() || !m_probeGrid.IsInitialized() || !m_probeGrid.IsBaked()) {
+            return false;
+        }
+
+        std::vector<uint8_t> probeData;
+        if (!m_probeGrid.ExportProbeData(*m_device, probeData) || probeData.empty()) {
+            return false;
+        }
+
+        GIProbeCacheFileHeader header{};
+        header.headerSize = sizeof(GIProbeCacheFileHeader);
+        header.countX = m_probeGrid.GetCountX();
+        header.countY = m_probeGrid.GetCountY();
+        header.countZ = m_probeGrid.GetCountZ();
+        header.origin[0] = m_probeGrid.GetOriginX();
+        header.origin[1] = m_probeGrid.GetOriginY();
+        header.origin[2] = m_probeGrid.GetOriginZ();
+        header.spacing[0] = m_probeGrid.GetSpacingX();
+        header.spacing[1] = m_probeGrid.GetSpacingY();
+        header.spacing[2] = m_probeGrid.GetSpacingZ();
+        header.stateHash = stateHash;
+        header.dataSizeBytes = static_cast<uint64_t>(probeData.size());
+
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        if (!out.is_open()) {
+            return false;
+        }
+
+        out.write(reinterpret_cast<const char*>(&header), sizeof(header));
+        out.write(reinterpret_cast<const char*>(probeData.data()),
+                  static_cast<std::streamsize>(probeData.size()));
+        return out.good();
+    }
+
+    bool Renderer::LoadGIProbeCache(const std::string& path, uint64_t stateHash)
+    {
+        if (!m_device || path.empty() || !m_probeGrid.IsInitialized()) {
+            return false;
+        }
+
+        std::ifstream in(path, std::ios::binary);
+        if (!in.is_open()) {
+            return false;
+        }
+
+        GIProbeCacheFileHeader header{};
+        in.read(reinterpret_cast<char*>(&header), sizeof(header));
+        if (!in.good() ||
+            header.magic != kGIProbeCacheMagic ||
+            header.version != kGIProbeCacheVersion ||
+            header.headerSize != sizeof(GIProbeCacheFileHeader) ||
+            header.coeffCount != kGIProbeCacheCoeffCount ||
+            header.stateHash != stateHash ||
+            header.countX != m_probeGrid.GetCountX() ||
+            header.countY != m_probeGrid.GetCountY() ||
+            header.countZ != m_probeGrid.GetCountZ() ||
+            !NearlyEqual(header.origin[0], m_probeGrid.GetOriginX()) ||
+            !NearlyEqual(header.origin[1], m_probeGrid.GetOriginY()) ||
+            !NearlyEqual(header.origin[2], m_probeGrid.GetOriginZ()) ||
+            !NearlyEqual(header.spacing[0], m_probeGrid.GetSpacingX()) ||
+            !NearlyEqual(header.spacing[1], m_probeGrid.GetSpacingY()) ||
+            !NearlyEqual(header.spacing[2], m_probeGrid.GetSpacingZ()) ||
+            header.dataSizeBytes != m_probeGrid.GetProbeDataSizeBytes()) {
+            return false;
+        }
+
+        std::vector<uint8_t> probeData(static_cast<size_t>(header.dataSizeBytes));
+        in.read(reinterpret_cast<char*>(probeData.data()),
+                static_cast<std::streamsize>(probeData.size()));
+        if (!in.good()) {
+            return false;
+        }
+
+        if (!m_probeGrid.ImportProbeData(*m_device, probeData.data(), header.dataSizeBytes)) {
+            return false;
+        }
+
+        m_giBakeRequested = false;
+        m_giBakeFrameIndex = 0u;
+        SetGIBakePhase("Loaded GI probe cache");
+        RefreshGIBakeStatus(GIBakeState::Completed);
+        AddGIBakeLog("Cache", "Loaded GI probe cache. probes=%u/%u",
+                     m_probeGrid.GetBakedProbeCount(),
+                     m_probeGrid.GetTotalProbeCount());
+        return true;
     }
 
     void Renderer::FitProbeGridToScene(float bMinX, float bMinY, float bMinZ,

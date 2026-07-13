@@ -1,5 +1,6 @@
 #include "ApplicationCore.h"
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -29,6 +30,14 @@ namespace SasamiRenderer
             const auto it = kv.find(key);
             if (it == kv.end()) return fallback;
             try { return std::stof(it->second); } catch (...) { return fallback; }
+        }
+
+        long ParseInt(const std::unordered_map<std::string, std::string>& kv,
+                      const char* key, long fallback = 0)
+        {
+            const auto it = kv.find(key);
+            if (it == kv.end()) return fallback;
+            try { return std::stol(it->second); } catch (...) { return fallback; }
         }
 
         std::string ParseString(const std::unordered_map<std::string, std::string>& kv,
@@ -110,12 +119,25 @@ namespace SasamiRenderer
         out << "r = "          << dl.color.r     << '\n';
         out << "g = "          << dl.color.g     << '\n';
         out << "b = "          << dl.color.b     << '\n';
+        out << "shadow_mode = " << static_cast<int>(dl.shadowMode) << '\n';
+        out << "shadow_distance = " << dl.shadowDistance << '\n';
+        out << "cascade_exponent = " << dl.cascadeDistributionExponent << '\n';
+        out << "cascade_blend = " << dl.cascadeBlendFraction << '\n';
+        out << "depth_range_mode = " << static_cast<int>(dl.depthRangeMode) << '\n';
+        out << "depth_bias = " << dl.depthBias << '\n';
+        out << "slope_scale_bias = " << dl.slopeScaleBias << '\n';
+        out << "normal_bias = " << dl.normalBias << '\n';
+        out << "far_bias_scale = " << dl.farBiasScale << '\n';
         out << '\n';
 
         // --- camera ---
         const Camera* cam = GetActiveCamera();
         if (cam) {
             out << "[camera]\n";
+            WriteFloat3(out, "position_x", "position_y", "position_z",
+                        cam->Transform().position.x,
+                        cam->Transform().position.y,
+                        cam->Transform().position.z);
             WriteFloat3(out, "target_x", "target_y", "target_z",
                         cam->Transform().position.x,
                         cam->Transform().position.y,
@@ -200,14 +222,25 @@ namespace SasamiRenderer
                 dl.color.r   = ParseFloat(kv, "r",         dl.color.r);
                 dl.color.g   = ParseFloat(kv, "g",         dl.color.g);
                 dl.color.b   = ParseFloat(kv, "b",         dl.color.b);
+                dl.shadowMode = static_cast<DirectionalShadowMode>(
+                    std::clamp(ParseInt(kv, "shadow_mode", static_cast<long>(dl.shadowMode)), 0L, 3L));
+                dl.shadowDistance = ParseFloat(kv, "shadow_distance", dl.shadowDistance);
+                dl.cascadeDistributionExponent = ParseFloat(kv, "cascade_exponent", dl.cascadeDistributionExponent);
+                dl.cascadeBlendFraction = ParseFloat(kv, "cascade_blend", dl.cascadeBlendFraction);
+                dl.depthRangeMode = static_cast<DirectionalShadowDepthRangeMode>(
+                    std::clamp(ParseInt(kv, "depth_range_mode", static_cast<long>(dl.depthRangeMode)), 0L, 1L));
+                dl.depthBias = ParseFloat(kv, "depth_bias", dl.depthBias);
+                dl.slopeScaleBias = ParseFloat(kv, "slope_scale_bias", dl.slopeScaleBias);
+                dl.normalBias = ParseFloat(kv, "normal_bias", dl.normalBias);
+                dl.farBiasScale = ParseFloat(kv, "far_bias_scale", dl.farBiasScale);
                 SetDirectionalLight(dl);
             }
             else if (currentSection == "camera") {
                 Camera* cam = CreateCameraObject();
                 cam->SetTarget(
-                    ParseFloat(kv, "target_x"),
-                    ParseFloat(kv, "target_y"),
-                    ParseFloat(kv, "target_z"));
+                    ParseFloat(kv, "position_x", ParseFloat(kv, "target_x")),
+                    ParseFloat(kv, "position_y", ParseFloat(kv, "target_y")),
+                    ParseFloat(kv, "position_z", ParseFloat(kv, "target_z")));
                 cam->SetYawPitch(
                     ParseFloat(kv, "yaw"),
                     ParseFloat(kv, "pitch"));
@@ -291,6 +324,17 @@ namespace SasamiRenderer
                 dl.color.r   = ParseFloat(kv, "r",         dl.color.r);
                 dl.color.g   = ParseFloat(kv, "g",         dl.color.g);
                 dl.color.b   = ParseFloat(kv, "b",         dl.color.b);
+                dl.shadowMode = static_cast<DirectionalShadowMode>(
+                    std::clamp(ParseInt(kv, "shadow_mode", static_cast<long>(dl.shadowMode)), 0L, 3L));
+                dl.shadowDistance = ParseFloat(kv, "shadow_distance", dl.shadowDistance);
+                dl.cascadeDistributionExponent = ParseFloat(kv, "cascade_exponent", dl.cascadeDistributionExponent);
+                dl.cascadeBlendFraction = ParseFloat(kv, "cascade_blend", dl.cascadeBlendFraction);
+                dl.depthRangeMode = static_cast<DirectionalShadowDepthRangeMode>(
+                    std::clamp(ParseInt(kv, "depth_range_mode", static_cast<long>(dl.depthRangeMode)), 0L, 1L));
+                dl.depthBias = ParseFloat(kv, "depth_bias", dl.depthBias);
+                dl.slopeScaleBias = ParseFloat(kv, "slope_scale_bias", dl.slopeScaleBias);
+                dl.normalBias = ParseFloat(kv, "normal_bias", dl.normalBias);
+                dl.farBiasScale = ParseFloat(kv, "far_bias_scale", dl.farBiasScale);
                 SetDirectionalLight(dl);
             }
             else if (currentSection == "camera") {
@@ -298,9 +342,9 @@ namespace SasamiRenderer
                 if (!cam) cam = CreateCameraObject();
                 if (!cam) return;
                 cam->SetTarget(
-                    ParseFloat(kv, "target_x"),
-                    ParseFloat(kv, "target_y"),
-                    ParseFloat(kv, "target_z"));
+                    ParseFloat(kv, "position_x", ParseFloat(kv, "target_x")),
+                    ParseFloat(kv, "position_y", ParseFloat(kv, "target_y")),
+                    ParseFloat(kv, "position_z", ParseFloat(kv, "target_z")));
                 cam->SetYawPitch(
                     ParseFloat(kv, "yaw"),
                     ParseFloat(kv, "pitch"));

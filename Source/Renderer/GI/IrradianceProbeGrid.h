@@ -4,6 +4,8 @@
 #include "Renderer/RayTracing/GpuSoftwareRayTracer.h"
 
 #include <cstdint>
+#include <string>
+#include <vector>
 #include <wrl.h>
 
 namespace SasamiRenderer
@@ -133,6 +135,9 @@ namespace SasamiRenderer
         static constexpr uint32_t GetProbesPerBakeStep() { return kProbesPerFrame; }
         void  ResetBakeState();
         bool  ReallocAndClearProbeBuffer(IRHIDevice& device);
+        uint64_t GetProbeDataSizeBytes() const;
+        bool  ExportProbeData(IRHIDevice& device, std::vector<uint8_t>& outData) const;
+        bool  ImportProbeData(IRHIDevice& device, const void* data, uint64_t sizeInBytes);
 
         uint32_t GetTotalProbeCount() const { return m_countX * m_countY * m_countZ; }
         uint32_t GetCountX() const { return m_countX; }
@@ -142,6 +147,8 @@ namespace SasamiRenderer
         float GetOriginY() const { return m_originY; }
         float GetOriginZ() const { return m_originZ; }
         float GetSpacingX() const { return m_spacingX; }
+        float GetSpacingY() const { return m_spacingY; }
+        float GetSpacingZ() const { return m_spacingZ; }
 
         // Re-allocates the probe buffer after FitToSceneBounds changes count at runtime.
         // No-op if count and buffer size have not changed.
@@ -155,7 +162,7 @@ namespace SasamiRenderer
 
     private:
         bool CreatePipeline(IRHIDevice& device);
-        bool AllocateProbeBuffer(IRHIDevice& device);
+        bool AllocateProbeBuffer(IRHIDevice& device, const void* initialData = nullptr);
         Resource* GetProbeBufferResource() const;
         Resource* GetConstantBufferResource() const;
         void FillProbeGridCB(GIProbeGridCBData& out) const;

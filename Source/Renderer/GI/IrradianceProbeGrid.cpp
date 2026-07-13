@@ -302,10 +302,10 @@ namespace SasamiRenderer
     // Allocates (or reallocates) the probe StructuredBuffer and creates SRV/UAV.
     // =========================================================================
 
-    bool IrradianceProbeGrid::AllocateProbeBuffer(IRHIDevice& device)
+    bool IrradianceProbeGrid::AllocateProbeBuffer(IRHIDevice& device, const void* initialData)
     {
         const uint32_t totalProbes = m_countX * m_countY * m_countZ;
-        if (totalProbes == m_probeBufferCapacity) {
+        if (!initialData && totalProbes == m_probeBufferCapacity) {
             Resource* currentProbeBuffer = GetProbeBufferResource();
             if (currentProbeBuffer && currentProbeBuffer->IsValid()) {
                 return true;
@@ -330,11 +330,21 @@ namespace SasamiRenderer
             rhiDesc.strideInBytes = sizeof(float) * 4u;
             rhiDesc.usage = RhiBufferUsageFlags::Structured |
                             RhiBufferUsageFlags::ShaderResource |
-                            RhiBufferUsageFlags::UnorderedAccess;
+                            RhiBufferUsageFlags::UnorderedAccess |
+                            RhiBufferUsageFlags::CopySource |
+                            RhiBufferUsageFlags::CopyDest;
             rhiDesc.memoryUsage = RhiMemoryUsage::GpuOnly;
-            rhiDesc.initialState = RhiResourceState::ShaderResource;
-            m_probeBufferHandle = device.CreateRhiBuffer(rhiDesc);
+            rhiDesc.initialState = initialData ? RhiResourceState::CopyDest : RhiResourceState::ShaderResource;
+            m_probeBufferHandle = device.CreateRhiBuffer(rhiDesc, initialData);
             m_probeBufferCompat = device.GetD3D12CompatibilityResource(m_probeBufferHandle);
+        }
+
+        if (initialData && !m_probeBufferCompat) {
+            if (m_probeBufferHandle.IsValid()) {
+                device.DestroyRhiResource(m_probeBufferHandle);
+                m_probeBufferHandle = {};
+            }
+            return false;
         }
 
         if (!m_probeBufferCompat) {
@@ -715,6 +725,125 @@ namespace SasamiRenderer
     {
         const uint32_t total = GetTotalProbeCount();
         return std::min(m_totalProbesDispatched, total);
+    }
+
+    uint64_t IrradianceProbeGrid::GetProbeDataSizeBytes() const
+    {
+        return static_cast<uint64_t>(GetTotalProbeCount()) *
+               9u *
+               sizeof(float) * 4u;
+    }
+
+    bool IrradianceProbeGrid::ExportProbeData(IRHIDevice& device, std::vector<uint8_t>& outData) const
+    {
+        outData.clear();
+        if (!m_initialized || !IsBaked() || !m_probeBufferHandle.IsValid()) {
+            return false;
+        }
+
+        const uint64_t byteSize = GetProbeDataSizeBytes();
+        if (byteSize == 0u) {
+            return false;
+        }
+
+        Resource* probeBuffer = GetProbeBufferResource();
+        if (!probeBuffer || !probeBuffer->IsValid()) {
+            return false;
+        }
+
+        device.WaitForGPU();
+
+        RhiBufferDesc readbackDesc{};
+        readbackDesc.sizeInBytes = byteSize;
+        readbackDesc.strideInBytes = sizeof(float) * 4u;
+        readbackDesc.usage = RhiBufferUsageFlags::CopyDest;
+        readbackDesc.memoryUsage = RhiMemoryUsage::GpuToCpu;
+        readbackDesc.initialState = RhiResourceState::CopyDest;
+
+        RhiBufferHandle readbackHandle = device.CreateRhiBuffer(readbackDesc);
+        if (!readbackHandle.IsValid()) {
+            return false;
+        }
+
+        bool ok = false;
+        Resource* readbackBuffer = device.GetD3D12CompatibilityResource(readbackHandle);
+        if (readbackBuffer && readbackBuffer->IsValid()) {
+            CommandAllocator allocator;
+            CommandList commandList;
+            if (SUCCEEDED(device.CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, allocator)) &&
+                SUCCEEDED(device.CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nullptr, commandList))) {
+                auto toCopy = CD3DX12_RESOURCE_BARRIER::Transition(
+                    probeBuffer->Get(),
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_COPY_SOURCE);
+                commandList.ResourceBarrier(1, &toCopy);
+                commandList.CopyBufferRegion(*readbackBuffer, 0u, *probeBuffer, 0u, byteSize);
+                auto toSrv = CD3DX12_RESOURCE_BARRIER::Transition(
+                    probeBuffer->Get(),
+                    D3D12_RESOURCE_STATE_COPY_SOURCE,
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                commandList.ResourceBarrier(1, &toSrv);
+
+                if (SUCCEEDED(commandList.Close())) {
+                    ID3D12CommandList* lists[] = { commandList.Get() };
+                    device.GetCommandQueue().ExecuteCommandLists(1u, lists);
+                    device.WaitForGPU();
+
+                    outData.resize(static_cast<size_t>(byteSize));
+                    ok = device.ReadRhiBuffer(readbackHandle, 0u, outData.data(), byteSize);
+                    if (!ok) {
+                        outData.clear();
+                    }
+                }
+            }
+        }
+
+        device.DestroyRhiResource(readbackHandle);
+        return ok;
+    }
+
+    bool IrradianceProbeGrid::ImportProbeData(IRHIDevice& device, const void* data, uint64_t sizeInBytes)
+    {
+        if (!m_initialized || !data || sizeInBytes == 0u ||
+            sizeInBytes != GetProbeDataSizeBytes() ||
+            !device.GetCapabilities().supportsRhiResourceCreation) {
+            return false;
+        }
+
+        device.WaitForGPU();
+        if (!AllocateProbeBuffer(device, data)) {
+            return false;
+        }
+
+        Resource* probeBuffer = GetProbeBufferResource();
+        if (!probeBuffer || !probeBuffer->IsValid()) {
+            return false;
+        }
+
+        CommandAllocator allocator;
+        CommandList commandList;
+        if (FAILED(device.CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, allocator)) ||
+            FAILED(device.CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nullptr, commandList))) {
+            return false;
+        }
+
+        auto toSrv = CD3DX12_RESOURCE_BARRIER::Transition(
+            probeBuffer->Get(),
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        commandList.ResourceBarrier(1, &toSrv);
+        if (FAILED(commandList.Close())) {
+            return false;
+        }
+
+        ID3D12CommandList* lists[] = { commandList.Get() };
+        device.GetCommandQueue().ExecuteCommandLists(1u, lists);
+        device.WaitForGPU();
+
+        m_nextProbeIdx = GetTotalProbeCount();
+        m_totalProbesDispatched = GetTotalProbeCount();
+        FlushGridCB();
+        return true;
     }
 
     void IrradianceProbeGrid::ResetBakeState()

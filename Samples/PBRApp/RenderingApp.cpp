@@ -15,7 +15,9 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <map>
 #include <string>
@@ -39,6 +41,51 @@ namespace SasamiRenderer
         // Session persistence file names (resolved to project root / exe dir at runtime).
         constexpr const char* kSceneStateFile    = "PBRApp.scene";
         constexpr const char* kSettingsStateFile = "PBRApp.settings.ini";
+        constexpr const char* kGIProbeCacheFile  = "PBRApp.gi_probe_cache.bin";
+
+        uint64_t Fnva1Mix(uint64_t hash, const void* data, size_t size)
+        {
+            const auto* bytes = static_cast<const uint8_t*>(data);
+            for (size_t i = 0; i < size; ++i) {
+                hash ^= static_cast<uint64_t>(bytes[i]);
+                hash *= 1099511628211ull;
+            }
+            return hash;
+        }
+
+        uint64_t Fnva1MixString(uint64_t hash, const char* text)
+        {
+            return Fnva1Mix(hash, text, std::strlen(text));
+        }
+
+        uint64_t Fnva1MixFile(uint64_t hash, const std::string& path)
+        {
+            std::ifstream in(path, std::ios::binary);
+            if (!in.is_open()) {
+                return Fnva1MixString(hash, "<missing>");
+            }
+
+            std::array<char, 4096> buffer{};
+            while (in.good()) {
+                in.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+                const std::streamsize readCount = in.gcount();
+                if (readCount > 0) {
+                    hash = Fnva1Mix(hash, buffer.data(), static_cast<size_t>(readCount));
+                }
+            }
+            return hash;
+        }
+
+        uint64_t ComputeSessionStateHash(const std::string& scenePath,
+                                         const std::string& settingsPath)
+        {
+            uint64_t hash = 14695981039346656037ull;
+            hash = Fnva1MixString(hash, "scene:");
+            hash = Fnva1MixFile(hash, scenePath);
+            hash = Fnva1MixString(hash, "|settings:");
+            hash = Fnva1MixFile(hash, settingsPath);
+            return hash;
+        }
 
         struct RenderPassBuilderUiEntry
         {
@@ -289,7 +336,9 @@ namespace SasamiRenderer
     void RenderingApp::SaveSessionState(ApplicationCore& app) const
     {
         // Camera + lights via the framework scene writer.
-        app.SaveScene(ApplicationResourcePaths::ResolveConfigPathString(kSceneStateFile));
+        const std::string scenePath =
+            ApplicationResourcePaths::ResolveConfigPathString(kSceneStateFile);
+        app.SaveScene(scenePath);
 
         // Render settings + GI toggles + app UI settings.
         const std::string path = ApplicationResourcePaths::ResolveConfigPathString(kSettingsStateFile);
@@ -359,17 +408,35 @@ namespace SasamiRenderer
         out << "enabled = "   << (renderer.GetGIEnabled() ? 1 : 0) << '\n';
         out << "intensity = " << renderer.GetGIIntensity()         << '\n';
         out << "ema_alpha = " << renderer.GetGIEmaAlpha()          << '\n';
+        out << "baked = "     << (renderer.IsGIBaked() ? 1 : 0)    << '\n';
 
         out << "[app]\n";
         out << "probe_preset = "      << m_probeGridPreset            << '\n';
+        out << "show_probe_spheres = " << (app.GetDebugProbeGridEnabled() ? 1 : 0) << '\n';
+        out << "probe_radius = "      << app.GetDebugProbeRadius()     << '\n';
+        out << "probe_cache = "       << kGIProbeCacheFile             << '\n';
         out << "show_light_gizmo = "  << (m_showLightGizmo ? 1 : 0)   << '\n';
         out << "show_light_gizmos = " << (m_showLightGizmos ? 1 : 0)  << '\n';
+        out.close();
+
+        const uint64_t stateHash = ComputeSessionStateHash(scenePath, path);
+        const std::string cachePath =
+            ApplicationResourcePaths::ResolveConfigPathString(kGIProbeCacheFile);
+        if (renderer.IsGIBaked() && !renderer.SaveGIProbeCache(cachePath, stateHash)) {
+            DebugLog("PBRApp: failed to save GI probe cache.\n");
+        }
     }
 
     void RenderingApp::LoadSessionState(ApplicationCore& app)
     {
         const std::string settingsPath =
             ApplicationResourcePaths::ResolveConfigPathString(kSettingsStateFile);
+        const std::string scenePath =
+            ApplicationResourcePaths::ResolveConfigPathString(kSceneStateFile);
+        const std::string cachePath =
+            ApplicationResourcePaths::ResolveConfigPathString(kGIProbeCacheFile);
+        bool shouldLoadGIProbeCache = false;
+
         std::ifstream in(settingsPath);
         if (in.is_open()) {
             std::map<std::string, std::map<std::string, std::string>> sections;
@@ -474,8 +541,11 @@ namespace SasamiRenderer
             renderer.SetGIEnabled(getB("gi", "enabled", renderer.GetGIEnabled()));
             renderer.SetGIIntensity(getF("gi", "intensity", renderer.GetGIIntensity()));
             renderer.SetGIEmaAlpha(getF("gi", "ema_alpha", renderer.GetGIEmaAlpha()));
+            shouldLoadGIProbeCache = getB("gi", "baked", false);
 
-            m_probeGridPreset = static_cast<int>(getI("app", "probe_preset", m_probeGridPreset));
+            m_probeGridPreset = std::clamp(static_cast<int>(getI("app", "probe_preset", m_probeGridPreset)), 0, 2);
+            app.SetDebugProbeGridEnabled(getB("app", "show_probe_spheres", app.GetDebugProbeGridEnabled()));
+            app.SetDebugProbeRadius(getF("app", "probe_radius", app.GetDebugProbeRadius()));
             m_showLightGizmo  = getB("app", "show_light_gizmo", m_showLightGizmo);
             m_showLightGizmos = getB("app", "show_light_gizmos", m_showLightGizmos);
             ApplyProbeGridPreset(app, m_probeGridPreset);
@@ -483,8 +553,15 @@ namespace SasamiRenderer
 
         // Camera + lights (non-destructive: applied onto existing objects; overrides
         // the default view/lights when a saved scene file is present).
-        app.ApplyCameraAndLights(
-            ApplicationResourcePaths::ResolveConfigPathString(kSceneStateFile));
+        app.ApplyCameraAndLights(scenePath);
+
+        if (shouldLoadGIProbeCache) {
+            Renderer& renderer = app.GetRenderer();
+            const uint64_t stateHash = ComputeSessionStateHash(scenePath, settingsPath);
+            if (!renderer.LoadGIProbeCache(cachePath, stateHash) && renderer.GetGIEnabled()) {
+                renderer.RequestGIBake();
+            }
+        }
     }
 
     void RenderingApp::OnInit(ApplicationCore& app)
