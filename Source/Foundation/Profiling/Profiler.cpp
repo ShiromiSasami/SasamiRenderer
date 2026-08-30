@@ -73,14 +73,6 @@ namespace SasamiRenderer::Profiler
             TraceLoggingString(SafeName(name), "Name"));
     }
 
-    void MarkCpuEvent(const char* name)
-    {
-        TraceLoggingWrite(
-            g_sasamiProfilerProvider,
-            "CpuMarker",
-            TraceLoggingString(SafeName(name), "Name"));
-    }
-
     void BeginGpuEvent(CommandList* cmdList, const char* name)
     {
         if (!cmdList || !cmdList->Get()) {
@@ -105,16 +97,4 @@ namespace SasamiRenderer::Profiler
 #endif
     }
 
-    void MarkGpuEvent(CommandList* cmdList, const char* name)
-    {
-        if (!cmdList || !cmdList->Get()) {
-            return;
-        }
-
-#if SASAMI_HAS_PIX3
-        PIXSetMarker(cmdList->Get(), PIX_COLOR(80, 180, 255), "%s", SafeName(name));
-#else
-        (void)name;
-#endif
-    }
 }

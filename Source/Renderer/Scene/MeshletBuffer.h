@@ -22,9 +22,11 @@ namespace SasamiRenderer
     class MeshletBuffer
     {
     public:
-        // 16 triangles per meshlet: allows LOD-0 subdivision (ÁE) ↁE64 output tris,
-        // fitting within the MS 256-primitive / 256-vertex hard limits.
-        static constexpr uint32_t kMaxTrianglesPerMeshlet = 16u;
+        // 64 triangles per meshlet: with no vertex dedup (3 output verts/tri, no
+        // sharing) the D3D12 mesh shader hard limit of 256 vertices/256 primitives
+        // caps this at floor(256/3) = 84; 64 keeps numthreads(64) at exactly one
+        // wave and yields 192 output vertices, comfortably under the 256 cap.
+        static constexpr uint32_t kMaxTrianglesPerMeshlet = 64u;
 
         ~MeshletBuffer();
 

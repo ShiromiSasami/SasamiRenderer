@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -45,6 +45,12 @@
     </Filter>
     <Filter Include="Header Files\ECS">
       <UniqueIdentifier>{767e82f1-e8d7-4bf1-a29f-7d79f2465713}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Debug">
+      <UniqueIdentifier>{a1b2c3d4-0001-4a00-9000-5a5a4d493001}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Debug\RemoteControl">
+      <UniqueIdentifier>{a1b2c3d4-0002-4a00-9000-5a5a4d493002}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -93,6 +99,45 @@
     <ClInclude Include="Source\AppFramework\Component\SkinnedMeshComponent.h">
       <Filter>Header Files\Component</Filter>
     </ClInclude>
+    <ClInclude Include="Source\AppFramework\Component\CpuTextureLoader.h">
+      <Filter>Header Files\Component</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Component\CpuTexturePathCache.h">
+      <Filter>Header Files\Component</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Boot\StartupCoordinator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Loader\AsyncAssetLoadService.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Loader\ModelLoaderFbx.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Loader\StaticMeshCache.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Loader\DdsTextureLoader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Libraries\ufbx\ufbx.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Libraries\bcdec\bcdec.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\BootProgressWindow.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Foundation\Boot\BootStatus.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Foundation\Boot\InitTaskScheduler.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Foundation\Boot\MainThreadTaskPump.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Source\AppFramework\Component\IComponent.h">
       <Filter>Header Files\Component</Filter>
     </ClInclude>
@@ -102,7 +147,19 @@
     <ClInclude Include="Source\Foundation\Math\MathUtil.h">
       <Filter>Header Files\Tool</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Foundation\Jobs\JobSystem.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Foundation\Jobs\ParallelFor.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
     <ClInclude Include="Source\AppFramework\Loader\ModelLoader.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Loader\ModelLoaderGlb.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Loader\ModelLoaderGltfUtility.h">
       <Filter>Header Files\Tool</Filter>
     </ClInclude>
     <ClInclude Include="Source\AppFramework\Loader\AssetLoader.h">
@@ -122,6 +179,24 @@
     </ClInclude>
     <ClInclude Include="Source\Foundation\Math\Vector3.h">
       <Filter>Header Files\Tool</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\IDebugTransport.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugNamedPipeTransport.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugCommandQueue.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugCommandRegistry.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugRemoteControlServer.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugSceneCommands.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -167,10 +242,43 @@
     <ClCompile Include="Source\AppFramework\Component\SkinnedMeshComponent.cpp">
       <Filter>Source Files\Component</Filter>
     </ClCompile>
+    <ClCompile Include="Source\AppFramework\Component\CpuTextureLoader.cpp">
+      <Filter>Source Files\Component</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Component\CpuTexturePathCache.cpp">
+      <Filter>Source Files\Component</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Boot\StartupCoordinator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Loader\AsyncAssetLoadService.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Loader\ModelLoaderFbx.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Loader\StaticMeshCache.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Loader\DdsTextureLoader.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\ufbx\ufbx.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\BootProgressWindow.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Source\AppFramework\Input\InputSystem.cpp">
       <Filter>Source Files\Input</Filter>
     </ClCompile>
     <ClCompile Include="Source\AppFramework\Loader\ModelLoader.cpp">
+      <Filter>Source Files\Tool</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Loader\ModelLoaderGlb.cpp">
+      <Filter>Source Files\Tool</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Loader\ModelLoaderGltfUtility.cpp">
       <Filter>Source Files\Tool</Filter>
     </ClCompile>
     <ClCompile Include="Source\AppFramework\Loader\AssetLoader.cpp">
@@ -178,6 +286,21 @@
     </ClCompile>
     <ClCompile Include="Source\AppFramework\Object\SkinnedModel.cpp">
       <Filter>Source Files\Object</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugNamedPipeTransport.cpp">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugCommandQueue.cpp">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugCommandRegistry.cpp">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugRemoteControlServer.cpp">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugSceneCommands.cpp">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

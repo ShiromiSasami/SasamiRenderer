@@ -1,3 +1,8 @@
+
+// シャドウを持つスポット/ポイントライトの本数。LightCBData.h の
+// kMaxSpotShadows / kMaxPointShadows と必ず一致させること。
+#define MAX_SPOT_SHADOWS  8
+#define MAX_POINT_SHADOWS 4
 // =============================================================================
 // LightCB.hlsli
 // ライティング定数バッファの HLSL 定義。
@@ -32,8 +37,9 @@ cbuffer LightCB : register(b1)
 
     // ディレクショナルライト色。
     // rgb: 線形 RGB カラー
-    // w:   未使用
-    float4 u_dirColor;    // rgb: color
+    // w:   ディレクショナルシャドウの供給元モード（LightCBData.h の dirColor コメント参照）
+    //      0 = ラスタライズカスケード, 1 = SWRT（そのままサンプル可）, 2 = SWRT 信頼不可（1.0 を返す）
+    float4 u_dirColor;    // rgb: color, w: directional shadow source mode
 
     // ライト数カウント。
     // x: ポイントライト数（StructuredBuffer の要素数）
@@ -57,7 +63,7 @@ cbuffer LightCB : register(b1)
 
     // デバッグ表示モード。
     // x: 0=通常ライティング, 1=アルベド, 2=法線, 3=粗さ, 4=メタリック, 5=AO, 6=シャドウ
-    float4 u_debugParams; // x: gbuffer debug view mode
+    float4 u_debugParams; // x: gbuffer debug view mode, y: direct-light micro-shadowing strength (Chan 2018), z/w: unused
 
     // シャドウマップのテクセルサイズ（PCF サンプリングオフセット計算用）。
     // x: 1.0 / シャドウマップ幅
@@ -81,11 +87,19 @@ cbuffer LightCB : register(b1)
     float4 u_diffuseSh[DIFFUSE_SH_COEFFICIENT_COUNT];
 
     // スポットライト #0 のシャドウ用ビュープロジェクション行列。
-    row_major float4x4 u_spotLightVP;
+    row_major float4x4 u_spotLightVP[MAX_SPOT_SHADOWS];
 
     // スポットシャドウのパラメータ。
     // x: 深度バイアス, y: ニアプレーン, z: 有効フラグ(1=有効), w: マップサイズ
     float4 u_spotShadowParams;
+
+    // ポイントライト #0 のキューブシャドウマップ用ビュープロジェクション行列（6面）。
+    // 面インデックスの規約: 0:+X, 1:-X, 2:+Y, 3:-Y, 4:+Z, 5:-Z。
+    row_major float4x4 u_pointLightVP[MAX_POINT_SHADOWS][6];
+
+    // ポイントシャドウのパラメータ。
+    // x: 深度バイアス, y: ニアプレーン, z: 有効フラグ(1=有効), w: マップサイズ
+    float4 u_pointShadowParams;
 
     // VSM シャドウのパラメータ。
     // x: シャドウモード (0/1=CSM系, 2=VSM 1cascade, 3=VSM 4cascade)

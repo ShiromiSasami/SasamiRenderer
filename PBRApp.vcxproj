@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="Libraries\packages\Microsoft.Direct3D.D3D12.1.616.1\build\native\Microsoft.Direct3D.D3D12.props" Condition="Exists('Libraries\packages\Microsoft.Direct3D.D3D12.1.616.1\build\native\Microsoft.Direct3D.D3D12.props')" />
   <ItemGroup Label="ProjectConfigurations">
@@ -198,13 +198,17 @@
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;PLATFORM_WINDOWS=1;PLATFORM_LINUX=0;PLATFORM_MACOS=0;PLATFORM_ANDROID=0;$(RhiPreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <LanguageStandard>stdcpp20</LanguageStandard>
+      <LanguageStandard>stdcpp23</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
       <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Source\Renderer;$(ProjectDir)Samples;$(ProjectDir)Samples\PBRApp;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;$(BOOST_ROOT);$(BOOST_INCLUDEDIR);$(RhiVulkanIncludeDirectories)</AdditionalIncludeDirectories>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <!-- ufbx parses deeply nested FBX node graphs and needs more than the 1 MB
+           default on JobSystem worker threads (CreateThread inherits this reserve). -->
+      <StackReserveSize>16777216</StackReserveSize>
       <AdditionalDependencies>SasamiRenderer.lib;SasamiAppFramework.lib;xinput.lib;dxgi.lib;d3d12.lib;dxguid.lib;windowscodecs.lib;ole32.lib;NRD.lib;NRI.lib;$(RhiAdditionalDependencies);%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(OutDir);$(ProjectDir)Libraries\NRD\_Bin\$(BaseConfiguration);$(RhiVulkanLibraryDirectories);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
@@ -218,14 +222,18 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;PLATFORM_WINDOWS=1;PLATFORM_LINUX=0;PLATFORM_MACOS=0;PLATFORM_ANDROID=0;$(RhiPreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <LanguageStandard>stdcpp20</LanguageStandard>
+      <LanguageStandard>stdcpp23</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
       <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Source\Renderer;$(ProjectDir)Samples;$(ProjectDir)Samples\PBRApp;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;C:\local\boost_1_89_0;$(RhiVulkanIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/FS /utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <!-- ufbx parses deeply nested FBX node graphs and needs more than the 1 MB
+           default on JobSystem worker threads (CreateThread inherits this reserve). -->
+      <StackReserveSize>16777216</StackReserveSize>
       <AdditionalDependencies>SasamiRenderer.lib;SasamiAppFramework.lib;xinput.lib;dxgi.lib;d3d12.lib;dxguid.lib;windowscodecs.lib;ole32.lib;NRD.lib;NRI.lib;$(RhiAdditionalDependencies);%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(OutDir);$(ProjectDir)Libraries\NRD\_Bin\$(BaseConfiguration);$(RhiVulkanLibraryDirectories);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
@@ -241,10 +249,11 @@
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;PLATFORM_WINDOWS=1;PLATFORM_LINUX=0;PLATFORM_MACOS=0;PLATFORM_ANDROID=0;$(RhiPreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <LanguageStandard>stdcpp20</LanguageStandard>
+      <LanguageStandard>stdcpp23</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
       <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Source\Renderer;$(ProjectDir)Samples;$(ProjectDir)Samples\PBRApp;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;$(BOOST_ROOT);$(BOOST_INCLUDEDIR);$(RhiVulkanIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/FS /utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -266,10 +275,11 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;PLATFORM_WINDOWS=1;PLATFORM_LINUX=0;PLATFORM_MACOS=0;PLATFORM_ANDROID=0;$(RhiPreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <LanguageStandard>stdcpp20</LanguageStandard>
+      <LanguageStandard>stdcpp23</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
       <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Source\Renderer;$(ProjectDir)Samples;$(ProjectDir)Samples\PBRApp;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;C:\local\boost_1_89_0;$(RhiVulkanIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/FS /utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

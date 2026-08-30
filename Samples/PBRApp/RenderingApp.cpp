@@ -1,10 +1,17 @@
 #include "RenderingApp.h"
 #include "ApplicationCore.h"
 #include "Object/StaticModel.h"
+#include "Object/SkinnedModel.h"
 #include "Input/InputSystem.h"
 #include "UI/ImGuiCoordinator.h"
+#include "UI/UiTab.h"
+#include "UI/UiText.h"
+#include "UI/UiButton.h"
+#include "UI/UiVolume.h"
+#include "UI/UiLayout.h"
 #include "ApplicationEntryPoint.h"
 #include "Foundation/Tools/DebugOutput.h"
+#include "Foundation/Math/MathUtil.h"
 #include "Renderer/Structures/RendererEnums.h"
 #include "Renderer/Runtime/Renderer.h"
 #include "ApplicationResourcePaths.h"
@@ -27,16 +34,12 @@ namespace SasamiRenderer
 {
     namespace
     {
-        constexpr const char* kSkyboxPanoramaPath = "Assets/HDR/citrus_orchard_road_puresky_4k.hdr";
+        constexpr const char* kSkyboxPanoramaPath = "Assets/Models/Bistro/san_giuseppe_bridge_4k.hdr";
         constexpr const char* kStanfordBunnyPath = "Models/stanford_bunny_pbr/scene.gltf";
+        constexpr const char* kFoxPath = "Models/Fox/Fox.gltf";
 
-        float DefaultReflectionStrength(float roughness, float metallic)
-        {
-            const float smoothness = 1.0f - std::fmin(std::fmax(roughness, 0.0f), 1.0f);
-            const float strength = std::fmin(std::fmax(metallic, 0.0f), 1.0f) * smoothness;
-            return std::fmin(std::fmax(strength, 0.0f), 1.0f);
-        }
         constexpr const char* kSponzaPath = "Models/Sponza/glTF/Sponza.gltf";
+        constexpr const char* kBistroPath = "Models/Bistro/BistroExterior.fbx";
 
         // Session persistence file names (resolved to project root / exe dir at runtime).
         constexpr const char* kSceneStateFile    = "PBRApp.scene";
@@ -90,12 +93,16 @@ namespace SasamiRenderer
         struct RenderPassBuilderUiEntry
         {
             const char* label = "";
-            RendererEnums::RenderPassType type = RendererEnums::RenderPassType::Opaque;
+            RendererEnums::RenderPassType type = RendererEnums::RenderPassType::OpaqueGBuffer;
+            // Shown but not toggleable: deferred lighting reads this pass's targets, so
+            // dropping it renders from targets nothing wrote. Renderer::SetRenderPassSequence
+            // restores it regardless; listing it here keeps the UI honest about the graph.
+            bool required = false;
         };
 
-        constexpr std::array<RenderPassBuilderUiEntry, 16> kRenderPassBuilderUiEntries = {{
+        constexpr std::array<RenderPassBuilderUiEntry, 15> kRenderPassBuilderUiEntries = {{
             { "Shadow", RendererEnums::RenderPassType::Shadow },
-            { "Opaque", RendererEnums::RenderPassType::Opaque },
+            { "Opaque GBuffer", RendererEnums::RenderPassType::OpaqueGBuffer, true },
             { "Runtime AO", RendererEnums::RenderPassType::RuntimeAO },
             { "Runtime AO Blur", RendererEnums::RenderPassType::RuntimeAOBlur },
             { "Lighting", RendererEnums::RenderPassType::Lighting },
@@ -106,7 +113,6 @@ namespace SasamiRenderer
             { "Procedural Sky", RendererEnums::RenderPassType::ProceduralSky },
             { "Transparent Backface Distance", RendererEnums::RenderPassType::TransparentBackfaceDistance },
             { "Transparent Scene Color Copy", RendererEnums::RenderPassType::TransparentSceneColorCopy },
-            { "Transparent", RendererEnums::RenderPassType::Transparent },
             { "Transparent Lighting", RendererEnums::RenderPassType::TransparentLighting },
             { "Transparent Composite", RendererEnums::RenderPassType::TransparentComposite },
             { "Post Process", RendererEnums::RenderPassType::PostProcess },
@@ -124,6 +130,7 @@ namespace SasamiRenderer
             case Renderer::GIBakeState::Idle: return "Idle";
             case Renderer::GIBakeState::Baking: return "Baking";
             case Renderer::GIBakeState::Completed: return "Completed";
+            case Renderer::GIBakeState::Continuous: return "Continuous (DDGI)";
             case Renderer::GIBakeState::WaitingForProbeGrid: return "Waiting for probe grid";
             case Renderer::GIBakeState::WaitingForBvh: return "Waiting for software ray tracing BVH buffers";
             case Renderer::GIBakeState::Failed: return "Failed";
@@ -138,28 +145,28 @@ namespace SasamiRenderer
             char progressText[64]{};
             std::snprintf(progressText, sizeof(progressText), "%.1f%%", progress * 100.0f);
 
-            ImGui::Text("State: %s", ToGIBakeStateLabel(status.state));
-            ImGui::TextDisabled("Phase: %s", status.currentPhase[0] ? status.currentPhase : "(none)");
-            ImGui::TextDisabled("Scene: %u instances / %u triangles, versions %llu/%llu/%llu",
-                                status.sceneInstances,
-                                status.sceneTriangles,
-                                static_cast<unsigned long long>(status.sceneGeometryVersion),
-                                static_cast<unsigned long long>(status.sceneMaterialVersion),
-                                static_cast<unsigned long long>(status.sceneInstanceVersion));
+            UI::Text("State: %s", ToGIBakeStateLabel(status.state));
+            UI::TextDisabled("Phase: %s", status.currentPhase[0] ? status.currentPhase : "(none)");
+            UI::TextDisabled("Scene: %u instances / %u triangles, versions %llu/%llu/%llu",
+                             status.sceneInstances,
+                             status.sceneTriangles,
+                             static_cast<unsigned long long>(status.sceneGeometryVersion),
+                             static_cast<unsigned long long>(status.sceneMaterialVersion),
+                             static_cast<unsigned long long>(status.sceneInstanceVersion));
             ImGui::ProgressBar(progress, {-1.f, 0.f}, progressText);
-            ImGui::TextDisabled("Probes: %u / %u", status.completedProbes, status.totalProbes);
-            ImGui::TextDisabled("Step: %u probes/frame, remaining: %u frame(s)",
-                                status.probesPerStep,
-                                status.estimatedFramesRemaining);
+            UI::TextDisabled("Probes: %u / %u", status.completedProbes, status.totalProbes);
+            UI::TextDisabled("Step: %u probes/frame, remaining: %u frame(s)",
+                             status.probesPerStep,
+                             status.estimatedFramesRemaining);
             if (status.stalledFrames > 0u) {
-                ImGui::TextDisabled("Stalled: %u frame(s)", status.stalledFrames);
+                UI::TextDisabled("Stalled: %u frame(s)", status.stalledFrames);
             }
 
             if (status.state == Renderer::GIBakeState::WaitingForBvh) {
                 ImGui::TextColored({1.f, 0.6f, 0.2f, 1.f},
                                    "Waiting: software ray tracing BVH GPU buffers are not ready.");
                 if (status.bvhMissingMask != 0u) {
-                    ImGui::TextDisabled("Missing BVH buffers:");
+                    UI::TextDisabled("Missing BVH buffers:");
                     if ((status.bvhMissingMask & Renderer::GI_BVH_MISSING_SWRT_NOT_INITIALIZED) != 0u) {
                         ImGui::BulletText("software ray tracer is not initialized");
                     }
@@ -192,7 +199,7 @@ namespace SasamiRenderer
 
             ImGui::SeparatorText("Bake log");
             if (status.logCount == 0u) {
-                ImGui::TextDisabled("(no bake events)");
+                UI::TextDisabled("(no bake events)");
             } else {
                 ImGui::BeginChild("GIBakeLog", ImVec2(0.0f, 150.0f), ImGuiChildFlags_Borders);
                 const uint32_t first = status.logCount > Renderer::GIBakeStatus::kLogCapacity
@@ -200,9 +207,9 @@ namespace SasamiRenderer
                     : 0u;
                 for (uint32_t i = first; i < status.logCount; ++i) {
                     const auto& entry = status.logEntries[i];
-                    ImGui::TextDisabled("#%u frame=%u %s", entry.sequence, entry.bakeFrame, ToGIBakeStateLabel(entry.state));
+                    UI::TextDisabled("#%u frame=%u %s", entry.sequence, entry.bakeFrame, ToGIBakeStateLabel(entry.state));
                     ImGui::SameLine();
-                    ImGui::Text("[%s] %s", entry.phase, entry.message);
+                    UI::Text("[%s] %s", entry.phase, entry.message);
                 }
                 if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f) {
                     ImGui::SetScrollHereY(1.0f);
@@ -224,6 +231,16 @@ namespace SasamiRenderer
 
             for (const RenderPassBuilderUiEntry& entry : kRenderPassBuilderUiEntries) {
                 bool enabled = HasRenderPass(currentSequence, entry.type);
+                if (entry.required) {
+                    bool alwaysOn = true;
+                    ImGui::BeginDisabled();
+                    ImGui::Checkbox(entry.label, &alwaysOn);
+                    ImGui::EndDisabled();
+                    ImGui::SameLine();
+                    UI::TextDisabled("(required by deferred lighting)");
+                    nextSequence.push_back(entry.type);
+                    continue;
+                }
                 if (ImGui::Checkbox(entry.label, &enabled)) {
                     changed = true;
                 }
@@ -232,7 +249,7 @@ namespace SasamiRenderer
                 }
             }
 
-            if (ImGui::Button("Reset Passes")) {
+            if (UI::Button("Reset Passes")) {
                 app.UseDefaultRenderNodePreset();
                 return;
             }
@@ -258,6 +275,15 @@ namespace SasamiRenderer
                 // Default: wider than the old Sponza fit so probe debug is easier to inspect.
                 app.FitProbeGridToScene(-12.0f, -1.0f, -18.0f, 12.0f, 12.0f, 20.0f, 2.0f);
                 break;
+            case 3:
+                // Scene auto-fit: covers every loaded model (Sponza and the Bistro block at
+                // x = 60 alike) instead of a hardcoded Sponza-sized box, coarsening probe
+                // spacing as needed to stay inside the budget. Falls back to the default
+                // interior box while the scene has no geometry yet.
+                if (!app.FitProbeGridToSceneAuto(2.0f, 16384u)) {
+                    app.FitProbeGridToScene(-12.0f, -1.0f, -18.0f, 12.0f, 12.0f, 20.0f, 2.0f);
+                }
+                break;
             }
         }
 
@@ -274,7 +300,7 @@ namespace SasamiRenderer
             material.emissive[2] = emissiveB;
             material.roughness = roughness;
             material.metallic = metallic;
-            material.reflectionStrength = DefaultReflectionStrength(roughness, metallic);
+            material.reflectionStrength = Math::DefaultReflectionStrength(roughness, metallic);
             material.occlusionStrength = 1.0f;
             return material;
         }
@@ -294,8 +320,8 @@ namespace SasamiRenderer
         {
             bool changed = false;
             ImGui::PushID(label);
-            ImGui::TextDisabled("%s", label);
-            ImGui::Separator();
+            UI::TextDisabled("%s", label);
+            UI::Separator();
             int workflowIndex = static_cast<int>(material.workflow);
             if (ImGui::Combo("Workflow", &workflowIndex, "Metallic-Roughness\0Specular-Glossiness\0")) {
                 if (workflowIndex < 0) {
@@ -311,22 +337,22 @@ namespace SasamiRenderer
                 changed |= ImGui::ColorEdit4("Diffuse Color", material.baseColor);
                 changed |= ImGui::ColorEdit3("Specular Color", material.specularColor);
                 float glossiness = 1.0f - material.roughness;
-                if (ImGui::SliderFloat("Glossiness", &glossiness, 0.0f, 1.0f)) {
+                if (UI::Volume("Glossiness", &glossiness, 0.0f, 1.0f)) {
                     material.roughness = 1.0f - glossiness;
                     changed = true;
                 }
             } else {
                 changed |= ImGui::ColorEdit4("Base Color", material.baseColor);
-                changed |= ImGui::SliderFloat("Roughness", &material.roughness, 0.0f, 1.0f);
-                changed |= ImGui::SliderFloat("Metallic", &material.metallic, 0.0f, 1.0f);
+                changed |= UI::Volume("Roughness", &material.roughness, 0.0f, 1.0f);
+                changed |= UI::Volume("Metallic", &material.metallic, 0.0f, 1.0f);
             }
             changed |= ImGui::ColorEdit3("Emissive", material.emissive);
-            changed |= ImGui::SliderFloat("Reflection Strength", &material.reflectionStrength, 0.0f, 1.0f);
-            changed |= ImGui::SliderFloat("AO Strength", &material.occlusionStrength, 0.0f, 1.0f);
-            changed |= ImGui::SliderFloat("Transmission", &material.transmission, 0.0f, 1.0f);
-            changed |= ImGui::SliderFloat("IOR", &material.ior, 1.0f, 2.5f);
+            changed |= UI::Volume("Reflection Strength", &material.reflectionStrength, 0.0f, 1.0f);
+            changed |= UI::Volume("AO Strength", &material.occlusionStrength, 0.0f, 1.0f);
+            changed |= UI::Volume("Transmission", &material.transmission, 0.0f, 1.0f);
+            changed |= UI::Volume("IOR", &material.ior, 1.0f, 2.5f);
             if (material.baseColor[3] < 0.999f || material.transmission > 0.0f) {
-                changed |= ImGui::SliderFloat("Transparent Shell", &material.transparentShellStrength, 0.0f, 2.0f);
+                changed |= UI::Volume("Transparent Shell", &material.transparentShellStrength, 0.0f, 2.0f);
             }
             ImGui::PopID();
             return changed;
@@ -363,7 +389,6 @@ namespace SasamiRenderer
         WRITE_B(tessDebugColorsEnabled);
         WRITE_B(meshletDebugViewEnabled);
         WRITE_B(useMeshShader);
-        WRITE_E(rasterShaderMode);
         WRITE_E(renderPathMode);
         WRITE_E(rayTracingPerformancePreset);
         WRITE_B(rayTracingDynamicResolutionEnabled);
@@ -371,6 +396,14 @@ namespace SasamiRenderer
         WRITE_B(rasterSoftwareRayTracedDirectionalShadowEnabled);
         WRITE_B(rasterSoftwareRayTracedReflectionEnabled);
         WRITE_B(rasterScreenSpaceReflectionEnabled);
+        WRITE_F(ssrMaxDistance);
+        WRITE_F(ssrThickness);
+        WRITE_F(ssrStepCount);
+        WRITE_F(ssrRoughnessCutoff);
+        WRITE_F(ssrRefineSteps);
+        WRITE_F(ssrEdgeFade);
+        WRITE_F(ssrNormalOffset);
+        WRITE_F(ssrIntensity);
         WRITE_B(rasterSoftwareRayTracedAmbientOcclusionEnabled);
         WRITE_E(ambientOcclusionMode);
         WRITE_E(runtimeAoMethod);
@@ -393,12 +426,14 @@ namespace SasamiRenderer
         WRITE_F(runtimeAoBias);
         WRITE_F(runtimeAoIntensity);
         WRITE_F(aoMinOcclusion);
+        WRITE_F(aoDirectLightingStrength);
         WRITE_F(runtimeAoThickness);
         WRITE_U(runtimeAoQuality);
         WRITE_U(swrtAoSampleCount);
         WRITE_E(gBufferDebugView);
         WRITE_F(hardwareRayTracingResolutionScale);
         WRITE_B(vsmBlurEnabled);
+        WRITE_F(exposure);
 #undef WRITE_F
 #undef WRITE_U
 #undef WRITE_B
@@ -408,7 +443,8 @@ namespace SasamiRenderer
         out << "enabled = "   << (renderer.GetGIEnabled() ? 1 : 0) << '\n';
         out << "intensity = " << renderer.GetGIIntensity()         << '\n';
         out << "ema_alpha = " << renderer.GetGIEmaAlpha()          << '\n';
-        out << "baked = "     << (renderer.IsGIBaked() ? 1 : 0)    << '\n';
+        out << "baked = "     << (renderer.HasGIProbeData() ? 1 : 0) << '\n';
+        out << "continuous_mode = " << (renderer.GetGIContinuousMode() ? 1 : 0) << '\n';
 
         out << "[app]\n";
         out << "probe_preset = "      << m_probeGridPreset            << '\n';
@@ -417,12 +453,13 @@ namespace SasamiRenderer
         out << "probe_cache = "       << kGIProbeCacheFile             << '\n';
         out << "show_light_gizmo = "  << (m_showLightGizmo ? 1 : 0)   << '\n';
         out << "show_light_gizmos = " << (m_showLightGizmos ? 1 : 0)  << '\n';
+        out << "show_particles = " << (app.GetParticlesEnabled() ? 1 : 0) << '\n';
         out.close();
 
         const uint64_t stateHash = ComputeSessionStateHash(scenePath, path);
         const std::string cachePath =
             ApplicationResourcePaths::ResolveConfigPathString(kGIProbeCacheFile);
-        if (renderer.IsGIBaked() && !renderer.SaveGIProbeCache(cachePath, stateHash)) {
+        if (renderer.HasGIProbeData() && !renderer.SaveGIProbeCache(cachePath, stateHash)) {
             DebugLog("PBRApp: failed to save GI probe cache.\n");
         }
     }
@@ -433,9 +470,7 @@ namespace SasamiRenderer
             ApplicationResourcePaths::ResolveConfigPathString(kSettingsStateFile);
         const std::string scenePath =
             ApplicationResourcePaths::ResolveConfigPathString(kSceneStateFile);
-        const std::string cachePath =
-            ApplicationResourcePaths::ResolveConfigPathString(kGIProbeCacheFile);
-        bool shouldLoadGIProbeCache = false;
+        m_sessionGiBaked = false;
 
         std::ifstream in(settingsPath);
         if (in.is_open()) {
@@ -496,7 +531,6 @@ namespace SasamiRenderer
             READ_B(tessDebugColorsEnabled);
             READ_B(meshletDebugViewEnabled);
             READ_B(useMeshShader);
-            READ_E(rasterShaderMode);
             READ_E(renderPathMode);
             READ_E(rayTracingPerformancePreset);
             READ_B(rayTracingDynamicResolutionEnabled);
@@ -504,6 +538,14 @@ namespace SasamiRenderer
             READ_B(rasterSoftwareRayTracedDirectionalShadowEnabled);
             READ_B(rasterSoftwareRayTracedReflectionEnabled);
             READ_B(rasterScreenSpaceReflectionEnabled);
+            READ_F(ssrMaxDistance);
+            READ_F(ssrThickness);
+            READ_F(ssrStepCount);
+            READ_F(ssrRoughnessCutoff);
+            READ_F(ssrRefineSteps);
+            READ_F(ssrEdgeFade);
+            READ_F(ssrNormalOffset);
+            READ_F(ssrIntensity);
             READ_B(rasterSoftwareRayTracedAmbientOcclusionEnabled);
             READ_E(ambientOcclusionMode);
             READ_E(runtimeAoMethod);
@@ -526,12 +568,14 @@ namespace SasamiRenderer
             READ_F(runtimeAoBias);
             READ_F(runtimeAoIntensity);
             READ_F(aoMinOcclusion);
+            READ_F(aoDirectLightingStrength);
             READ_F(runtimeAoThickness);
             READ_U(runtimeAoQuality);
             READ_U(swrtAoSampleCount);
             READ_E(gBufferDebugView);
             READ_F(hardwareRayTracingResolutionScale);
             READ_B(vsmBlurEnabled);
+            READ_F(exposure);
 #undef READ_F
 #undef READ_U
 #undef READ_B
@@ -541,22 +585,55 @@ namespace SasamiRenderer
             renderer.SetGIEnabled(getB("gi", "enabled", renderer.GetGIEnabled()));
             renderer.SetGIIntensity(getF("gi", "intensity", renderer.GetGIIntensity()));
             renderer.SetGIEmaAlpha(getF("gi", "ema_alpha", renderer.GetGIEmaAlpha()));
-            shouldLoadGIProbeCache = getB("gi", "baked", false);
+            renderer.SetGIContinuousMode(getB("gi", "continuous_mode", renderer.GetGIContinuousMode()));
+            m_sessionGiBaked = getB("gi", "baked", false);
 
-            m_probeGridPreset = std::clamp(static_cast<int>(getI("app", "probe_preset", m_probeGridPreset)), 0, 2);
+            m_probeGridPreset = std::clamp(static_cast<int>(getI("app", "probe_preset", m_probeGridPreset)), 0, 3);
             app.SetDebugProbeGridEnabled(getB("app", "show_probe_spheres", app.GetDebugProbeGridEnabled()));
             app.SetDebugProbeRadius(getF("app", "probe_radius", app.GetDebugProbeRadius()));
             m_showLightGizmo  = getB("app", "show_light_gizmo", m_showLightGizmo);
             m_showLightGizmos = getB("app", "show_light_gizmos", m_showLightGizmos);
-            ApplyProbeGridPreset(app, m_probeGridPreset);
+            app.SetParticlesEnabled(getB("app", "show_particles", app.GetParticlesEnabled()));
         }
 
         // Camera + lights (non-destructive: applied onto existing objects; overrides
         // the default view/lights when a saved scene file is present).
         app.ApplyCameraAndLights(scenePath);
 
-        if (shouldLoadGIProbeCache) {
+        // GI probe grid fit + probe cache load / bake request need final scene bounds
+        // (Sponza/bunny async loads settled) and renderer GI/SWRT readiness. Apply now
+        // if those conditions already hold (e.g. a manual/UI-triggered reload after the
+        // app is fully up), otherwise defer to OnUpdate via m_pendingGiSessionRestore.
+        Renderer& renderer = app.GetRenderer();
+        const RendererReadyState& readyState = renderer.GetReadyState();
+        const bool sponzaSettled = !m_sponzaModel ||
+            m_sponzaModel->GetLoadState() != MeshComponent::MeshLoadState::Loading;
+        const bool bunnySettled = !m_bunnyModel ||
+            m_bunnyModel->GetLoadState() != MeshComponent::MeshLoadState::Loading;
+        const bool bistroSettled = !m_bistroModel ||
+            m_bistroModel->GetLoadState() != MeshComponent::MeshLoadState::Loading;
+        if (readyState.IsFeatureReady(readyState.giReady) &&
+            readyState.IsFeatureReady(readyState.swrtReady) &&
+            sponzaSettled && bunnySettled && bistroSettled) {
+            ApplyDeferredGiSessionState(app);
+            m_pendingGiSessionRestore = false;
+        } else {
+            m_pendingGiSessionRestore = true;
+        }
+    }
+
+    void RenderingApp::ApplyDeferredGiSessionState(ApplicationCore& app)
+    {
+        ApplyProbeGridPreset(app, m_probeGridPreset);
+
+        if (m_sessionGiBaked) {
             Renderer& renderer = app.GetRenderer();
+            const std::string scenePath =
+                ApplicationResourcePaths::ResolveConfigPathString(kSceneStateFile);
+            const std::string settingsPath =
+                ApplicationResourcePaths::ResolveConfigPathString(kSettingsStateFile);
+            const std::string cachePath =
+                ApplicationResourcePaths::ResolveConfigPathString(kGIProbeCacheFile);
             const uint64_t stateHash = ComputeSessionStateHash(scenePath, settingsPath);
             if (!renderer.LoadGIProbeCache(cachePath, stateHash) && renderer.GetGIEnabled()) {
                 renderer.RequestGIBake();
@@ -585,7 +662,7 @@ namespace SasamiRenderer
         if (useFullDx12RenderGraph) {
             app.UseDefaultRenderNodePreset();
 
-            if (!app.LoadSkybox(kSkyboxPanoramaPath, ApplicationCore::SkyboxLoadFormat::HdrEquirect)) {
+            if (!app.LoadSkyboxAsync(kSkyboxPanoramaPath, ApplicationCore::SkyboxLoadFormat::HdrEquirect)) {
                 DebugLog("Skybox load failed: invalid path for selected format.\n");
             }
         } else {
@@ -597,35 +674,63 @@ namespace SasamiRenderer
         m_transparentSphereMaterial = MakeTransparentMaterial(0.35f, 0.78f, 0.95f, 0.35f, 0.04f, 0.0f, 0.92f, 1.33f);
         m_transparentBoxMaterial = MakeTransparentMaterial(0.92f, 0.58f, 0.26f, 0.42f, 0.08f, 0.0f, 0.78f, 1.50f);
 
-        StaticModel* bunnyModel = app.CreateStaticModel();
-        StaticModel* sponzaModel = app.CreateStaticModel();
+        m_bunnyModel = app.CreateStaticModel();
+        m_sponzaModel = app.CreateStaticModel();
+        m_bistroModel = app.CreateStaticModel();
         m_sphereModel = app.CreateStaticModel();
         m_boxModel = app.CreateStaticModel();
         m_transparentSphereModel = app.CreateStaticModel();
         m_transparentBoxModel = app.CreateStaticModel();
         StaticModel* floorModel = app.CreateStaticModel();
 
-        if (!bunnyModel || !sponzaModel || !m_sphereModel || !m_boxModel ||
+        if (!m_bunnyModel || !m_sponzaModel || !m_bistroModel || !m_sphereModel || !m_boxModel ||
             !m_transparentSphereModel || !m_transparentBoxModel || !floorModel) {
             DebugLog("Sample scene object creation failed.\n");
             app.RequestQuit();
             return;
         }
 
-        if (!bunnyModel->LoadModel(kStanfordBunnyPath, StaticModel::ModelFormat::Gltf, 0.01f)) {
-            app.DeleteObject(bunnyModel);
-            bunnyModel = nullptr;
+        if (!m_bunnyModel->LoadModelAsync(app, kStanfordBunnyPath, StaticModel::ModelFormat::Gltf, 0.01f)) {
+            app.DeleteObject(m_bunnyModel);
+            m_bunnyModel = nullptr;
             DebugLog("Bunny model load failed: Assets/Models/stanford_bunny_pbr/scene.gltf\n");
         } else {
-            bunnyModel->SetTranslation(0.0f, 0.0f, 0.8f);
+            m_bunnyModel->SetTranslation(0.0f, 0.0f, 0.8f);
         }
 
-        if (!sponzaModel->LoadModel(kSponzaPath, StaticModel::ModelFormat::Gltf, 1.f)) {
-            app.DeleteObject(sponzaModel);
-            sponzaModel = nullptr;
+        if (!m_sponzaModel->LoadModelAsync(app, kSponzaPath, StaticModel::ModelFormat::Gltf, 1.f)) {
+            app.DeleteObject(m_sponzaModel);
+            m_sponzaModel = nullptr;
             DebugLog("Sponza model load failed: Assets/Models/Sponza/glTF/Sponza.gltf\n");
         } else {
-            sponzaModel->SetTranslation(0.f, 0.f, 1.f);
+            m_sponzaModel->SetTranslation(0.f, 0.f, 1.f);
+        }
+
+        // Loaded synchronously, unlike the glTF models: parsing this FBX on a worker
+        // thread reliably kills the process a few seconds later (no exception reaches any
+        // handler), while the identical parse on the main thread is stable. Tracked as a
+        // follow-up in TODO.md; until it is understood, correctness beats overlap here.
+        if (!m_bistroModel->LoadModel(kBistroPath, StaticModel::ModelFormat::Fbx, 1.0f)) {
+            app.DeleteObject(m_bistroModel);
+            m_bistroModel = nullptr;
+            DebugLog("Bistro model load failed: Assets/Models/Bistro/BistroExterior.fbx\n");
+        } else {
+            // +X offset keeps the Bistro exterior from overlapping Sponza, which stays at the origin.
+            m_bistroModel->SetTranslation(60.0f, 0.0f, 0.0f);
+        }
+
+        // Skinned animated model (glTF sample "Fox", authored in centimeters).
+        SkinnedModel* foxModel = app.CreateSkinnedModel();
+        if (foxModel) {
+            if (!foxModel->LoadModel(kFoxPath)) {
+                app.DeleteObject(foxModel);
+                foxModel = nullptr;
+                DebugLog("Fox model load failed: Assets/Models/Fox/Fox.gltf\n");
+            } else {
+                foxModel->SetUniformScale(0.02f);
+                foxModel->SetTranslation(1.2f, 0.0f, 0.3f);
+                foxModel->PlayAnimation(2); // Run — clearly visible loop
+            }
         }
 
         StaticModel::SphereDesc sphereDesc{};
@@ -660,7 +765,7 @@ namespace SasamiRenderer
         m_transparentBoxModel->AddBox(transparentBoxDesc);
         m_transparentBoxModel->SetTranslation(4.0f, 0.59f, 0.35f);
 
-        if (!sponzaModel) {
+        if (!m_sponzaModel) {
             SurfaceMaterial floorMaterial = MakeMaterial(0.52f, 0.54f, 0.58f, 0.92f, 0.0f);
             StaticModel::BoxDesc floorDesc{};
             floorDesc.width = 12.0f;
@@ -674,7 +779,10 @@ namespace SasamiRenderer
             floorModel = nullptr;
         }
 
-        ApplyProbeGridPreset(app, m_probeGridPreset);
+        // Probe grid fit is deferred (see ApplyDeferredGiSessionState): scene bounds are
+        // not final until the async Sponza/bunny loads settle.
+
+        app.SetParticleEmitOrigin(0.0f, 1.5f, 0.0f);
 
         BindInputEvents(app);
         RegisterUi(app);
@@ -686,7 +794,23 @@ namespace SasamiRenderer
 
     void RenderingApp::OnUpdate(ApplicationCore& app, float deltaTime)
     {
-        (void)app;
+        if (m_pendingGiSessionRestore && app.IsRendererReady()) {
+            const RendererReadyState& readyState = app.GetRenderer().GetReadyState();
+            const bool sponzaSettled = !m_sponzaModel ||
+                m_sponzaModel->GetLoadState() != MeshComponent::MeshLoadState::Loading;
+            const bool bunnySettled = !m_bunnyModel ||
+                m_bunnyModel->GetLoadState() != MeshComponent::MeshLoadState::Loading;
+            const bool bistroSettled = !m_bistroModel ||
+                m_bistroModel->GetLoadState() != MeshComponent::MeshLoadState::Loading;
+            if (readyState.IsFeatureReady(readyState.giReady) &&
+                readyState.IsFeatureReady(readyState.swrtReady) &&
+                sponzaSettled && bunnySettled && bistroSettled) {
+                ApplyDeferredGiSessionState(app);
+                m_pendingGiSessionRestore = false;
+                DebugLog("[PBRApp] deferred GI session state applied\n");
+            }
+        }
+
         if (m_camera) {
             m_camera->Update(deltaTime);
         }
@@ -697,6 +821,7 @@ namespace SasamiRenderer
         if (!app.IsRendererReady()) {
             return;
         }
+
         app.RenderFrame();
     }
 
@@ -711,6 +836,9 @@ namespace SasamiRenderer
         m_boxModel = nullptr;
         m_transparentSphereModel = nullptr;
         m_transparentBoxModel = nullptr;
+        m_bunnyModel = nullptr;
+        m_sponzaModel = nullptr;
+        m_bistroModel = nullptr;
         m_inputConnections.clear();
     }
 
@@ -769,75 +897,74 @@ namespace SasamiRenderer
                 return;
             }
 
-            if (ImGui::BeginTabItem("Camera")) {
+            if (UI::Tab cameraTab{"Camera"}) {
             if (!m_camera) {
-                ImGui::TextDisabled("Camera object is not available.");
+                UI::TextDisabled("Camera object is not available.");
             } else {
 
             float speed = m_camera->MoveSpeed();
-            if (ImGui::SliderFloat("Move Speed", &speed, 0.01f, 20.0f)) {
+            if (UI::Volume("Move Speed", &speed, 0.01f, 20.0f)) {
                 m_camera->SetMoveSpeed(speed);
             }
 
             float nearClip = m_camera->NearClip();
             float farClip = m_camera->FarClip();
             bool clipChanged = false;
-            clipChanged |= ImGui::SliderFloat("Near Clip", &nearClip, 0.0001f, 1.0f, "%.4f", ImGuiSliderFlags_Logarithmic);
-            clipChanged |= ImGui::SliderFloat("Far Clip", &farClip, 1.0f, 5000.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
+            clipChanged |= UI::Volume("Near Clip", &nearClip, 0.0001f, 1.0f, "%.4f", true);
+            clipChanged |= UI::Volume("Far Clip", &farClip, 1.0f, 5000.0f, "%.1f", true);
             if (clipChanged) {
                 m_camera->SetClipPlanes(nearClip, farClip);
             }
 
             const auto& transform = m_camera->Transform();
-            ImGui::Text("Position: (%.3f, %.3f, %.3f)",
+            UI::Text("Position: (%.3f, %.3f, %.3f)",
                         transform.position.x,
                         transform.position.y,
                         transform.position.z);
 
             const auto& proxy = app.GetMainCameraProxy();
-            ImGui::Text("Proxy Pos: (%.3f, %.3f, %.3f)",
+            UI::Text("Proxy Pos: (%.3f, %.3f, %.3f)",
                         proxy.cameraPosition[0],
                         proxy.cameraPosition[1],
                         proxy.cameraPosition[2]);
 
-            ImGui::Separator();
+            UI::Separator();
             const float yawDeg   = m_camera->Yaw()   * (180.0f / 3.14159265f);
             const float pitchDeg = m_camera->Pitch() * (180.0f / 3.14159265f);
-            ImGui::Text("Yaw:   %.2f deg  (%.4f rad)", yawDeg,   m_camera->Yaw());
-            ImGui::Text("Pitch: %.2f deg  (%.4f rad)", pitchDeg, m_camera->Pitch());
-            ImGui::Text("Forward: (%.3f, %.3f, %.3f)",
+            UI::Text("Yaw:   %.2f deg  (%.4f rad)", yawDeg,   m_camera->Yaw());
+            UI::Text("Pitch: %.2f deg  (%.4f rad)", pitchDeg, m_camera->Pitch());
+            UI::Text("Forward: (%.3f, %.3f, %.3f)",
                         proxy.cameraForward[0],
                         proxy.cameraForward[1],
                         proxy.cameraForward[2]);
-            ImGui::Text("Right:   (%.3f, %.3f, %.3f)",
+            UI::Text("Right:   (%.3f, %.3f, %.3f)",
                         proxy.cameraRight[0],
                         proxy.cameraRight[1],
                         proxy.cameraRight[2]);
-            ImGui::Text("Up:      (%.3f, %.3f, %.3f)",
+            UI::Text("Up:      (%.3f, %.3f, %.3f)",
                         proxy.cameraUp[0],
                         proxy.cameraUp[1],
                         proxy.cameraUp[2]);
             }
-            ImGui::EndTabItem();
             }
 
-            if (ImGui::BeginTabItem("Lighting")) {
+            if (UI::Tab lightingTab{"Lighting"}) {
             auto light = app.GetDirectionalLight();
             bool changed = false;
             changed |= ImGui::SliderAngle("Yaw", &light.yaw, -180.0f, 180.0f);
             changed |= ImGui::SliderAngle("Pitch", &light.pitch, -180.0f, 180.0f);
-            changed |= ImGui::SliderFloat("Distance", &light.distance, 0.1f, 50.0f);
+            changed |= UI::Volume("Distance", &light.distance, 0.1f, 50.0f);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Shadow camera distance from the scene center.\nThis is not physical light falloff distance.");
             }
-            changed |= ImGui::SliderFloat("Ortho Half", &light.orthoHalf, 0.1f, 50.0f);
+            changed |= UI::Volume("Ortho Half", &light.orthoHalf, 0.1f, 50.0f);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Half-size of the directional shadow orthographic projection.\nLarger values cover more area but reduce shadow texel density.");
             }
-            changed |= ImGui::SliderFloat("Near", &light.nearZ, 0.01f, 100.0f);
-            changed |= ImGui::SliderFloat("Far", &light.farZ, 0.02f, 300.0f);
+            changed |= UI::Volume("Near", &light.nearZ, 0.01f, 100.0f);
+            changed |= UI::Volume("Far", &light.farZ, 0.02f, 300.0f);
             changed |= ImGui::ColorEdit4("Dir Color", light.color.Data());
-            changed |= ImGui::SliderFloat("Dir Intensity", &light.intensity, 0.0f, 10.0f);
+            changed |= UI::Volume("Dir Intensity", &light.intensity, 0.0f, 10.0f);
             int shadowMode = static_cast<int>(light.shadowMode);
             changed |= ImGui::RadioButton("Single Shadow", &shadowMode, static_cast<int>(DirectionalShadowMode::Single));
             changed |= ImGui::RadioButton("CSM4", &shadowMode, static_cast<int>(DirectionalShadowMode::Csm4));
@@ -850,13 +977,13 @@ namespace SasamiRenderer
                     app.SetVsmBlurEnabled(vsmBlur);
                 }
             }
-            changed |= ImGui::SliderFloat("Shadow Distance", &light.shadowDistance, 5.0f, 250.0f);
-            changed |= ImGui::SliderFloat("Cascade Exponent", &light.cascadeDistributionExponent, 1.0f, 4.0f);
-            changed |= ImGui::SliderFloat("Cascade Blend", &light.cascadeBlendFraction, 0.0f, 0.3f);
-            changed |= ImGui::SliderFloat("Depth Bias", &light.depthBias, 0.0f, 4000.0f);
-            changed |= ImGui::SliderFloat("Slope Bias", &light.slopeScaleBias, 0.0f, 8.0f);
-            changed |= ImGui::SliderFloat("Normal Bias", &light.normalBias, 0.0f, 0.1f);
-            changed |= ImGui::SliderFloat("Far Bias Scale", &light.farBiasScale, 1.0f, 4.0f);
+            changed |= UI::Volume("Shadow Distance", &light.shadowDistance, 5.0f, 250.0f);
+            changed |= UI::Volume("Cascade Exponent", &light.cascadeDistributionExponent, 1.0f, 4.0f);
+            changed |= UI::Volume("Cascade Blend", &light.cascadeBlendFraction, 0.0f, 0.3f);
+            changed |= UI::Volume("Depth Bias", &light.depthBias, 0.0f, 4000.0f);
+            changed |= UI::Volume("Slope Bias", &light.slopeScaleBias, 0.0f, 8.0f);
+            changed |= UI::Volume("Normal Bias", &light.normalBias, 0.0f, 0.1f);
+            changed |= UI::Volume("Far Bias Scale", &light.farBiasScale, 1.0f, 4.0f);
 
             if (light.nearZ < 0.001f) {
                 light.nearZ = 0.001f;
@@ -874,7 +1001,7 @@ namespace SasamiRenderer
                 app.SetDirectionalLight(light);
             }
 
-            ImGui::Separator();
+            UI::Separator();
             ImGui::Checkbox("Show Light Gizmo", &m_showLightGizmo);
 
             // 3D light position/direction gizmo drawn on the viewport
@@ -884,12 +1011,10 @@ namespace SasamiRenderer
                 const float sw = static_cast<float>(app.GetWidth());
                 const float sh = static_cast<float>(app.GetHeight());
 
-                // Light forward direction from yaw/pitch (same as DirectionFromYawPitch)
-                const float cy = std::cos(light.yaw),  sy = std::sin(light.yaw);
-                const float cp = std::cos(light.pitch), sp = std::sin(light.pitch);
-                float fx = -sy, fy = sp * cy, fz = -cp * cy;
-                const float fl = std::sqrt(fx*fx + fy*fy + fz*fz);
-                if (fl > 1e-6f) { fx /= fl; fy /= fl; fz /= fl; }
+                // Light forward direction from yaw/pitch.
+                float fDir[3] = {};
+                Math::DirectionFromYawPitch(light.yaw, light.pitch, fDir);
+                const float fx = fDir[0], fy = fDir[1], fz = fDir[2];
 
                 // Light world position: place gizmo farther back so it stays
                 // visible outside the scene bounds (2.5× the shadow camera distance).
@@ -920,7 +1045,11 @@ namespace SasamiRenderer
                 const bool lightOk = w2s(lx, ly, lz, lightScreen);
                 const bool arrowOk = w2s(ax, ay, az, arrowTip);
 
-                ImDrawList* drawList = ImGui::GetForegroundDrawList();
+                // Background draw list, not the foreground one: ImGui renders the foreground
+                // list after every window, so scene gizmos drawn there sit on top of the
+                // control panel. The background list is drawn before windows, which keeps
+                // the UI clickable and visually in front.
+                ImDrawList* drawList = ImGui::GetBackgroundDrawList();
                 constexpr ImU32 kYellow   = IM_COL32(255, 220, 50, 230);
                 constexpr ImU32 kYellowBg = IM_COL32(255, 180, 0,  160);
                 constexpr float kRadius   = 13.f;
@@ -979,21 +1108,21 @@ namespace SasamiRenderer
                 }
             }
 
-            ImGui::Separator();
+            UI::Separator();
             auto pointLights = app.GetPointLightObjects();
-            ImGui::Text("Point Lights: %d", static_cast<int>(pointLights.size()));
-            if (ImGui::Button("Add Point")) {
+            UI::Text("Point Lights: %d", static_cast<int>(pointLights.size()));
+            if (UI::Button("Add Point")) {
                 app.CreatePointLightObject();
                 pointLights = app.GetPointLightObjects();
             }
             ImGui::SameLine();
-            if (ImGui::Button("Remove Point") && !pointLights.empty()) {
+            if (UI::Button("Remove Point") && !pointLights.empty()) {
                 app.DeleteObject(pointLights.back());
                 pointLights = app.GetPointLightObjects();
             }
             for (size_t i = 0; i < pointLights.size(); ++i) {
                 ImGui::PushID(static_cast<int>(i));
-                ImGui::Text("Point %d", static_cast<int>(i));
+                UI::Text("Point %d", static_cast<int>(i));
                 auto* pl = pointLights[i];
                 if (!pl) {
                     ImGui::PopID();
@@ -1003,11 +1132,11 @@ namespace SasamiRenderer
                 ImGui::DragFloat3("Pos", &tr.position.x, 0.05f);
                 ImGui::ColorEdit4("Color", pl->ColorData());
                 float intensity = pl->Intensity();
-                if (ImGui::SliderFloat("Intensity", &intensity, 0.0f, 10.0f)) {
+                if (UI::Volume("Intensity", &intensity, 0.0f, 10.0f)) {
                     pl->SetIntensity(intensity);
                 }
                 float range = pl->Range();
-                if (ImGui::SliderFloat("Range", &range, 0.1f, 50.0f)) {
+                if (UI::Volume("Range", &range, 0.1f, 50.0f)) {
                     if (range < 0.01f) {
                         range = 0.01f;
                     }
@@ -1016,21 +1145,21 @@ namespace SasamiRenderer
                 ImGui::PopID();
             }
 
-            ImGui::Separator();
+            UI::Separator();
             auto spotLights = app.GetSpotLightObjects();
-            ImGui::Text("Spot Lights: %d", static_cast<int>(spotLights.size()));
-            if (ImGui::Button("Add Spot")) {
+            UI::Text("Spot Lights: %d", static_cast<int>(spotLights.size()));
+            if (UI::Button("Add Spot")) {
                 app.CreateSpotLightObject();
                 spotLights = app.GetSpotLightObjects();
             }
             ImGui::SameLine();
-            if (ImGui::Button("Remove Spot") && !spotLights.empty()) {
+            if (UI::Button("Remove Spot") && !spotLights.empty()) {
                 app.DeleteObject(spotLights.back());
                 spotLights = app.GetSpotLightObjects();
             }
             for (size_t i = 0; i < spotLights.size(); ++i) {
                 ImGui::PushID(100 + static_cast<int>(i));
-                ImGui::Text("Spot %d", static_cast<int>(i));
+                UI::Text("Spot %d", static_cast<int>(i));
                 auto* sl = spotLights[i];
                 if (!sl) {
                     ImGui::PopID();
@@ -1043,11 +1172,11 @@ namespace SasamiRenderer
                 ImGui::ColorEdit4("Color", sl->ColorData());
 
                 float intensity = sl->Intensity();
-                if (ImGui::SliderFloat("Intensity", &intensity, 0.0f, 10.0f)) {
+                if (UI::Volume("Intensity", &intensity, 0.0f, 10.0f)) {
                     sl->SetIntensity(intensity);
                 }
                 float range = sl->Range();
-                if (ImGui::SliderFloat("Range", &range, 0.1f, 50.0f)) {
+                if (UI::Volume("Range", &range, 0.1f, 50.0f)) {
                     if (range < 0.01f) {
                         range = 0.01f;
                     }
@@ -1071,7 +1200,7 @@ namespace SasamiRenderer
             }
 
             // ── Point / Spot light 3D gizmos (viewport overlay) ──────────────
-            ImGui::Separator();
+            UI::Separator();
             ImGui::Checkbox("Show Point/Spot Gizmos", &m_showLightGizmos);
             if (m_showLightGizmos) {
                 const auto& gProxy = app.GetMainCameraProxy();
@@ -1090,7 +1219,11 @@ namespace SasamiRenderer
                     return ndcX >= -1.1f && ndcX <= 1.1f && ndcY >= -1.1f && ndcY <= 1.1f;
                 };
 
-                ImDrawList* gdl = ImGui::GetForegroundDrawList();
+                // Background draw list, not the foreground one: ImGui renders the foreground
+                // list after every window, so scene gizmos drawn there sit on top of the
+                // control panel. The background list is drawn before windows, which keeps
+                // the UI clickable and visually in front.
+                ImDrawList* gdl = ImGui::GetBackgroundDrawList();
 
                 // ── Point lights: filled circle + crosshair + label
                 for (size_t pi = 0; pi < pointLights.size(); ++pi) {
@@ -1148,12 +1281,9 @@ namespace SasamiRenderer
                     gdl->AddText({ssc.x + kSR + 3.f, ssc.y - 7.f}, scol, sbuf);
 
                     // Forward direction from yaw/pitch
-                    const float scy = std::cos(str.rotation.yaw), ssy = std::sin(str.rotation.yaw);
-                    const float scp = std::cos(str.rotation.pitch), ssp = std::sin(str.rotation.pitch);
-                    float sfx = -ssy, sfy = ssp * scy, sfz = -scp * scy;
-                    const float sfl = std::sqrt(sfx*sfx + sfy*sfy + sfz*sfz);
-                    if (sfl < 1e-6f) continue;
-                    sfx /= sfl; sfy /= sfl; sfz /= sfl;
+                    float sDir[3] = {};
+                    Math::DirectionFromYawPitch(str.rotation.yaw, str.rotation.pitch, sDir);
+                    const float sfx = sDir[0], sfy = sDir[1], sfz = sDir[2];
 
                     // Direction arrow
                     const float arrowDist = std::fmin(sl->Range() * 0.5f, 3.0f);
@@ -1198,11 +1328,9 @@ namespace SasamiRenderer
                 }
             }
             // ── End Point / Spot gizmos ───────────────────────────────────────
-
-            ImGui::EndTabItem();
             }
 
-            if (ImGui::BeginTabItem("Rendering")) {
+            if (UI::Tab renderingTab{"Rendering"}) {
             int renderPathMode = app.GetRenderPathModeIndex();
             if (ImGui::Combo("Render Type", &renderPathMode, "Raster\0Hardware RT\0")) {
                 app.SetRenderPathModeIndex(renderPathMode);
@@ -1212,18 +1340,29 @@ namespace SasamiRenderer
             const bool isRayTracingRenderType =
                 (renderPathMode == static_cast<int>(RendererEnums::RenderPathMode::HardwareRayTracing));
 
-            ImGui::Separator();
+            float exposure = app.GetExposure();
+            if (UI::Volume("Exposure", &exposure, 0.1f, 8.0f, "%.2f", true)) {
+                app.SetExposure(exposure);
+            }
+
+            UI::Separator();
             if (isRasterRenderType) {
                 DrawRenderPassBuilderControls(app);
-                ImGui::Separator();
+                UI::Separator();
             }
             if (isRasterRenderType) {
                 // --- Geometry pipeline comparison ---
                 bool useMeshShader   = app.GetUseMeshShader();
                 bool useTessellation = app.GetUseTessellation();
 
-                ImGui::TextDisabled("Geometry Pipeline");
-                if (ImGui::RadioButton("Mesh Shader (AS+MS) [default]", useMeshShader && !useTessellation)) {
+                UI::TextDisabled("Geometry Pipeline");
+                // useMeshShader is currently inert: no render-time code reads it, the
+                // MeshShaderRenderPass is never constructed, and meshlet building is not
+                // implemented in any loader, so this option selects the standard VS path.
+                // Labelled honestly rather than as "[default]" until the path is built.
+                // See TODO.md for the wire-up-vs-delete decision.
+
+                if (ImGui::RadioButton("Standard VS (mesh shader path not implemented)", useMeshShader && !useTessellation)) {
                     app.SetUseMeshShader(true);
                     app.SetUseTessellation(false);
                 }
@@ -1235,7 +1374,7 @@ namespace SasamiRenderer
                     app.SetUseMeshShader(false);
                     app.SetUseTessellation(false);
                 }
-                ImGui::TextDisabled("LOD: <5m dense / 5-15m mid / >15m cull");
+                UI::TextDisabled("LOD: <5m dense / 5-15m mid / >15m cull");
 
                 // Debug options that are only relevant for specific pipeline modes
                 if (useTessellation) {
@@ -1244,7 +1383,7 @@ namespace SasamiRenderer
                         app.SetTessWireframeEnabled(tessWireframe);
                     }
                     ImGui::SameLine();
-                    ImGui::TextDisabled("(?)");
+                    UI::TextDisabled("(?)");
                     if (ImGui::IsItemHovered()) {
                         ImGui::SetTooltip("Render tessellated polygons as wireframe\nto visualize the geometry formed by the tessellation stage.");
                     }
@@ -1253,26 +1392,21 @@ namespace SasamiRenderer
                         app.SetTessDebugColorsEnabled(tessDebug);
                     }
                     ImGui::SameLine();
-                    ImGui::TextDisabled("(?)");
+                    UI::TextDisabled("(?)");
                     if (ImGui::IsItemHovered()) {
                         ImGui::SetTooltip("Flat-shade each tessellation patch with a unique\nhash-based color to visualize patch boundaries\n(similar to Meshlet Debug View).");
                     }
                 }
                 if (useMeshShader) {
                     bool meshletDebug = app.GetMeshletDebugViewEnabled();
-                    if (ImGui::Checkbox("Meshlet Debug View", &meshletDebug)) {
+                    if (ImGui::Checkbox("Meshlet Debug View (no effect)", &meshletDebug)) {
                         app.SetMeshletDebugViewEnabled(meshletDebug);
                     }
                     ImGui::SameLine();
-                    ImGui::TextDisabled("(?)");
+                    UI::TextDisabled("(?)");
                     if (ImGui::IsItemHovered()) {
                         ImGui::SetTooltip("Color each triangle group by its approximate meshlet index\n(SV_PrimitiveID / 16) to visualize meshlet boundaries.");
                     }
-                }
-
-                int rasterMode = app.GetRasterShaderModeIndex();
-                if (ImGui::Combo("Raster Shader", &rasterMode, "Lighting (PBR)\0Opaque (Unlit)\0")) {
-                    app.SetRasterShaderModeIndex(rasterMode);
                 }
 
                 int debugMode = app.GetGBufferDebugViewIndex();
@@ -1280,7 +1414,7 @@ namespace SasamiRenderer
                                  "Final Lit\0Albedo\0Normal\0Roughness\0Metallic\0Ambient Occlusion\0Shadow\0Emissive\0Runtime AO Raw\0Runtime AO Filtered\0Directional Light Dir\0Directional NdotL\0Reflection Radiance\0Reflection Alpha\0SWRT Reflection Hit Distance\0SWRT Reflection Composite\0")) {
                     app.SetGBufferDebugViewIndex(debugMode);
                 }
-                ImGui::TextDisabled("Shortcut: F2 (cycle)");
+                UI::TextDisabled("Shortcut: F2 (cycle)");
 
                 bool softwareDirectionalShadow = app.GetRasterSoftwareRayTracedDirectionalShadowEnabled();
                 if (ImGui::Checkbox("SWRT Directional Shadow", &softwareDirectionalShadow)) {
@@ -1304,7 +1438,33 @@ namespace SasamiRenderer
                     softwareReflections = app.GetRasterSoftwareRayTracedReflectionEnabled();
                     screenSpaceReflections = app.GetRasterScreenSpaceReflectionEnabled();
                 }
-                ImGui::SetItemTooltip("Raster reflection mode. SWRT and screen-space reflections are mutually exclusive; SSR uses screen-space depth hits and IBL fallback.");
+                ImGui::SetItemTooltip("Raster reflection mode. SWRT and screen-space reflections are mutually exclusive; SSR ray-marches the screen-space depth buffer only (misses are dropped, no IBL fallback).");
+                if (screenSpaceReflections) {
+                    float ssrMaxDistance = app.GetSSRMaxDistance();
+                    if (UI::Volume("SSR Max Distance", &ssrMaxDistance, 1.0f, 100.0f))
+                        app.SetSSRMaxDistance(ssrMaxDistance);
+                    float ssrThickness = app.GetSSRThickness();
+                    if (UI::Volume("SSR Thickness", &ssrThickness, 0.01f, 2.0f))
+                        app.SetSSRThickness(ssrThickness);
+                    float ssrStepCount = app.GetSSRStepCount();
+                    if (UI::Volume("SSR Step Count", &ssrStepCount, 8.0f, 128.0f))
+                        app.SetSSRStepCount(ssrStepCount);
+                    float ssrRoughnessCutoff = app.GetSSRRoughnessCutoff();
+                    if (UI::Volume("SSR Roughness Cutoff", &ssrRoughnessCutoff, 0.0f, 1.0f))
+                        app.SetSSRRoughnessCutoff(ssrRoughnessCutoff);
+                    float ssrRefineSteps = app.GetSSRRefineSteps();
+                    if (UI::Volume("SSR Refine Steps", &ssrRefineSteps, 0.0f, 8.0f))
+                        app.SetSSRRefineSteps(ssrRefineSteps);
+                    float ssrEdgeFade = app.GetSSREdgeFade();
+                    if (UI::Volume("SSR Edge Fade", &ssrEdgeFade, 0.0f, 0.5f))
+                        app.SetSSREdgeFade(ssrEdgeFade);
+                    float ssrNormalOffset = app.GetSSRNormalOffset();
+                    if (UI::Volume("SSR Normal Offset", &ssrNormalOffset, 0.0f, 0.5f))
+                        app.SetSSRNormalOffset(ssrNormalOffset);
+                    float ssrIntensity = app.GetSSRIntensity();
+                    if (UI::Volume("SSR Intensity", &ssrIntensity, 0.0f, 2.0f))
+                        app.SetSSRIntensity(ssrIntensity);
+                }
                 int aoMode = app.GetAmbientOcclusionModeIndex();
                 if (ImGui::Combo("AO Mode", &aoMode, "Material Only\0Runtime AO Only\0RTAO Only\0Hybrid (Material * Runtime AO)\0")) {
                     app.SetAmbientOcclusionModeIndex(aoMode);
@@ -1321,37 +1481,43 @@ namespace SasamiRenderer
                 const bool aoUsesSsao = aoUsesRuntimeAo && !aoUsesRtao;
                 if (aoUsesRuntimeAo) {
                     float runtimeAoRadius = app.GetRuntimeAORadius();
-                    if (ImGui::SliderFloat("Runtime AO Radius",
-                                           &runtimeAoRadius,
-                                           0.05f,
-                                           3.0f)) {
+                    if (UI::Volume("Runtime AO Radius",
+                                   &runtimeAoRadius,
+                                   0.05f,
+                                   3.0f)) {
                         app.SetRuntimeAORadius(runtimeAoRadius);
                     }
                     float runtimeAoBias = app.GetRuntimeAOBias();
-                    if (ImGui::SliderFloat("Runtime AO Bias",
-                                           &runtimeAoBias,
-                                           0.001f,
-                                           0.1f)) {
+                    if (UI::Volume("Runtime AO Bias",
+                                   &runtimeAoBias,
+                                   0.001f,
+                                   0.1f)) {
                         app.SetRuntimeAOBias(runtimeAoBias);
                     }
                     float runtimeAoIntensity = app.GetRuntimeAOIntensity();
-                    if (ImGui::SliderFloat(aoUsesRtao ? "Runtime AO Power" : "Runtime AO Intensity",
-                                           &runtimeAoIntensity,
-                                           0.0f,
-                                           4.0f)) {
+                    if (UI::Volume(aoUsesRtao ? "Runtime AO Power" : "Runtime AO Intensity",
+                                   &runtimeAoIntensity,
+                                   0.0f,
+                                   4.0f)) {
                         app.SetRuntimeAOIntensity(runtimeAoIntensity);
                     }
                     float aoMinOcc = app.GetAoMinOcclusion();
-                    if (ImGui::SliderFloat("AO Min Occlusion", &aoMinOcc, 0.0f, 1.0f,
-                                           "%.2f")) {
+                    if (UI::Volume("AO Min Occlusion", &aoMinOcc, 0.0f, 1.0f,
+                                   "%.2f")) {
                         app.SetAoMinOcclusion(aoMinOcc);
                     }
                     ImGui::SetItemTooltip("Minimum brightness in fully-occluded areas (0=full black, UE-style floor).");
+                    float aoDirectStrength = app.GetAoDirectLightingStrength();
+                    if (UI::Volume("AO Direct Lighting", &aoDirectStrength, 0.0f, 1.0f,
+                                   "%.2f")) {
+                        app.SetAoDirectLightingStrength(aoDirectStrength);
+                    }
+                    ImGui::SetItemTooltip("How much AO darkens direct lighting (non-physical, fakes occlusion for unshadowed point/spot lights).");
                     float runtimeAoThickness = app.GetRuntimeAOThickness();
-                    if (ImGui::SliderFloat("Runtime AO Thickness",
-                                           &runtimeAoThickness,
-                                           0.01f,
-                                           0.75f)) {
+                    if (UI::Volume("Runtime AO Thickness",
+                                   &runtimeAoThickness,
+                                   0.01f,
+                                   0.75f)) {
                         app.SetRuntimeAOThickness(runtimeAoThickness);
                     }
                     if (aoUsesSsao) {
@@ -1419,40 +1585,40 @@ namespace SasamiRenderer
                     }
 
                     const auto rayTracingStats = app.GetRayTracingStats();
-                    ImGui::TextDisabled("SWRT Partial RT: %ux%u",
-                                        rayTracingStats.renderWidth,
-                                        rayTracingStats.renderHeight);
-                    ImGui::TextDisabled("SWRT Partial RT Cost: total %.2f ms / build %.2f / trace %.2f / copy %.2f",
-                                        rayTracingStats.lastFrameMs,
-                                        rayTracingStats.sceneBuildMs,
-                                        rayTracingStats.traceMs,
-                                        rayTracingStats.copyMs);
-                    ImGui::TextDisabled("SWRT Scene: %u instances / %u triangles / %u BVH nodes",
-                                        rayTracingStats.instanceCount,
-                                        rayTracingStats.triangleCount,
-                                        rayTracingStats.bvhNodeCount);
-                    ImGui::TextDisabled("SWRT Shadow: %s / cache %s / %ux%u / interval %u",
-                                        rayTracingStats.shadowUpdatedThisFrame ? "updated" : "idle",
-                                        rayTracingStats.shadowReusedThisFrame ? "reuse" : "fresh",
-                                        rayTracingStats.shadowMapSize,
-                                        rayTracingStats.shadowMapSize,
-                                        rayTracingStats.shadowUpdateInterval);
-                    ImGui::TextDisabled("SWRT Reflection: %s / cache %s / %ux%u / interval %u / phase %u/%u",
-                                        rayTracingStats.reflectionUpdatedThisFrame ? "updated" : "idle",
-                                        rayTracingStats.reflectionReusedThisFrame ? "reuse" : "fresh",
-                                        rayTracingStats.reflectionWidth,
-                                        rayTracingStats.reflectionHeight,
-                                        rayTracingStats.reflectionUpdateInterval,
-                                        rayTracingStats.reflectionPhaseCount > 0u ? (rayTracingStats.reflectionPhaseIndex + 1u) : 0u,
-                                        rayTracingStats.reflectionPhaseCount);
-                    ImGui::TextDisabled("SWRT Reflection Filter: roughness <= %.2f / energy >= %.2f / distance <= %.1f",
-                                        rayTracingStats.reflectionMaxRoughness,
-                                        rayTracingStats.reflectionMinEnergy,
-                                        rayTracingStats.reflectionMaxDistance);
+                    UI::TextDisabled("SWRT Partial RT: %ux%u",
+                                     rayTracingStats.renderWidth,
+                                     rayTracingStats.renderHeight);
+                    UI::TextDisabled("SWRT Partial RT Cost: total %.2f ms / build %.2f / trace %.2f / copy %.2f",
+                                     rayTracingStats.lastFrameMs,
+                                     rayTracingStats.sceneBuildMs,
+                                     rayTracingStats.traceMs,
+                                     rayTracingStats.copyMs);
+                    UI::TextDisabled("SWRT Scene: %u instances / %u triangles / %u BVH nodes",
+                                     rayTracingStats.instanceCount,
+                                     rayTracingStats.triangleCount,
+                                     rayTracingStats.bvhNodeCount);
+                    UI::TextDisabled("SWRT Shadow: %s / cache %s / %ux%u / interval %u",
+                                     rayTracingStats.shadowUpdatedThisFrame ? "updated" : "idle",
+                                     rayTracingStats.shadowReusedThisFrame ? "reuse" : "fresh",
+                                     rayTracingStats.shadowMapSize,
+                                     rayTracingStats.shadowMapSize,
+                                     rayTracingStats.shadowUpdateInterval);
+                    UI::TextDisabled("SWRT Reflection: %s / cache %s / %ux%u / interval %u / phase %u/%u",
+                                     rayTracingStats.reflectionUpdatedThisFrame ? "updated" : "idle",
+                                     rayTracingStats.reflectionReusedThisFrame ? "reuse" : "fresh",
+                                     rayTracingStats.reflectionWidth,
+                                     rayTracingStats.reflectionHeight,
+                                     rayTracingStats.reflectionUpdateInterval,
+                                     rayTracingStats.reflectionPhaseCount > 0u ? (rayTracingStats.reflectionPhaseIndex + 1u) : 0u,
+                                     rayTracingStats.reflectionPhaseCount);
+                    UI::TextDisabled("SWRT Reflection Filter: roughness <= %.2f / energy >= %.2f / distance <= %.1f",
+                                     rayTracingStats.reflectionMaxRoughness,
+                                     rayTracingStats.reflectionMinEnergy,
+                                     rayTracingStats.reflectionMaxDistance);
                 }
             }
 
-            ImGui::Separator();
+            UI::Separator();
             if (isRayTracingRenderType) {
                 int rayTracingPreset = app.GetRayTracingPerformancePresetIndex();
                 if (ImGui::Combo("RT Preset", &rayTracingPreset, "Balanced\0Performance\0Ultra Fast\0")) {
@@ -1462,56 +1628,53 @@ namespace SasamiRenderer
                 if (ImGui::SliderInt("RT Bounce Count", &rayTracingBounceCount, 1, 8)) {
                     app.SetRayTracingMaxBounceCount(rayTracingBounceCount);
                 }
-                ImGui::TextDisabled("1 = primary only, default = 2");
+                UI::TextDisabled("1 = primary only, default = 2");
                 bool dynamicResolutionEnabled = app.GetRayTracingDynamicResolutionEnabled();
                 if (ImGui::Checkbox("RT Dynamic Resolution", &dynamicResolutionEnabled)) {
                     app.SetRayTracingDynamicResolutionEnabled(dynamicResolutionEnabled);
                 }
 
                 const auto rayTracingStats = app.GetRayTracingStats();
-                ImGui::TextDisabled("HWRT Support: %s", app.IsHardwareRayTracingSupported() ? "Yes" : "No");
-                ImGui::TextDisabled("RT Backend: %s",
-                                    rayTracingStats.usingHardwarePath ? "Hardware"
-                                    : "Unavailable");
-                ImGui::TextDisabled("RT Scene: %u instances / %u triangles",
-                                    rayTracingStats.instanceCount,
-                                    rayTracingStats.triangleCount);
-                ImGui::TextDisabled("RT BVH Nodes: %u", rayTracingStats.bvhNodeCount);
-                ImGui::TextDisabled("RT Internal: %ux%u (%.2fx)",
-                                    rayTracingStats.renderWidth,
-                                    rayTracingStats.renderHeight,
-                                    rayTracingStats.dynamicResolutionScale);
-                ImGui::TextDisabled("RT Quality: %s",
-                                    (rayTracingStats.qualityTier == 0u) ? "Full"
-                                    : (rayTracingStats.qualityTier == 1u) ? "Fast"
-                                    : "UltraFast");
-                ImGui::TextDisabled("RT Cost: total %.2f ms / build %.2f / trace %.2f / copy %.2f",
-                                    rayTracingStats.lastFrameMs,
-                                    rayTracingStats.sceneBuildMs,
-                                    rayTracingStats.traceMs,
-                                    rayTracingStats.copyMs);
-                ImGui::TextDisabled("RT Detail: primary %.2f / shadow %.2f / shade %.2f / resolve %.2f",
-                                    rayTracingStats.primaryTraceMs,
-                                    rayTracingStats.shadowTraceMs,
-                                    rayTracingStats.shadeMs,
-                                    rayTracingStats.resolveMs);
+                UI::TextDisabled("HWRT Support: %s", app.IsHardwareRayTracingSupported() ? "Yes" : "No");
+                UI::TextDisabled("RT Backend: %s",
+                                 rayTracingStats.usingHardwarePath ? "Hardware"
+                                 : "Unavailable");
+                UI::TextDisabled("RT Scene: %u instances / %u triangles",
+                                 rayTracingStats.instanceCount,
+                                 rayTracingStats.triangleCount);
+                UI::TextDisabled("RT BVH Nodes: %u", rayTracingStats.bvhNodeCount);
+                UI::TextDisabled("RT Internal: %ux%u (%.2fx)",
+                                 rayTracingStats.renderWidth,
+                                 rayTracingStats.renderHeight,
+                                 rayTracingStats.dynamicResolutionScale);
+                UI::TextDisabled("RT Quality: %s",
+                                 (rayTracingStats.qualityTier == 0u) ? "Full"
+                                 : (rayTracingStats.qualityTier == 1u) ? "Fast"
+                                 : "UltraFast");
+                UI::TextDisabled("RT Cost: total %.2f ms / build %.2f / trace %.2f / copy %.2f",
+                                 rayTracingStats.lastFrameMs,
+                                 rayTracingStats.sceneBuildMs,
+                                 rayTracingStats.traceMs,
+                                 rayTracingStats.copyMs);
+                UI::TextDisabled("RT Detail: primary %.2f / shadow %.2f / shade %.2f / resolve %.2f",
+                                 rayTracingStats.primaryTraceMs,
+                                 rayTracingStats.shadowTraceMs,
+                                 rayTracingStats.shadeMs,
+                                 rayTracingStats.resolveMs);
             }
 
-            ImGui::TextDisabled("Mesh Shader Path: optional DX12 Ultimate path");
-            ImGui::EndTabItem();
+            UI::TextDisabled("Mesh Shader Path: optional DX12 Ultimate path");
             }
 
-            if (ImGui::BeginTabItem("Common")) {
+            if (UI::Tab commonTab{"Common"}) {
             if (app.GetDeltaTime() > 0.0f) {
-                ImGui::Text("FPS: %.1f", 1.0f / app.GetDeltaTime());
+                UI::Text("FPS: %.1f", 1.0f / app.GetDeltaTime());
             } else {
-                ImGui::Text("FPS: --");
+                UI::Text("FPS: --");
+            }
             }
 
-            ImGui::EndTabItem();
-            }
-
-            if (ImGui::BeginTabItem("GI")) {
+            if (UI::Tab giTab{"GI"}) {
             auto& renderer = app.GetRenderer();
             auto& grid     = renderer.GetProbeGrid();
 
@@ -1519,11 +1682,11 @@ namespace SasamiRenderer
             if (ImGui::Checkbox("Enable GI", &giEnabled))
                 renderer.SetGIEnabled(giEnabled);
 
-            ImGui::Separator();
-            ImGui::Text("Bake Status");
+            UI::Separator();
+            UI::Text("Bake Status");
 
             if (!grid.IsInitialized()) {
-                ImGui::TextDisabled("(GI not initialized — load a scene first)");
+                UI::TextDisabled("(GI not initialized — load a scene first)");
             } else {
                 DrawGIBakeStatus(renderer);
 
@@ -1533,50 +1696,69 @@ namespace SasamiRenderer
                     ImGui::TextColored({1.f, 0.5f, 0.f, 1.f}, "No GI data. Press Bake to generate.");
                 }
 
-                if (ImGui::Button(renderer.IsGIBaked() ? "Rebuild GI" : "Bake GI")) {
+                bool giContinuous = renderer.GetGIContinuousMode();
+                if (ImGui::Checkbox("Continuous update (DDGI)", &giContinuous))
+                    renderer.SetGIContinuousMode(giContinuous);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Keep re-tracing probes forever instead of stopping after one full pass, so GI tracks moving lights/geometry.");
+
+                if (UI::Button(renderer.IsGIBaked() ? "Rebuild GI" : "Bake GI")) {
                     renderer.ResetAndRebakeGI();
                 }
                 ImGui::SameLine();
-                if (ImGui::Button("Cancel Bake")) {
+                if (UI::Button("Cancel Bake")) {
                     renderer.CancelGIBake();
                 }
             }
 
-            ImGui::Separator();
-            ImGui::Text("Settings");
+            UI::Separator();
+            UI::Text("Settings");
             float intensity = renderer.GetGIIntensity();
-            if (ImGui::SliderFloat("GI Intensity", &intensity, 0.f, 5.f))
+            if (UI::Volume("GI Intensity", &intensity, 0.f, 5.f))
                 renderer.SetGIIntensity(intensity);
             float ema = renderer.GetGIEmaAlpha();
-            if (ImGui::SliderFloat("EMA Alpha", &ema, 0.01f, 1.f))
+            if (UI::Volume("EMA Alpha", &ema, 0.01f, 1.f))
                 renderer.SetGIEmaAlpha(ema);
 
-            ImGui::Separator();
-            ImGui::Text("Probe Grid Debug");
+            UI::Separator();
+            UI::Text("Probe Grid Debug");
             bool probeDebug = app.GetDebugProbeGridEnabled();
             if (ImGui::Checkbox("Show Probe Spheres", &probeDebug))
                 app.SetDebugProbeGridEnabled(probeDebug);
+            int probeGridPreset = m_probeGridPreset;
+            if (ImGui::Combo("Grid Preset", &probeGridPreset, "Interior\0Wide\0Very Wide\0Scene Auto\0")) {
+                m_probeGridPreset = probeGridPreset;
+                ApplyProbeGridPreset(app, m_probeGridPreset);
+            }
             if (probeDebug) {
-                int probeGridPreset = m_probeGridPreset;
-                if (ImGui::Combo("Grid Preset", &probeGridPreset, "Interior\0Wide\0Very Wide\0")) {
-                    m_probeGridPreset = probeGridPreset;
-                    ApplyProbeGridPreset(app, m_probeGridPreset);
-                }
                 float probeRadius = app.GetDebugProbeRadius();
-                if (ImGui::SliderFloat("Probe Radius", &probeRadius, 0.05f, 2.f))
+                if (UI::Volume("Probe Radius", &probeRadius, 0.05f, 2.f))
                     app.SetDebugProbeRadius(probeRadius);
             }
-            ImGui::TextDisabled("Grid: %ux%ux%u  Total: %u probes",
-                                grid.GetCountX(), grid.GetCountY(), grid.GetCountZ(),
-                                grid.GetTotalProbeCount());
-            ImGui::TextDisabled("Origin: (%.1f, %.1f, %.1f)  Spacing: %.1fm",
-                                grid.GetOriginX(), grid.GetOriginY(), grid.GetOriginZ(),
-                                grid.GetSpacingX());
-            ImGui::EndTabItem();
+            UI::TextDisabled("Grid: %ux%ux%u  Total: %u probes",
+                             grid.GetCountX(), grid.GetCountY(), grid.GetCountZ(),
+                             grid.GetTotalProbeCount());
+            UI::TextDisabled("Origin: (%.1f, %.1f, %.1f)  Spacing: %.1fm",
+                             grid.GetOriginX(), grid.GetOriginY(), grid.GetOriginZ(),
+                             grid.GetSpacingX());
             }
 
-            if (ImGui::BeginTabItem("Primitives")) {
-            ImGui::TextDisabled("External model assets are not required for this scene.");
+            if (UI::Tab particleTab{"Particle"}) {
+            UI::Text("Particles (V1)");
+            bool particlesEnabled = app.GetParticlesEnabled();
+            if (ImGui::Checkbox("Show Particles", &particlesEnabled)) app.SetParticlesEnabled(particlesEnabled);
+            if (particlesEnabled) {
+                float emissionRate = app.GetParticleEmissionRate();
+                if (UI::Volume("Emission Rate", &emissionRate, 0.0f, 1000.0f)) app.SetParticleEmissionRate(emissionRate);
+                float gravity = app.GetParticleGravity();
+                if (UI::Volume("Gravity", &gravity, -20.0f, 0.0f)) app.SetParticleGravity(gravity);
+                float drag = app.GetParticleDrag();
+                if (UI::Volume("Drag", &drag, 0.0f, 2.0f)) app.SetParticleDrag(drag);
+            }
+            }
+
+            if (UI::Tab primitivesTab{"Primitives"}) {
+            UI::TextDisabled("External model assets are not required for this scene.");
 
             bool changed = false;
             if (m_sphereModel) {
@@ -1607,7 +1789,6 @@ namespace SasamiRenderer
                 }
                 app.InvalidateRenderObjects();
             }
-            ImGui::EndTabItem();
             }
 
             ImGui::EndTabBar();

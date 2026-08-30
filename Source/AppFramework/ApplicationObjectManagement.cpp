@@ -7,7 +7,9 @@
 #include <utility>
 #include <vector>
 
+#include "Component/MeshComponent.h"
 #include "Foundation/Tools/DebugOutput.h"
+#include "Loader/AsyncAssetLoadService.h"
 #include "Object/Camera.h"
 #include "Object/PointLight.h"
 #include "Object/SkinnedModel.h"
@@ -138,11 +140,6 @@ namespace SasamiRenderer
         return true;
     }
 
-    bool ApplicationCore::SetActiveCamera(Camera* camera)
-    {
-        return SetMainCamera(camera);
-    }
-
     bool ApplicationCore::DeleteObject(SObject* object)
     {
         if (!object) {
@@ -159,6 +156,11 @@ namespace SasamiRenderer
         if (object == m_activeCamera) {
             m_activeCamera = nullptr;
         }
+        if (m_assetLoadService) {
+            if (MeshComponent* meshComponent = object->GetComponent<MeshComponent>()) {
+                m_assetLoadService->CancelFor(meshComponent);
+            }
+        }
         UnregisterObjectInEcs(object);
         m_objects.erase(it);
         m_objectsDirty = true;
@@ -167,6 +169,13 @@ namespace SasamiRenderer
 
     void ApplicationCore::ClearObjects()
     {
+        if (m_assetLoadService) {
+            for (const auto& entry : m_objects) {
+                if (MeshComponent* meshComponent = entry->GetComponent<MeshComponent>()) {
+                    m_assetLoadService->CancelFor(meshComponent);
+                }
+            }
+        }
         m_objects.clear();
         m_activeCamera = nullptr;
         m_ecsRegistry.Clear();

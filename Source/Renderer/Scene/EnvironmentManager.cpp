@@ -32,6 +32,11 @@ namespace SasamiRenderer
         m_swrtExecutor.OnReflectionResourcesReallocated();
     }
 
+    void EnvironmentManager::AdoptPregeneratedIblData(IblSystem::GeneratedIblData&& data)
+    {
+        m_skybox.AdoptPregeneratedIblData(std::move(data));
+    }
+
     void EnvironmentManager::RefreshEnvironmentAssets()
     {
         m_skybox.RefreshEnvironmentAssets();

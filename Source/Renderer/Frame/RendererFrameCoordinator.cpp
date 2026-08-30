@@ -1,5 +1,6 @@
 #include "Renderer/Frame/RendererFrameCoordinator.h"
 
+#include <cstdio>
 #include <cstring>
 #include <windows.h>
 
@@ -297,6 +298,15 @@ namespace SasamiRenderer
         UINT slot = frame.cameraCbCount;
         if (slot >= frame.cameraCbCapacity) {
             slot = frame.cameraCbCapacity - 1;
+            static int sOverflowLogCount = 0;
+            if (sOverflowLogCount < 20) {
+                ++sOverflowLogCount;
+                char buf[160];
+                std::snprintf(buf, sizeof(buf),
+                              "[DIAG] PushCameraCB overflow: count=%u capacity=%u (clamped to slot %u)\n",
+                              frame.cameraCbCount, frame.cameraCbCapacity, slot);
+                DebugLog(buf);
+            }
         } else {
             ++frame.cameraCbCount;
         }

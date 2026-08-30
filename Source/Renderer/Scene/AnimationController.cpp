@@ -21,12 +21,20 @@ namespace SasamiRenderer
         m_globalMatrices.resize(n);
         m_boneMatrices.resize(n);
 
-        // Default local pose: identity TRS
+        // Default local pose: bind pose, so bones whose animation clip has no
+        // track for a given channel (e.g. translation) keep their bind-pose
+        // offset instead of snapping to identity.
         for (uint32_t i = 0; i < n; ++i) {
-            m_localPoses[i].t[0] = m_localPoses[i].t[1] = m_localPoses[i].t[2] = 0.0f;
-            m_localPoses[i].r[0] = m_localPoses[i].r[1] = m_localPoses[i].r[2] = 0.0f;
-            m_localPoses[i].r[3] = 1.0f;
-            m_localPoses[i].s[0] = m_localPoses[i].s[1] = m_localPoses[i].s[2] = 1.0f;
+            m_localPoses[i].t[0] = m_skeleton->bindLocalT[i][0];
+            m_localPoses[i].t[1] = m_skeleton->bindLocalT[i][1];
+            m_localPoses[i].t[2] = m_skeleton->bindLocalT[i][2];
+            m_localPoses[i].r[0] = m_skeleton->bindLocalR[i][0];
+            m_localPoses[i].r[1] = m_skeleton->bindLocalR[i][1];
+            m_localPoses[i].r[2] = m_skeleton->bindLocalR[i][2];
+            m_localPoses[i].r[3] = m_skeleton->bindLocalR[i][3];
+            m_localPoses[i].s[0] = m_skeleton->bindLocalS[i][0];
+            m_localPoses[i].s[1] = m_skeleton->bindLocalS[i][1];
+            m_localPoses[i].s[2] = m_skeleton->bindLocalS[i][2];
         }
 
         ComputeGlobalMatrices();

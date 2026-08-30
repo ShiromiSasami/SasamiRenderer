@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="Libraries\packages\Microsoft.Direct3D.D3D12.1.616.1\build\native\Microsoft.Direct3D.D3D12.props" Condition="Exists('Libraries\packages\Microsoft.Direct3D.D3D12.1.616.1\build\native\Microsoft.Direct3D.D3D12.props')" />
   <ItemGroup Label="ProjectConfigurations">
@@ -54,49 +54,120 @@
     <ClInclude Include="Source\AppFramework\Light\DirectionalLight.h" />
     <ClInclude Include="Source\AppFramework\Component\MeshComponent.h" />
     <ClInclude Include="Source\AppFramework\Component\SkinnedMeshComponent.h" />
+    <ClInclude Include="Source\AppFramework\Component\CpuTextureLoader.h" />
+    <ClInclude Include="Source\AppFramework\Component\CpuTexturePathCache.h" />
     <ClInclude Include="Source\AppFramework\Object\Camera.h" />
     <ClInclude Include="Source\AppFramework\Object\PointLight.h" />
     <ClInclude Include="Source\AppFramework\Object\SpotLight.h" />
     <ClInclude Include="Source\AppFramework\ECS\EcsRegistry.h" />
     <ClInclude Include="Source\AppFramework\Loader\AssetLoader.h" />
     <ClInclude Include="Source\AppFramework\Loader\ModelLoader.h" />
+    <ClInclude Include="Source\AppFramework\Loader\ModelLoaderGlb.h" />
+    <ClInclude Include="Source\AppFramework\Loader\ModelLoaderGltfUtility.h" />
     <ClInclude Include="Source\AppFramework\Object\SObject.h" />
     <ClInclude Include="Source\AppFramework\Object\SkinnedModel.h" />
     <ClInclude Include="Source\AppFramework\Object\StaticModel.h" />
     <ClInclude Include="Source\AppFramework\Component\IComponent.h" />
     <ClInclude Include="Source\AppFramework\Component\TransformComponent.h" />
+    <ClInclude Include="Source\AppFramework\UI\UiButton.h" />
+    <ClInclude Include="Source\AppFramework\UI\UiLayout.h" />
+    <ClInclude Include="Source\AppFramework\UI\UiTab.h" />
+    <ClInclude Include="Source\AppFramework\UI\UiTabBar.h" />
+    <ClInclude Include="Source\AppFramework\UI\UiTabbedPanel.h" />
+    <ClInclude Include="Source\AppFramework\UI\UiText.h" />
+    <ClInclude Include="Source\AppFramework\UI\UiVolume.h" />
+    <ClInclude Include="Source\AppFramework\UI\UiWindow.h" />
     <ClInclude Include="Source\AppFramework\UI\ImGuiCoordinator.h" />
     <ClInclude Include="Source\AppFramework\Input\InputSystem.h" />
     <ClInclude Include="Source\Foundation\Math\Color.h" />
     <ClInclude Include="Source\Foundation\Math\Rotation3.h" />
     <ClInclude Include="Source\Foundation\Math\Vector3.h" />
     <ClInclude Include="Source\Foundation\Math\MathUtil.h" />
+    <ClInclude Include="Source\Foundation\Jobs\JobSystem.h" />
+    <ClInclude Include="Source\Foundation\Boot\BootStatus.h" />
+    <ClInclude Include="Source\Foundation\Boot\InitTaskScheduler.h" />
+    <ClInclude Include="Source\Foundation\Boot\MainThreadTaskPump.h" />
+    <ClInclude Include="Source\AppFramework\Boot\StartupCoordinator.h" />
+    <ClInclude Include="Source\AppFramework\Loader\AsyncAssetLoadService.h" />
+    <ClInclude Include="Source\AppFramework\Loader\ModelLoaderFbx.h" />
+    <ClInclude Include="Source\AppFramework\Loader\StaticMeshCache.h" />
+    <ClInclude Include="Source\AppFramework\Loader\DdsTextureLoader.h" />
+    <ClInclude Include="Libraries\ufbx\ufbx.h" />
+    <ClInclude Include="Libraries\bcdec\bcdec.h" />
+    <ClInclude Include="Source\AppFramework\UI\BootProgressWindow.h" />
+    <ClInclude Include="Source\Foundation\Jobs\ParallelFor.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\IDebugTransport.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugNamedPipeTransport.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugCommandQueue.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugCommandRegistry.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugRemoteControlServer.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugCaptureCommands.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugRenderCommands.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugSceneCommands.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\AppFramework\ApplicationCore.cpp" />
     <ClCompile Include="Source\AppFramework\ApplicationResourcePaths.cpp" />
-    <ClCompile Include="Source\AppFramework\ApplicationCore_Properties.cpp" />
+    <ClCompile Include="Source\AppFramework\ApplicationCoreProperties.cpp" />
+    <ClCompile Include="Source\AppFramework\ApplicationCoreRenderPasses.cpp" />
     <ClCompile Include="Source\AppFramework\ApplicationObjectManagement.cpp" />
     <ClCompile Include="Source\AppFramework\ApplicationCoreScene.cpp" />
     <ClCompile Include="Source\AppFramework\Component\MeshComponent.cpp" />
     <ClCompile Include="Source\AppFramework\Component\SkinnedMeshComponent.cpp" />
+    <ClCompile Include="Source\AppFramework\Component\CpuTextureLoader.cpp" />
+    <ClCompile Include="Source\AppFramework\Component\CpuTexturePathCache.cpp" />
+    <ClCompile Include="Source\AppFramework\Boot\StartupCoordinator.cpp" />
+    <ClCompile Include="Source\AppFramework\Loader\AsyncAssetLoadService.cpp" />
+    <ClCompile Include="Source\AppFramework\Loader\ModelLoaderFbx.cpp" />
+    <ClCompile Include="Source\AppFramework\Loader\StaticMeshCache.cpp" />
+    <ClCompile Include="Source\AppFramework\Loader\DdsTextureLoader.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\BootProgressWindow.cpp" />
     <ClCompile Include="Source\AppFramework\Object\Camera.cpp" />
     <ClCompile Include="Source\AppFramework\Loader\AssetLoader.cpp" />
     <ClCompile Include="Source\AppFramework\Loader\ModelLoader.cpp" />
-    <ClCompile Include="Source\AppFramework\Loader\ModelLoader_Skinned.cpp" />
-    <ClCompile Include="Source\AppFramework\Loader\ModelLoader_OBJ.cpp" />
+    <ClCompile Include="Source\AppFramework\Loader\ModelLoaderGlb.cpp" />
+    <ClCompile Include="Source\AppFramework\Loader\ModelLoaderGltfUtility.cpp" />
+    <ClCompile Include="Source\AppFramework\Loader\ModelLoaderSkinned.cpp" />
+    <ClCompile Include="Source\AppFramework\Loader\ModelLoaderOBJ.cpp" />
     <ClCompile Include="Source\AppFramework\Object\SObject.cpp" />
     <ClCompile Include="Source\AppFramework\Object\SkinnedModel.cpp" />
     <ClCompile Include="Source\AppFramework\Object\StaticModel.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UiButton.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UiLayout.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UiTab.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UiTabBar.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UiTabbedPanel.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UiText.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UiVolume.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UiWindow.cpp" />
     <ClCompile Include="Source\AppFramework\UI\ImGuiCoordinator.cpp" />
     <ClCompile Include="Source\AppFramework\Input\InputSystem.cpp" />
     <!-- ImGui core and backends -->
     <ClCompile Include="Libraries\imgui-master\imgui.cpp" />
+    <ClCompile Include="Libraries\ufbx\ufbx.c">
+      <!-- Third-party C source: keep it compiling as C and out of the project's
+           forced C++ prefix header (StdFirst.h), which is what made a plain C
+           build fail with STL1003. -->
+      <CompileAs>CompileAsC</CompileAs>
+      <ForcedIncludeFiles>
+      </ForcedIncludeFiles>
+      <ConformanceMode>false</ConformanceMode>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="Libraries\imgui-master\imgui_draw.cpp" />
     <ClCompile Include="Libraries\imgui-master\imgui_tables.cpp" />
     <ClCompile Include="Libraries\imgui-master\imgui_widgets.cpp" />
     <ClCompile Include="Libraries\imgui-master\backends\imgui_impl_win32.cpp" />
     <ClCompile Include="Libraries\imgui-master\backends\imgui_impl_dx12.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugNamedPipeTransport.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugCommandQueue.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugCommandRegistry.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugRemoteControlServer.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugCaptureCommands.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugRenderCommands.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugSceneCommands.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>15.0</VCProjectVersion>
@@ -239,9 +310,10 @@
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;PLATFORM_WINDOWS=1;PLATFORM_LINUX=0;PLATFORM_MACOS=0;PLATFORM_ANDROID=0;$(RhiPreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <LanguageStandard>stdcpp20</LanguageStandard>
+      <LanguageStandard>stdcpp23</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
       <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;$(BOOST_ROOT);$(BOOST_INCLUDEDIR);$(RhiVulkanIncludeDirectories)</AdditionalIncludeDirectories>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -257,10 +329,11 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;PLATFORM_WINDOWS=1;PLATFORM_LINUX=0;PLATFORM_MACOS=0;PLATFORM_ANDROID=0;$(RhiPreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <LanguageStandard>stdcpp20</LanguageStandard>
+      <LanguageStandard>stdcpp23</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
       <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;C:\local\boost_1_89_0;$(RhiVulkanIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/FS /utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -280,10 +353,11 @@
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;PLATFORM_WINDOWS=1;PLATFORM_LINUX=0;PLATFORM_MACOS=0;PLATFORM_ANDROID=0;$(RhiPreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <LanguageStandard>stdcpp20</LanguageStandard>
+      <LanguageStandard>stdcpp23</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
       <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;$(BOOST_ROOT);$(BOOST_INCLUDEDIR);$(RhiVulkanIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/FS /utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -303,10 +377,11 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;PLATFORM_WINDOWS=1;PLATFORM_LINUX=0;PLATFORM_MACOS=0;PLATFORM_ANDROID=0;$(RhiPreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <LanguageStandard>stdcpp20</LanguageStandard>
+      <LanguageStandard>stdcpp23</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
       <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;C:\local\boost_1_89_0;$(RhiVulkanIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/FS /utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

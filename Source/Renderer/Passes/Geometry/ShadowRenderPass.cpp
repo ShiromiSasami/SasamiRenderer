@@ -55,7 +55,8 @@ namespace SasamiRenderer
                 policy.renderWidth,
                 policy.renderHeight,
                 services.executeSoftwareDirectionalShadow,
-                services.drawShadowItems);
+                services.drawShadowItems,
+                services.drawSkinnedShadowItems);
         return true;
     }
 
@@ -80,7 +81,8 @@ namespace SasamiRenderer
                                    uint32_t renderWidth,
                                    uint32_t renderHeight,
                                    const std::function<bool(const LightSystem::ShadowPassContext&)>& softwareShadowCallback,
-                                   const DrawCallback& drawCallback) const
+                                   const DrawCallback& drawCallback,
+                                   const DrawCallback& drawSkinnedCallback) const
     {
         if (useSoftwareRayTracedDirectionalShadow) {
             lightSystem.UpdateFrameLighting(frameLight,
@@ -112,6 +114,24 @@ namespace SasamiRenderer
             if (!softwareShadowCallback(shadowContext)) {
                 DebugLog("ShadowRenderPass::Execute: software shadow callback failed.\n");
             }
+
+            // SWRT replaces only the directional cascade rendering; spot/point shadow maps
+            // must still be rendered on both paths, otherwise their shadow-enable flags in
+            // the light CB point at never-rendered textures and those lights go black.
+            Resource* lightCB = frameLight.GetLightCBResource();
+            if (lightCB && lightCB->IsValid()) {
+                cmdList->SetGraphicsRootSignature(pipelineStateCache.GetRootSignature());
+                DescriptorHeap* heaps[] = { &srvHeap };
+                cmdList->SetDescriptorHeaps(1, heaps);
+                cmdList->SetGraphicsRootConstantBufferView(3, lightCB->GetGPUVirtualAddress());
+            }
+            lightSystem.ExecuteLocalLightShadowPasses(cmdList,
+                                                       frameLight,
+                                                       pipelineStateCache,
+                                                       srvHeap,
+                                                       useTessellationPath,
+                                                       drawCallback,
+                                                       drawSkinnedCallback);
             return;
         }
 
@@ -135,6 +155,7 @@ namespace SasamiRenderer
                                       renderWidth,
                                       renderHeight,
                                       drawCallback,
+                                      drawSkinnedCallback,
                                       vsmBlurEnabled);
     }
 }

@@ -3,6 +3,7 @@
 #if RHI_DIRECTX11
 
 #include "Foundation/Tools/DebugOutput.h"
+#include "Renderer/Structures/Skeleton.h"
 
 #include <array>
 #include <cstring>
@@ -144,6 +145,82 @@ float4 PSMain(PSInput input) : SV_TARGET
         lit = pow(saturate(lit), 1.0 / 2.2);
     }
     return float4(saturate(lit), input.color.a * texColor.a);
+}
+)";
+
+        // Bone-palette linear-blend skinning in model space, then the same u_model/u_viewProjection
+        // transform as the static native mesh path. PSInput is field-for-field identical to
+        // kDx11MeshPixelShader's, so that pixel shader is reused unmodified (no skinned-specific PS).
+        const char* kDx11SkinnedMeshVertexShader = R"(
+cbuffer MeshCB : register(b0)
+{
+    row_major float4x4 u_viewProjection;
+    row_major float4x4 u_model;
+    float4 u_baseColor;
+    float4 u_emissiveRoughness;
+    float4 u_lightDirIntensity;
+    float4 u_lightColor;
+    float4 u_cameraPosMetallic;
+    float4 u_featureFlags;
+    float4 u_featureFlags2;
+}
+
+cbuffer SkinnedBoneCB : register(b1)
+{
+    row_major float4x4 u_boneMatrices[128];
+}
+
+struct VSInput
+{
+    float3 position    : POSITION;
+    float3 normal      : NORMAL;
+    float4 color       : COLOR;
+    float2 uv          : TEXCOORD;
+    uint4  boneIndices : JOINTS_0;
+    float4 boneWeights : WEIGHTS_0;
+};
+
+struct PSInput
+{
+    float4 position : SV_POSITION;
+    float3 worldN   : NORMAL;
+    float4 color    : COLOR0;
+    float2 uv       : TEXCOORD0;
+    float3 worldPos : TEXCOORD1;
+};
+
+float4 SkinPosition(float3 pos, uint4 idx, float4 w)
+{
+    float4 r = float4(0.0, 0.0, 0.0, 0.0);
+    r += w.x * mul(float4(pos, 1.0), u_boneMatrices[idx.x]);
+    r += w.y * mul(float4(pos, 1.0), u_boneMatrices[idx.y]);
+    r += w.z * mul(float4(pos, 1.0), u_boneMatrices[idx.z]);
+    r += w.w * mul(float4(pos, 1.0), u_boneMatrices[idx.w]);
+    return r;
+}
+
+float3 SkinNormal(float3 n, uint4 idx, float4 w)
+{
+    float3 r = float3(0.0, 0.0, 0.0);
+    r += w.x * mul(n, (float3x3)u_boneMatrices[idx.x]);
+    r += w.y * mul(n, (float3x3)u_boneMatrices[idx.y]);
+    r += w.z * mul(n, (float3x3)u_boneMatrices[idx.z]);
+    r += w.w * mul(n, (float3x3)u_boneMatrices[idx.w]);
+    return r;
+}
+
+PSInput VSMain(VSInput input)
+{
+    PSInput o;
+    float4 skinnedPos = SkinPosition(input.position, input.boneIndices, input.boneWeights);
+    float3 skinnedNormal = SkinNormal(input.normal, input.boneIndices, input.boneWeights);
+    float4 worldPos = mul(skinnedPos, u_model);
+    o.position = mul(worldPos, u_viewProjection);
+    o.worldPos = worldPos.xyz;
+    o.worldN = normalize(mul(skinnedNormal, (float3x3)u_model));
+    o.color = input.color * u_baseColor;
+    o.uv = input.uv;
+    return o;
 }
 )";
 
@@ -921,6 +998,9 @@ float4 PSMain(PSInput input) : SV_TARGET
         m_capabilities.supportsRhiDescriptorCreation = true;
         m_capabilities.supportsRhiPipelineCreation = true;
         m_capabilities.supportsRhiCommandEncoding = true;
+        // ID3D11Device is thread-safe; the immediate context is not and is never touched off-thread.
+        m_capabilities.supportsThreadedResourceCreation = true;
+        m_capabilities.supportsThreadedPipelineCreation = true;
         return true;
     }
 
@@ -1071,7 +1151,7 @@ float4 PSMain(PSInput input) : SV_TARGET
 
         D3D11_MAPPED_SUBRESOURCE mapped{};
         HRESULT hr = m_context->Map(m_rayMarchConstantBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-        if (FAILED(hr)) {
+        if (FAILED(hr) || !mapped.pData) {
             DebugLog("Dx11GraphicsDevice::RenderRayMarchFrame: constant buffer map failed.\n");
             return false;
         }
@@ -1333,11 +1413,224 @@ float4 PSMain(PSInput input) : SV_TARGET
             constants.featureFlags2[0] = desc.enablePostProcess ? 1.0f : 0.0f;
 
             D3D11_MAPPED_SUBRESOURCE mapped{};
-            if (FAILED(m_context->Map(m_meshConstantBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+            if (FAILED(m_context->Map(m_meshConstantBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)) || !mapped.pData) {
                 continue;
             }
             std::memcpy(mapped.pData, &constants, sizeof(constants));
             m_context->Unmap(m_meshConstantBuffer.Get(), 0);
+
+            UINT stride = draw.vertexStride;
+            UINT offset = 0;
+            ID3D11Buffer* vb = vertexBuffer.Get();
+            m_context->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
+
+            ID3D11ShaderResourceView* albedoSrv = nullptr;
+            const auto srvIt = m_rhiSrvs.find(draw.albedoSrv);
+            if (srvIt != m_rhiSrvs.end()) {
+                albedoSrv = srvIt->second.Get();
+            }
+            m_context->PSSetShaderResources(0, 1, &albedoSrv);
+
+            if (draw.indexBufferHandle != 0 && draw.indexCount > 0) {
+                const auto ibIt = m_rhiResources.find(draw.indexBufferHandle);
+                if (ibIt == m_rhiResources.end()) {
+                    continue;
+                }
+                Microsoft::WRL::ComPtr<ID3D11Buffer> indexBuffer;
+                if (FAILED(ibIt->second.As(&indexBuffer))) {
+                    continue;
+                }
+                m_context->IASetIndexBuffer(indexBuffer.Get(),
+                                            draw.index32Bit ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT,
+                                            0);
+                m_context->DrawIndexed(draw.indexCount, 0, 0);
+            } else {
+                m_context->IASetIndexBuffer(nullptr, DXGI_FORMAT_UNKNOWN, 0);
+                m_context->Draw(draw.vertexCount, 0);
+            }
+        }
+
+        ID3D11ShaderResourceView* nullSrv = nullptr;
+        m_context->PSSetShaderResources(0, 1, &nullSrv);
+
+        return true;
+    }
+
+    bool Dx11GraphicsDevice::EnsureSkinnedMeshFrameResources(UINT width, UINT height)
+    {
+        if (!EnsureMeshFrameResources(width, height)) {
+            return false;
+        }
+
+        if (!m_skinnedMeshVertexShader || !m_skinnedMeshInputLayout) {
+            Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
+            if (!CompileDx11ShaderSource(kDx11SkinnedMeshVertexShader, "VSMain", "vs_5_0", vsBlob)) {
+                return false;
+            }
+
+            HRESULT hr = m_device->CreateVertexShader(vsBlob->GetBufferPointer(),
+                                                      vsBlob->GetBufferSize(),
+                                                      nullptr,
+                                                      m_skinnedMeshVertexShader.GetAddressOf());
+            if (FAILED(hr)) {
+                DebugLog("Dx11GraphicsDevice::EnsureSkinnedMeshFrameResources: CreateVertexShader failed.\n");
+                return false;
+            }
+
+            D3D11_INPUT_ELEMENT_DESC inputElements[] = {
+                { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 0,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
+                { "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+                { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+                { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 40, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+                { "JOINTS_0", 0, DXGI_FORMAT_R8G8B8A8_UINT,      0, 48, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+                { "WEIGHTS_0",0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 52, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+            };
+            hr = m_device->CreateInputLayout(inputElements,
+                                             _countof(inputElements),
+                                             vsBlob->GetBufferPointer(),
+                                             vsBlob->GetBufferSize(),
+                                             m_skinnedMeshInputLayout.GetAddressOf());
+            if (FAILED(hr)) {
+                DebugLog("Dx11GraphicsDevice::EnsureSkinnedMeshFrameResources: CreateInputLayout failed.\n");
+                return false;
+            }
+        }
+
+        if (!m_skinnedMeshConstantBuffer) {
+            D3D11_BUFFER_DESC cbDesc{};
+            cbDesc.ByteWidth = static_cast<UINT>(sizeof(Dx11MeshConstants));
+            cbDesc.Usage = D3D11_USAGE_DYNAMIC;
+            cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+            cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+            if (FAILED(m_device->CreateBuffer(&cbDesc, nullptr, m_skinnedMeshConstantBuffer.GetAddressOf()))) {
+                DebugLog("Dx11GraphicsDevice::EnsureSkinnedMeshFrameResources: CreateBuffer failed.\n");
+                return false;
+            }
+        }
+
+        if (!m_skinnedMeshBoneConstantBuffer) {
+            D3D11_BUFFER_DESC cbDesc{};
+            cbDesc.ByteWidth = static_cast<UINT>(Skeleton::kMaxBones * 16 * sizeof(float));
+            cbDesc.Usage = D3D11_USAGE_DYNAMIC;
+            cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+            cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+            if (FAILED(m_device->CreateBuffer(&cbDesc, nullptr, m_skinnedMeshBoneConstantBuffer.GetAddressOf()))) {
+                DebugLog("Dx11GraphicsDevice::EnsureSkinnedMeshFrameResources: CreateBuffer failed.\n");
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    bool Dx11GraphicsDevice::RenderSkinnedMeshFrame(const RhiBackendMeshFrameDesc& desc)
+    {
+        if (!m_context || !m_backBufferRtv || !desc.skinnedDraws || desc.skinnedDrawCount == 0) {
+            return false;
+        }
+
+        const UINT width = static_cast<UINT>(desc.renderWidth);
+        const UINT height = static_cast<UINT>(desc.renderHeight);
+        if (!EnsureSkinnedMeshFrameResources(width, height)) {
+            return false;
+        }
+
+        ID3D11RenderTargetView* rtv = m_backBufferRtv.Get();
+        m_context->OMSetRenderTargets(1, &rtv, m_backBufferDsv.Get());
+        // If the static-mesh pass already ran this frame it already cleared depth; avoid a second
+        // clear here, which would erase the static draws' depth results before skinned draws test
+        // against them.
+        const bool staticPassRan = (desc.draws != nullptr && desc.drawCount > 0);
+        if (!staticPassRan) {
+            m_context->ClearDepthStencilView(m_backBufferDsv.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
+        }
+
+        D3D11_VIEWPORT viewport{};
+        viewport.TopLeftX = 0.0f;
+        viewport.TopLeftY = 0.0f;
+        viewport.Width = desc.renderWidth;
+        viewport.Height = desc.renderHeight;
+        viewport.MinDepth = 0.0f;
+        viewport.MaxDepth = 1.0f;
+        m_context->RSSetViewports(1, &viewport);
+
+        m_context->IASetInputLayout(m_skinnedMeshInputLayout.Get());
+        m_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        m_context->VSSetShader(m_skinnedMeshVertexShader.Get(), nullptr, 0);
+        m_context->PSSetShader(m_meshPixelShader.Get(), nullptr, 0);
+        m_context->GSSetShader(nullptr, nullptr, 0);
+        m_context->HSSetShader(nullptr, nullptr, 0);
+        m_context->DSSetShader(nullptr, nullptr, 0);
+        m_context->CSSetShader(nullptr, nullptr, 0);
+        m_context->RSSetState(m_meshRasterizerState.Get());
+        m_context->OMSetDepthStencilState(m_meshDepthStencilState.Get(), 0);
+        const float blendFactor[4] = {};
+        m_context->OMSetBlendState(m_meshBlendState.Get(), blendFactor, 0xffffffffu);
+
+        ID3D11Buffer* boneCb = m_skinnedMeshBoneConstantBuffer.Get();
+        m_context->VSSetConstantBuffers(1, 1, &boneCb);
+        ID3D11SamplerState* sampler = m_meshSamplerState.Get();
+        m_context->PSSetSamplers(0, 1, &sampler);
+
+        for (uint32_t i = 0; i < desc.skinnedDrawCount; ++i) {
+            const RhiBackendSkinnedMeshDrawDesc& draw = desc.skinnedDraws[i];
+            if (draw.vertexBufferHandle == 0 || draw.boneMatrices == nullptr ||
+                (draw.indexCount == 0 && draw.vertexCount == 0)) {
+                continue;
+            }
+
+            const auto vbIt = m_rhiResources.find(draw.vertexBufferHandle);
+            if (vbIt == m_rhiResources.end()) {
+                continue;
+            }
+            Microsoft::WRL::ComPtr<ID3D11Buffer> vertexBuffer;
+            if (FAILED(vbIt->second.As(&vertexBuffer))) {
+                continue;
+            }
+
+            Dx11MeshConstants constants{};
+            std::memcpy(constants.viewProjection, desc.viewProjection, sizeof(constants.viewProjection));
+            std::memcpy(constants.model, draw.model, sizeof(constants.model));
+            std::memcpy(constants.baseColor, draw.baseColor, sizeof(constants.baseColor));
+            constants.emissiveRoughness[0] = draw.emissive[0];
+            constants.emissiveRoughness[1] = draw.emissive[1];
+            constants.emissiveRoughness[2] = draw.emissive[2];
+            constants.emissiveRoughness[3] = draw.roughness;
+            constants.lightDirIntensity[0] = desc.sunDir[0];
+            constants.lightDirIntensity[1] = desc.sunDir[1];
+            constants.lightDirIntensity[2] = desc.sunDir[2];
+            constants.lightDirIntensity[3] = desc.sunIntensity;
+            constants.lightColor[0] = desc.sunColor[0];
+            constants.lightColor[1] = desc.sunColor[1];
+            constants.lightColor[2] = desc.sunColor[2];
+            constants.lightColor[3] = 1.0f;
+            constants.cameraPosMetallic[0] = desc.cameraPos[0];
+            constants.cameraPosMetallic[1] = desc.cameraPos[1];
+            constants.cameraPosMetallic[2] = desc.cameraPos[2];
+            constants.cameraPosMetallic[3] = draw.metallic;
+            constants.featureFlags[0] = draw.albedoSrv != 0 ? 1.0f : 0.0f;
+            constants.featureFlags[1] = desc.enableIbl ? 1.0f : 0.0f;
+            constants.featureFlags[2] = desc.enableSsao ? 1.0f : 0.0f;
+            constants.featureFlags[3] = desc.enableShadow ? 1.0f : 0.0f;
+            constants.featureFlags2[0] = desc.enablePostProcess ? 1.0f : 0.0f;
+
+            D3D11_MAPPED_SUBRESOURCE mapped{};
+            if (FAILED(m_context->Map(m_skinnedMeshConstantBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)) || !mapped.pData) {
+                continue;
+            }
+            std::memcpy(mapped.pData, &constants, sizeof(constants));
+            m_context->Unmap(m_skinnedMeshConstantBuffer.Get(), 0);
+
+            D3D11_MAPPED_SUBRESOURCE mappedBones{};
+            if (FAILED(m_context->Map(m_skinnedMeshBoneConstantBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedBones)) || !mappedBones.pData) {
+                continue;
+            }
+            std::memcpy(mappedBones.pData, draw.boneMatrices, Skeleton::kMaxBones * 16 * sizeof(float));
+            m_context->Unmap(m_skinnedMeshBoneConstantBuffer.Get(), 0);
+
+            ID3D11Buffer* cb = m_skinnedMeshConstantBuffer.Get();
+            m_context->VSSetConstantBuffers(0, 1, &cb);
+            m_context->PSSetConstantBuffers(0, 1, &cb);
 
             UINT stride = draw.vertexStride;
             UINT offset = 0;
@@ -1395,6 +1688,7 @@ float4 PSMain(PSInput input) : SV_TARGET
             (void)RenderRayMarchFrame(frameDesc.rayMarch);
         } else if (frameDesc.mesh.enabled) {
             (void)RenderMeshFrame(frameDesc.mesh);
+            (void)RenderSkinnedMeshFrame(frameDesc.mesh);
         }
         return SUCCEEDED(m_swapChain->Present(1, 0));
     }
@@ -1545,6 +1839,10 @@ float4 PSMain(PSInput input) : SV_TARGET
         m_meshRasterizerState.Reset();
         m_meshDepthStencilState.Reset();
         m_meshBlendState.Reset();
+        m_skinnedMeshVertexShader.Reset();
+        m_skinnedMeshInputLayout.Reset();
+        m_skinnedMeshConstantBuffer.Reset();
+        m_skinnedMeshBoneConstantBuffer.Reset();
         m_swapChain.Reset();
         m_rhiResources.clear();
         m_rhiShaders.clear();

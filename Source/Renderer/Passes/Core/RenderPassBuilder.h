@@ -6,6 +6,7 @@
 
 #include <array>
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -19,10 +20,8 @@ namespace SasamiRenderer
     enum class RenderPassBuilderId
     {
         Shadow,
-        Opaque,
         OpaqueGBuffer,
         Lighting,
-        Transparent,
         TransparentLighting,
         Skybox,
         PostProcess,
@@ -33,11 +32,14 @@ namespace SasamiRenderer
         TransparentSceneColorCopy,
         TransparentComposite,
         ScreenSpaceReflection,
+        ScreenSpaceReflectionComposite,
         SoftwareReflection,
         SoftwareReflectionComposite,
         RayTracing,
         VolumetricCloud,
         DebugProbeGrid,
+        FluidSurface,
+        Particles,
     };
 
     class IRenderPassBuilder
@@ -56,7 +58,7 @@ namespace SasamiRenderer
     public:
         using RenderPassType = RendererEnums::RenderPassType;
         static constexpr size_t kSequencePassCount =
-            static_cast<size_t>(RendererEnums::RenderPassType::OpaqueGBuffer) + 1u;
+            static_cast<size_t>(RendererEnums::RenderPassType::ScreenSpaceReflectionComposite) + 1u;
 
         static RenderPassBuilderCatalog CreateDefault();
 
@@ -69,7 +71,11 @@ namespace SasamiRenderer
         std::shared_ptr<IRenderPass> Build(RenderPassBuilderId id, const RenderPassBuildContext& context) const;
 
     private:
-        static RenderPassBuilderId ToBuilderId(RenderPassType type);
+        // RenderPassType has retired gaps (values with no corresponding builder), so there is no
+        // valid RenderPassBuilderId for every RenderPassType. This used to be papered over by a
+        // `default:` case that silently returned Shadow, which stuffed a spurious ShadowRenderPass
+        // into the retired slots and relied on the caller overwriting them with nullptr afterward.
+        static std::optional<RenderPassBuilderId> ToBuilderId(RenderPassType type);
 
         std::vector<std::unique_ptr<IRenderPassBuilder>> m_builders;
     };

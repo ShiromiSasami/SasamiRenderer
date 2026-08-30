@@ -3,6 +3,7 @@
 
 #include "Renderer/RHI/GraphicsDevice.h"
 #include "Renderer/RHI/RhiDevice.h"
+#include "Renderer/Scene/DeferredUploadSink.h"
 #include "Renderer/Structures/Mesh.h"
 
 namespace SasamiRenderer
@@ -25,7 +26,8 @@ namespace SasamiRenderer
 
         ~SkinnedMeshBuffer();
 
-        bool Upload(GraphicsDevice& device, const std::vector<SkinnedMesh>& meshes);
+        bool Upload(GraphicsDevice& device, const std::vector<SkinnedMesh>& meshes,
+                    const DeferredUploadSink* sink = nullptr);
         void Release();
 
         const std::vector<GPUItem>& Items() const { return m_items; }

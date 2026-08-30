@@ -8,6 +8,8 @@
 
 namespace SasamiRenderer
 {
+    class ApplicationCore;
+
     class StaticModel : public SObject
     {
     public:
@@ -36,6 +38,13 @@ namespace SasamiRenderer
         };
 
         bool LoadModel(const std::string& assetPath, ModelFormat format, float uniformScale = 1.0f);
+
+        // Queues the load on the app's AsyncAssetLoadService; CPU parse/decode happens on
+        // a JobSystem worker and the meshes appear (objectsDirty) when adoption completes.
+        // Poll GetLoadState() for Loading/Ready/Failed.
+        bool LoadModelAsync(ApplicationCore& app, const std::string& assetPath,
+                            ModelFormat format, float uniformScale = 1.0f);
+        MeshComponent::MeshLoadState GetLoadState() const;
         std::vector<RenderProxy> BuildRenderProxies() const;
         void AddStaticMesh(Mesh mesh,
                            const std::string& albedoTexturePath = "",

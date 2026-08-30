@@ -10,7 +10,6 @@
 #include <vector>
 
 #include <d3dcompiler.h>
-#include <dxcapi.h>
 #include <wrl.h>
 #include "d3dx12.h"
 #include "Renderer/Resources/ShaderCompilationService.h"
@@ -21,107 +20,20 @@ namespace SasamiRenderer
 {
     namespace
     {
-        // ---- DXC runtime loader ----
-        HRESULT CreateDxcInstance(REFCLSID clsid, REFIID iid, LPVOID* out)
-        {
-            static HMODULE mod = []() -> HMODULE { return LoadLibraryW(L"dxcompiler.dll"); }();
-            static auto fn = mod ? reinterpret_cast<HRESULT(WINAPI*)(REFCLSID,REFIID,LPVOID*)>(
-                GetProcAddress(mod,"DxcCreateInstance")) : nullptr;
-            return fn ? fn(clsid,iid,out) : HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND);
-        }
-
-        // ---- Project root / shader path resolution ----
-        std::filesystem::path GetExeDir()
-        {
-            wchar_t buf[MAX_PATH]{};
-            GetModuleFileNameW(nullptr, buf, MAX_PATH);
-            return std::filesystem::path(buf).parent_path();
-        }
-
-        std::filesystem::path FindProjectRoot(std::filesystem::path dir)
-        {
-            for (int depth=0; depth<16; ++depth) {
-                if ((std::filesystem::exists(dir/"Shaders") && std::filesystem::exists(dir/"Source")) ||
-                    std::filesystem::exists(dir/"Source"/"Renderer"/"Shaders")) return dir;
-                auto p = dir.parent_path();
-                if (p.empty()||p==dir) break;
-                dir = p;
-            }
-            return {};
-        }
-
-        std::filesystem::path GetShaderRoot()
-        {
-            static const std::filesystem::path root = [](){
-                auto pr = FindProjectRoot(GetExeDir());
-                if (pr.empty()) {
-                    return std::filesystem::path(L"Shaders");
-                }
-                const std::filesystem::path shaderRoot = pr / L"Shaders";
-                return std::filesystem::exists(shaderRoot)
-                    ? shaderRoot
-                    : pr / L"Source" / L"Renderer" / L"Shaders";
-            }();
-            return root;
-        }
-
-        // ---- Compile a compute shader via DXC ----
+        // ---- Compile a compute shader via DXC (disk-cached) ----
         bool CompileComputeShader(const wchar_t* relPath, const char* entry,
                                   ComPtr<ID3DBlob>& outBlob,
                                   const std::wstring& targetProfile)
         {
-            const std::filesystem::path srcPath = GetShaderRoot() / relPath;
-            const std::filesystem::path incPath = GetShaderRoot();
-
-            ComPtr<IDxcUtils> utils; ComPtr<IDxcCompiler3> compiler;
-            if (FAILED(CreateDxcInstance(CLSID_DxcUtils, IID_PPV_ARGS(&utils)))) return false;
-            if (FAILED(CreateDxcInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&compiler)))) return false;
-
-            ComPtr<IDxcBlobEncoding> src;
-            if (FAILED(utils->LoadFile(srcPath.c_str(), nullptr, &src))) {
-                OutputDebugStringA(("GpuSWRT: failed to load shader: " + srcPath.string() + "\n").c_str());
+            const std::string profileNarrow(targetProfile.begin(), targetProfile.end());
+            std::vector<uint8_t> bytecode;
+            if (!ShaderCompilationService::GetOrCompileShaderBytecodeDxc(
+                    "GpuSWRT", relPath, entry, profileNarrow.c_str(), bytecode)) {
                 return false;
             }
 
-            ComPtr<IDxcIncludeHandler> incHandler;
-            utils->CreateDefaultIncludeHandler(&incHandler);
-
-            const std::wstring srcW  = srcPath.native();
-            const std::wstring entW  = [&](){ std::wstring w; for (char c:std::string(entry)) w+=c; return w; }();
-            const std::wstring incW  = incPath.native();
-
-            std::vector<LPCWSTR> args{
-                srcW.c_str(),
-                L"-E", entW.c_str(),
-                L"-T", targetProfile.c_str(),
-                L"-I", incW.c_str(),
-                L"-HV", L"2021",
-                L"-WX",
-            };
-#if defined(_DEBUG)
-            args.push_back(L"-Zi"); args.push_back(L"-Od");
-#else
-            args.push_back(L"-O3");
-#endif
-
-            DxcBuffer buf{ src->GetBufferPointer(), src->GetBufferSize(), DXC_CP_ACP };
-            ComPtr<IDxcResult> result;
-            if (FAILED(compiler->Compile(&buf, args.data(), (UINT32)args.size(), incHandler.Get(), IID_PPV_ARGS(&result)))) {
-                return false;
-            }
-            ComPtr<IDxcBlobUtf8> errors;
-            if (SUCCEEDED(result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&errors), nullptr)) &&
-                errors && errors->GetStringLength()>0) {
-                OutputDebugStringA(errors->GetStringPointer());
-            }
-            HRESULT status=S_OK;
-            if (FAILED(result->GetStatus(&status))||FAILED(status)) return false;
-
-            ComPtr<IDxcBlob> obj;
-            if (FAILED(result->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&obj), nullptr))||!obj) return false;
-
-            if (FAILED(D3DCreateBlob(obj->GetBufferSize(), outBlob.ReleaseAndGetAddressOf()))) return false;
-            memcpy(outBlob->GetBufferPointer(), obj->GetBufferPointer(), obj->GetBufferSize());
+            if (FAILED(D3DCreateBlob(bytecode.size(), outBlob.ReleaseAndGetAddressOf()))) return false;
+            memcpy(outBlob->GetBufferPointer(), bytecode.data(), bytecode.size());
             return true;
         }
 
@@ -136,8 +48,7 @@ namespace SasamiRenderer
         ID3D12Device* dev = device.GetDevice();
         if (!dev) return false;
 
-        const std::string smStr = ShaderCompilationService::ResolveEffectiveShaderModel(dev, "6_6");
-        const std::wstring csTarget = L"cs_" + std::wstring(smStr.begin(), smStr.end());
+        const std::wstring csTarget = ShaderCompilationService::ResolveEffectiveComputeShaderTarget(dev, "6_6");
 
         // ---- Root signature ----
         // [0]: Root CBV  (b0) inline
@@ -428,8 +339,7 @@ namespace SasamiRenderer
         ID3D12Device* dev = device.GetDevice();
         if (!dev) return false;
 
-        const std::string smStr = ShaderCompilationService::ResolveEffectiveShaderModel(dev, "6_6");
-        const std::wstring csTarget = L"cs_" + std::wstring(smStr.begin(), smStr.end());
+        const std::wstring csTarget = ShaderCompilationService::ResolveEffectiveComputeShaderTarget(dev, "6_6");
 
         // ---- ReSTIR root signature ----
         // [0]: Root CBV  (b0) – ReSTIRFrameConstants

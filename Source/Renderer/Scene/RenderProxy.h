@@ -24,6 +24,7 @@ namespace SasamiRenderer
         Mesh mesh;
         std::shared_ptr<const CpuTextureRgba8> albedoTexture;
         std::shared_ptr<const CpuTextureRgba8> occlusionTexture;
+        std::shared_ptr<const CpuTextureRgba8> normalTexture;
         bool usesMetallicRoughnessTexture = false;
         SurfaceMaterial material;
         bool transparent = false;
@@ -40,9 +41,11 @@ namespace SasamiRenderer
     struct SkinnedRenderProxy
     {
         SkinnedMesh                             mesh;
+        uint64_t                                meshId = 0; // stable identity; lets the submitter skip GPU re-upload
         AnimationController*                    animController = nullptr; // must remain alive
         std::shared_ptr<const CpuTextureRgba8>  albedoTexture;
         std::shared_ptr<const CpuTextureRgba8>  occlusionTexture;
+        std::shared_ptr<const CpuTextureRgba8>  normalTexture;
         SurfaceMaterial                         material;
         bool                                    transparent = false;
         float                                   model[16] = {

@@ -1,6 +1,7 @@
 #include "Renderer/RenderGraph/RenderGraph.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
@@ -11,11 +12,42 @@
 #include "Foundation/Profiling/Profiler.h"
 #include "Renderer/Passes/Core/IRenderPass.h"
 #include "Renderer/Passes/Core/RenderPassSetupContext.h"
+#include "Renderer/Profiling/GpuTimestampProfiler.h"
 
 namespace SasamiRenderer
 {
     namespace
     {
+        // Closes the pass's timestamp scope on every exit path, including the two
+        // early `return false`s inside executePass. An unclosed scope would be
+        // dropped by EndFrame, silently losing every later pass's timing too,
+        // because the profiler refuses to open a scope while one is still open.
+        class ScopedGpuTimestamp
+        {
+        public:
+            ScopedGpuTimestamp(GpuTimestampProfiler* profiler,
+                               ID3D12GraphicsCommandList* cmdList,
+                               std::string_view name)
+                : m_profiler(profiler), m_cmdList(cmdList)
+            {
+                if (m_profiler && m_cmdList) {
+                    m_profiler->BeginScope(m_cmdList, name);
+                }
+            }
+            ~ScopedGpuTimestamp()
+            {
+                if (m_profiler && m_cmdList) {
+                    m_profiler->EndScope(m_cmdList);
+                }
+            }
+            ScopedGpuTimestamp(const ScopedGpuTimestamp&) = delete;
+            ScopedGpuTimestamp& operator=(const ScopedGpuTimestamp&) = delete;
+
+        private:
+            GpuTimestampProfiler*      m_profiler = nullptr;
+            ID3D12GraphicsCommandList* m_cmdList  = nullptr;
+        };
+
         RhiResourceState ToRhiResourceState(D3D12_RESOURCE_STATES state)
         {
             if ((state & D3D12_RESOURCE_STATE_RENDER_TARGET) != 0) {
@@ -136,11 +168,6 @@ namespace SasamiRenderer
         RenderGraphBuilder builder(*this, m_resources, node, previousNode);
         renderPass.Setup(builder);
         return node;
-    }
-
-    RenderGraph::PhaseHandle RenderGraph::AddPhase(std::string_view phaseName)
-    {
-        return FindOrAddPhase(phaseName);
     }
 
     bool RenderGraph::AddPhaseCompletionNode(std::string_view phaseName,
@@ -383,13 +410,8 @@ namespace SasamiRenderer
             return false;
         }
 
-        D3D12_RESOURCE_BARRIER barrier = {};
-        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-        barrier.Transition.pResource = resource.resource;
-        barrier.Transition.StateBefore = resource.currentState;
-        barrier.Transition.StateAfter = requiredState;
-        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            resource.resource, resource.currentState, requiredState);
         cmdList->ResourceBarrier(1, &barrier);
         resource.currentState = requiredState;
         return true;
@@ -397,7 +419,7 @@ namespace SasamiRenderer
 
     bool RenderGraph::PreparePassResources(const PassNode& pass)
     {
-        if (pass.colorTargets.empty() && !pass.depthTarget.IsValid()) {
+        if (pass.reads.empty() && pass.colorTargets.empty() && !pass.depthTarget.IsValid()) {
             return true;
         }
 
@@ -653,13 +675,19 @@ namespace SasamiRenderer
         }
 
         // Async compute context (may be null if no compute queue is available).
+        // submitCurrentGraphicsNode/acquireNextGraphicsNode must also be present:
+        // without them there is no way to Signal work that has actually been
+        // submitted (a single frame-long command list is not closed/submitted
+        // until frame end), so the cross-queue join would guard nothing.
         const bool asyncComputeEnabled =
             m_hasExecuteContext &&
             m_executeContext.computeFrameInputs != nullptr &&
             m_executeContext.computeQueueRaw    != nullptr &&
             m_executeContext.graphicsQueueRaw   != nullptr &&
             m_executeContext.crossQueueFence    != nullptr &&
-            m_executeContext.crossQueueFenceVal != nullptr;
+            m_executeContext.crossQueueFenceVal != nullptr &&
+            static_cast<bool>(m_executeContext.submitCurrentGraphicsNode) &&
+            static_cast<bool>(m_executeContext.acquireNextGraphicsNode);
 
         // Build execution levels for parallel/async dispatch.
         const std::vector<std::vector<size_t>> levels = BuildExecutionLevels(executionOrder);
@@ -681,13 +709,36 @@ namespace SasamiRenderer
             Profiler::ScopedCpuEvent cpuEvent(pass.name.c_str());
             Profiler::ScopedGpuEvent gpuEvent(profileCmdList, pass.name.c_str());
 
+            {
+            // Timestamps are only taken for graphics passes. A compute pass records to the
+            // compute queue, whose timestamps come from a different clock domain than the
+            // graphics queue that owns the query heap and resolve, so timing them here would
+            // produce meaningless deltas. No pass currently returns CommandQueueType::Compute.
+            ScopedGpuTimestamp gpuTimestamp(
+                (!pass.preferCompute && m_hasExecuteContext) ? m_executeContext.gpuTimestampProfiler : nullptr,
+                profileCmdList ? profileCmdList->Get() : nullptr,
+                pass.name);
+
             // Compute-preferred passes bypass RTV/DSV setup (no rasterization).
+            // NOTE: this also means compute passes get no resource-state transition
+            // handoff at all. Cross-queue resource-state transitions (e.g. a resource
+            // written by a graphics pass and read by a compute pass, or vice versa)
+            // are NOT implemented anywhere in RenderGraph yet. The Signal/Wait pair
+            // around the compute dispatch below only orders GPU timelines; it does
+            // NOT insert the barriers a resource would need to safely cross queues.
+            // Until that handoff exists, opting a real pass into preferCompute is
+            // unsafe beyond passes that touch no resource shared with the graphics
+            // queue in the same frame.
             if (!pass.preferCompute) {
                 if (!PreparePassResources(pass)) {
                     DebugLog("RenderGraph::Execute: failed to prepare pass resources.\n");
                     return false;
                 }
             }
+#if defined(_DEBUG)
+            const unsigned int debugDrawCountBefore = DebugGetDrawCount();
+            const unsigned int debugDispatchCountBefore = DebugGetDispatchCount();
+#endif
             if (!pass.execute()) {
                 std::string message = "RenderGraph::Execute: pass execution failed: ";
                 message += pass.name;
@@ -695,6 +746,25 @@ namespace SasamiRenderer
                 DebugLog(message.c_str());
                 return false;
             }
+#if defined(_DEBUG)
+            const unsigned int debugDrawCountAfter = DebugGetDrawCount();
+            if (debugDrawCountAfter > debugDrawCountBefore) {
+                char drawRangeBuf[256];
+                std::snprintf(drawRangeBuf, sizeof(drawRangeBuf), "[DrawRange] %s: draws [%u, %u)\n",
+                              pass.name.c_str(), debugDrawCountBefore, debugDrawCountAfter);
+                DebugLog(drawRangeBuf);
+            }
+            const unsigned int debugDispatchCountAfter = DebugGetDispatchCount();
+            if (debugDispatchCountAfter > debugDispatchCountBefore) {
+                char dispatchRangeBuf[256];
+                std::snprintf(dispatchRangeBuf, sizeof(dispatchRangeBuf), "[DispatchRange] %s: dispatches [%u, %u)\n",
+                              pass.name.c_str(), debugDispatchCountBefore, debugDispatchCountAfter);
+                DebugLog(dispatchRangeBuf);
+            }
+#endif
+            } // end timestamp scope -- phase completion nodes below run their own GPU work
+              // and must not be billed to this pass.
+
             if (pass.phaseIndex < m_phases.size() && !phaseCompletionFired[pass.phaseIndex]) {
                 const size_t completeCount = ++completedPassCountByPhase[pass.phaseIndex];
                 const size_t phasePassCount = m_phases[pass.phaseIndex].passCount;
@@ -734,6 +804,17 @@ namespace SasamiRenderer
 
                 // ---- Cross-queue sync and compute dispatch ----
                 if (levelHasCompute && asyncComputeEnabled) {
+                    // Close and submit the graphics command list holding this Node's
+                    // work, and open a fresh one for the next Node. Without this, the
+                    // Signal below would refer to work that has not actually been
+                    // submitted to the queue yet (it would resolve against whatever
+                    // was submitted by a previous Execute() call, guarding nothing).
+                    if (!m_executeContext.submitCurrentGraphicsNode()) {
+                        DebugLog("RenderGraph::Execute: failed to submit graphics node before cross-queue join.\n");
+                        executeSucceeded = false;
+                        break;
+                    }
+
                     // Graphics queue signals that its work for this level is done.
                     // Compute queue waits before starting its work.
                     UINT64& fenceVal = *m_executeContext.crossQueueFenceVal;
@@ -758,6 +839,15 @@ namespace SasamiRenderer
                     ++fenceVal;
                     m_executeContext.computeQueueRaw->Signal(m_executeContext.crossQueueFence, fenceVal);
                     m_executeContext.graphicsQueueRaw->Wait(m_executeContext.crossQueueFence, fenceVal);
+
+                    // Open the next Node's graphics command list now that the queue has
+                    // been told to wait for the compute signal; *frameInputs is updated
+                    // in place so already-registered passes pick up the new command list.
+                    if (!m_executeContext.acquireNextGraphicsNode()) {
+                        DebugLog("RenderGraph::Execute: failed to acquire next graphics node after cross-queue join.\n");
+                        executeSucceeded = false;
+                        break;
+                    }
                 } else if (levelHasCompute) {
                     // No async compute queue: fall back to sequential execution on graphics.
                     for (const size_t passIdx : levelNodes) {
@@ -908,41 +998,4 @@ namespace SasamiRenderer
         return RenderPassContextView(executionPolicy, frameInputs, executionServices, requirements);
     }
 
-    RenderPassContextView RenderGraphExecuteContext::CreateComputeContextView(const RenderPassRequirements& requirements) const
-    {
-        const RenderPassFrameInputs* inputs = (computeFrameInputs != nullptr) ? computeFrameInputs : frameInputs;
-        return RenderPassContextView(executionPolicy, inputs, executionServices, requirements);
-    }
-
-    ResourceHandle RenderGraphExecuteContext::FindGraphResource(std::string_view resourceName) const
-    {
-        if (resources == nullptr) {
-            return {};
-        }
-        return resources->Find(resourceName);
-    }
-
-    std::string_view RenderGraphExecuteContext::GetResourceName(ResourceHandle handle) const
-    {
-        if (resources == nullptr) {
-            return {};
-        }
-        return resources->GetName(handle);
-    }
-
-    GpuDescriptorHandle RenderGraphExecuteContext::FindResourceSrv(std::string_view resourceName) const
-    {
-        if (resources == nullptr) {
-            return {};
-        }
-        return resources->GetSrv(resources->Find(resourceName));
-    }
-
-    RhiGpuDescriptorHandle RenderGraphExecuteContext::FindResourceRhiSrv(std::string_view resourceName) const
-    {
-        if (resources == nullptr) {
-            return {};
-        }
-        return resources->GetRhiSrv(resources->Find(resourceName));
-    }
 }

@@ -2,6 +2,8 @@
 #include "Renderer/Resources/SrvDescriptorAllocator.h"
 #include "Foundation/Tools/DebugOutput.h"
 
+#include <string>
+
 namespace SasamiRenderer
 {
     bool SrvDescriptorAllocator::Initialize(IRHIDevice& device, UINT capacity)
@@ -26,7 +28,14 @@ namespace SasamiRenderer
             return false;
         }
         if (m_next + count > m_capacity) {
-            DebugLog("SRV heap exhausted\n");
+            // Report the numbers: this allocator never frees, so an exhaustion is a budget
+            // decision (raise the capacity passed to Initialize), and the caller that hit it
+            // usually just falls back silently. Chasing one of those without the counts here
+            // means bisecting a 7000-line log, so log capacity/used/requested up front.
+            const std::string message = "SRV heap exhausted: capacity=" + std::to_string(m_capacity) +
+                                        " used=" + std::to_string(m_next) +
+                                        " requested=" + std::to_string(count) + "\n";
+            DebugLog(message.c_str());
             return false;
         }
 

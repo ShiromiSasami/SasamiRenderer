@@ -211,7 +211,7 @@ namespace SasamiRenderer
             // Map and copy
             void* pMapped = nullptr;
             hr = uploadResource->Map(0, nullptr, &pMapped);
-            if (FAILED(hr))
+            if (FAILED(hr) || !pMapped)
             {
                 DebugLog("MeshletBuffer::Upload: failed to map upload buffer.\n");
                 return false;
@@ -235,6 +235,7 @@ namespace SasamiRenderer
         // Upload meshlet index buffer
         if (!uploadBuffer(m_meshletIndices.data(), idxBytes, m_indexBuffer))
         {
+            Release();
             return false;
         }
 

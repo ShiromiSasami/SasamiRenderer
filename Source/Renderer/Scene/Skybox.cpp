@@ -6,7 +6,9 @@
 #include <utility>
 
 #include "Foundation/Tools/DebugOutput.h"
+#include "Foundation/Tools/ScopedPerfTimer.h"
 #include "Foundation/Math/MathUtil.h"
+#include "Renderer/Resources/ShaderCompilationService.h"
 #include "Renderer/Utilities/RendererMathUtility.h"
 #include "Renderer/Utilities/ResourceUploadUtility.h"
 #include "d3dx12.h"
@@ -33,225 +35,15 @@ namespace
         { { 1.0f, -1.0f, -1.0f } }, { { -1.0f,  1.0f, -1.0f } }, { { -1.0f, -1.0f, -1.0f } },
     };
 
-    static bool CreateTextureCubeFromRgba8Faces(SasamiRenderer::IRHIDevice& device,
-                                                SasamiRenderer::CommandList* cmdList,
-                                                const std::vector<std::vector<uint8_t>>& facePixels,
-                                                UINT width,
-                                                UINT height,
-                                                SasamiRenderer::Resource& outTexture,
-                                                SasamiRenderer::Resource& outUpload)
-    {
-        if (!cmdList || facePixels.size() != 6 || width == 0 || height == 0) {
-            return false;
-        }
-
-        D3D12_RESOURCE_DESC texDesc = {};
-        texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        texDesc.Width = width;
-        texDesc.Height = height;
-        texDesc.DepthOrArraySize = 6;
-        texDesc.MipLevels = 1;
-        texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        texDesc.SampleDesc.Count = 1;
-        texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        texDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-        CD3DX12_HEAP_PROPERTIES defaultHeapProps(D3D12_HEAP_TYPE_DEFAULT);
-        HRESULT hr = device.CreateCommittedResource(&defaultHeapProps,
-                                                    D3D12_HEAP_FLAG_NONE,
-                                                    &texDesc,
-                                                    D3D12_RESOURCE_STATE_COPY_DEST,
-                                                    nullptr,
-                                                    outTexture);
-        if (FAILED(hr)) {
-            return false;
-        }
-
-        const UINT64 uploadBufferSize = GetRequiredIntermediateSize(outTexture.Get(), 0, 6);
-        CD3DX12_HEAP_PROPERTIES uploadHeapProps(D3D12_HEAP_TYPE_UPLOAD);
-        CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
-        hr = device.CreateCommittedResource(&uploadHeapProps,
-                                            D3D12_HEAP_FLAG_NONE,
-                                            &bufferDesc,
-                                            D3D12_RESOURCE_STATE_GENERIC_READ,
-                                            nullptr,
-                                            outUpload);
-        if (FAILED(hr)) {
-            outTexture.Reset();
-            return false;
-        }
-
-        std::vector<D3D12_SUBRESOURCE_DATA> subresources(6);
-        for (int i = 0; i < 6; ++i) {
-            subresources[i].pData = facePixels[static_cast<size_t>(i)].data();
-            subresources[i].RowPitch = static_cast<LONG_PTR>(width) * 4;
-            subresources[i].SlicePitch = subresources[i].RowPitch * height;
-        }
-        UpdateSubresources(cmdList->Get(), outTexture.Get(), outUpload.Get(), 0, 0, 6, subresources.data());
-
-        auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(outTexture.Get(),
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-        cmdList->ResourceBarrier(1, &barrier);
-        return true;
-    }
-
-    static bool CreateTextureCubeFromFloatFacesWithMips(SasamiRenderer::IRHIDevice& device,
-                                                        SasamiRenderer::CommandList* cmdList,
-                                                        const std::vector<std::vector<float>>& subresourcesRgba,
-                                                        UINT baseFaceSize,
-                                                        UINT mipLevels,
-                                                        SasamiRenderer::Resource& outTexture,
-                                                        SasamiRenderer::Resource& outUpload)
-    {
-        if (!cmdList || baseFaceSize == 0 || mipLevels == 0 ||
-            subresourcesRgba.size() != static_cast<size_t>(mipLevels) * 6u) {
-            return false;
-        }
-
-        D3D12_RESOURCE_DESC texDesc = {};
-        texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        texDesc.Width = baseFaceSize;
-        texDesc.Height = baseFaceSize;
-        texDesc.DepthOrArraySize = 6;
-        texDesc.MipLevels = static_cast<UINT16>(mipLevels);
-        texDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        texDesc.SampleDesc.Count = 1;
-        texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        texDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-        CD3DX12_HEAP_PROPERTIES defaultHeapProps(D3D12_HEAP_TYPE_DEFAULT);
-        HRESULT hr = device.CreateCommittedResource(&defaultHeapProps,
-                                                    D3D12_HEAP_FLAG_NONE,
-                                                    &texDesc,
-                                                    D3D12_RESOURCE_STATE_COPY_DEST,
-                                                    nullptr,
-                                                    outTexture);
-        if (FAILED(hr)) {
-            return false;
-        }
-
-        const UINT subresourceCount = mipLevels * 6;
-        const UINT64 uploadBufferSize = GetRequiredIntermediateSize(outTexture.Get(), 0, subresourceCount);
-        CD3DX12_HEAP_PROPERTIES uploadHeapProps(D3D12_HEAP_TYPE_UPLOAD);
-        CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
-        hr = device.CreateCommittedResource(&uploadHeapProps,
-                                            D3D12_HEAP_FLAG_NONE,
-                                            &bufferDesc,
-                                            D3D12_RESOURCE_STATE_GENERIC_READ,
-                                            nullptr,
-                                            outUpload);
-        if (FAILED(hr)) {
-            outTexture.Reset();
-            return false;
-        }
-
-        std::vector<std::vector<uint16_t>> halfData(subresourceCount);
-        std::vector<D3D12_SUBRESOURCE_DATA> subresourceDescs(subresourceCount);
-        for (UINT face = 0; face < 6; ++face) {
-            for (UINT mip = 0; mip < mipLevels; ++mip) {
-                const UINT subresourceIndex = mip + face * mipLevels;
-                const UINT size = ((baseFaceSize >> mip) > 0) ? (baseFaceSize >> mip) : 1u;
-                const auto& src = subresourcesRgba[subresourceIndex];
-                if (src.size() != static_cast<size_t>(size) * size * 4u) {
-                    return false;
-                }
-
-                auto& dst = halfData[subresourceIndex];
-                dst.resize(src.size());
-                for (size_t i = 0; i < src.size(); ++i) {
-                    dst[i] = SasamiRenderer::Math::FloatToHalf(src[i]);
-                }
-
-                subresourceDescs[subresourceIndex].pData = dst.data();
-                subresourceDescs[subresourceIndex].RowPitch = static_cast<LONG_PTR>(size) * 8;
-                subresourceDescs[subresourceIndex].SlicePitch = subresourceDescs[subresourceIndex].RowPitch * size;
-            }
-        }
-
-        UpdateSubresources(cmdList->Get(), outTexture.Get(), outUpload.Get(), 0, 0, subresourceCount, subresourceDescs.data());
-        // Use combined state so the cubemap is readable by both PS (skybox, IBL lighting)
-        // and non-pixel shaders (SWRT compute shader IBL fallback sampling).
-        auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(outTexture.Get(),
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-        cmdList->ResourceBarrier(1, &barrier);
-        return true;
-    }
-
-    static bool CreateTexture2DFromFloatRgba(SasamiRenderer::IRHIDevice& device,
-                                             SasamiRenderer::CommandList* cmdList,
-                                             const std::vector<float>& pixels,
-                                             UINT width,
-                                             UINT height,
-                                             SasamiRenderer::Resource& outTexture,
-                                             SasamiRenderer::Resource& outUpload)
-    {
-        if (!cmdList || width == 0 || height == 0 ||
-            pixels.size() != static_cast<size_t>(width) * height * 4u) {
-            return false;
-        }
-
-        D3D12_RESOURCE_DESC texDesc = {};
-        texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        texDesc.Width = width;
-        texDesc.Height = height;
-        texDesc.DepthOrArraySize = 1;
-        texDesc.MipLevels = 1;
-        texDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        texDesc.SampleDesc.Count = 1;
-        texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        texDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-        CD3DX12_HEAP_PROPERTIES defaultHeapProps(D3D12_HEAP_TYPE_DEFAULT);
-        HRESULT hr = device.CreateCommittedResource(&defaultHeapProps,
-                                                    D3D12_HEAP_FLAG_NONE,
-                                                    &texDesc,
-                                                    D3D12_RESOURCE_STATE_COPY_DEST,
-                                                    nullptr,
-                                                    outTexture);
-        if (FAILED(hr)) {
-            return false;
-        }
-
-        const UINT64 uploadBufferSize = GetRequiredIntermediateSize(outTexture.Get(), 0, 1);
-        CD3DX12_HEAP_PROPERTIES uploadHeapProps(D3D12_HEAP_TYPE_UPLOAD);
-        CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
-        hr = device.CreateCommittedResource(&uploadHeapProps,
-                                            D3D12_HEAP_FLAG_NONE,
-                                            &bufferDesc,
-                                            D3D12_RESOURCE_STATE_GENERIC_READ,
-                                            nullptr,
-                                            outUpload);
-        if (FAILED(hr)) {
-            outTexture.Reset();
-            return false;
-        }
-
-        std::vector<uint16_t> halfPixels(pixels.size());
-        for (size_t i = 0; i < pixels.size(); ++i) {
-            halfPixels[i] = SasamiRenderer::Math::FloatToHalf(pixels[i]);
-        }
-
-        D3D12_SUBRESOURCE_DATA subresource = {};
-        subresource.pData = halfPixels.data();
-        subresource.RowPitch = static_cast<LONG_PTR>(width) * 8;
-        subresource.SlicePitch = subresource.RowPitch * height;
-        UpdateSubresources(cmdList->Get(), outTexture.Get(), outUpload.Get(), 0, 0, 1, &subresource);
-
-        auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(outTexture.Get(),
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-        cmdList->ResourceBarrier(1, &barrier);
-        return true;
-    }
 }
 
 namespace SasamiRenderer
 {
     using Math::Mul4x4;
 
-    bool Skybox::Initialize(IRHIDevice& device, const AllocateSrvRangeCallback& allocateSrvRange)
+    bool Skybox::Initialize(IRHIDevice& device,
+                            const AllocateSrvRangeCallback& allocateSrvRange,
+                            DescriptorHeap* srvHeap)
     {
         m_device = &device;
 
@@ -263,6 +55,7 @@ namespace SasamiRenderer
         }
         m_skyboxSrvCpu = skyboxCpu;
         m_skyboxSrv = skyboxGpu;
+        m_srvAlloc = allocateSrvRange;
 
         if (!m_iblSystem.Initialize(device, allocateSrvRange)) {
             DebugLogDialog("Skybox::Initialize: IBL system initialization failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
@@ -272,6 +65,15 @@ namespace SasamiRenderer
         if (!InitializeGeometry()) {
             DebugLogDialog("Skybox::Initialize: geometry initialization failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
             return false;
+        }
+
+        // GPU cubemap generation is an optional fast path for UploadHdrSkyboxTexture; failure
+        // here is not fatal since the CPU equirect->cube conversion still covers it.
+        const std::string configuredShaderModel = ShaderCompilationService::GetConfiguredShaderModel();
+        const std::string shaderModel = ShaderCompilationService::ResolveEffectiveShaderModel(device.GetDevice(), configuredShaderModel);
+        const std::string computeProfile = "cs_" + shaderModel;
+        if (!m_cubemapGenerator.Initialize(device, computeProfile, m_srvAlloc, srvHeap)) {
+            DebugLog("Skybox::Initialize: GPU sky cubemap generator initialization failed; falling back to CPU generation.\n");
         }
 
         return true;
@@ -332,6 +134,11 @@ namespace SasamiRenderer
         m_sourceLdrRgba8 = std::move(pixels);
         m_sourceHdrRgb.clear();
         m_sourceCubemapFaceRgba8.clear();
+    }
+
+    void Skybox::AdoptPregeneratedIblData(IblSystem::GeneratedIblData&& data)
+    {
+        m_iblSystem.AdoptPregeneratedIblData(std::move(data));
     }
 
     void Skybox::SetLdrCubemapFaceData(std::vector<std::vector<uint8_t>> facePixels, UINT width, UINT height)
@@ -590,11 +397,18 @@ namespace SasamiRenderer
             return;
         }
 
+        // Derive MipLevels from the uploaded resource itself so both single-mip callers
+        // (LDR cubemap / fallback) and the HDR skybox's full mip chain share this path correctly.
+        UINT mipLevels = 1;
+        if (ID3D12Resource* resource = m_skyboxTexture.Get()) {
+            mipLevels = resource->GetDesc().MipLevels;
+        }
+
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srvDesc.Format = format;
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
-        srvDesc.TextureCube.MipLevels = 1;
+        srvDesc.TextureCube.MipLevels = mipLevels;
         srvDesc.TextureCube.MostDetailedMip = 0;
         srvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
         m_device->CreateShaderResourceView(m_skyboxTexture, &srvDesc, m_skyboxSrvCpu);
@@ -606,18 +420,69 @@ namespace SasamiRenderer
             return false;
         }
 
+        // Timed because the equirect->cube conversion and the mip chain are built on the
+        // CPU: the cost scales with the square of the base face size, so this number is
+        // what decides whether the result is worth caching on disk.
+        ScopedPerfTimer perfTimer("Skybox::UploadHdrSkyboxTexture");
+
+        const UINT skyFaceSize = 2048;
+
+        // Prefer the GPU compute cubemap generator: it produces the same 2048^2 base face
+        // with a full mip chain far faster than the CPU box-filter path below. Only try it
+        // again after it has failed once, so a failing GPU path doesn't retry (and re-log) every frame;
+        // the CPU path remains as a fallback for devices/drivers where the compute path fails.
+        if (!m_gpuCubemapGenerationFailed) {
+            if (m_cubemapGenerator.IsReady() &&
+                m_cubemapGenerator.Generate(cmdList, m_hdrEquirectPixels, m_hdrEquirectWidth, m_hdrEquirectHeight,
+                                            skyFaceSize, m_skyboxTexture)) {
+                PublishSkyboxSrv(DXGI_FORMAT_R16G16B16A16_FLOAT);
+                m_skyboxTextureUploaded = true;
+                m_skyboxTextureIsHdr = true;
+                return true;
+            }
+            // Latch the failure so a device/driver that cannot run the compute path
+            // does not re-attempt (and re-log) it on every upload; a successful run
+            // leaves the latch clear so reloading the environment still uses the GPU.
+            m_gpuCubemapGenerationFailed = true;
+        }
+
+        // The HDR source equirect is 4K, so a 256^2 base cube face was far too coarse and
+        // produced a visibly blurry/aliased sky. Raise the base face to 2048^2 and build a
+        // full box-filtered mip chain down to 1x1 so the GPU samples an appropriately
+        // filtered level instead of always hitting the sharpest mip. Generation is CPU-side,
+        // so this trades startup time and VRAM (RGBA16F, 6 faces * 2048^2 + mips ~= 270MB)
+        // for reduced sampling cost and aliasing.
         std::vector<std::vector<float>> skyFaces;
-        const UINT skyFaceSize = 256;
         RendererMathUtility::GenerateSkyCubemapFromEquirect(m_hdrEquirectPixels,
                                                             m_hdrEquirectWidth,
                                                             m_hdrEquirectHeight,
                                                             skyFaceSize,
                                                             skyFaces);
-        if (!CreateTextureCubeFromFloatFacesWithMips(*m_device,
+
+        UINT mipLevels = 1;
+        for (UINT size = skyFaceSize; size > 1; size >>= 1) {
+            ++mipLevels;
+        }
+
+        // Subresource order must match ResourceUploadUtility::CreateTextureCubeFromFloatFacesWithMips
+        // (same convention used by IblSystem's prefilter cubemap upload): face-major, mip-minor,
+        // index = mip + face * mipLevels.
+        std::vector<std::vector<float>> skySubresources(static_cast<size_t>(mipLevels) * 6u);
+        for (UINT face = 0; face < 6; ++face) {
+            skySubresources[0 + face * mipLevels] = std::move(skyFaces[face]);
+            for (UINT mip = 1; mip < mipLevels; ++mip) {
+                const UINT prevSize = skyFaceSize >> (mip - 1);
+                RendererMathUtility::DownsampleFaceRgbaFloat(skySubresources[(mip - 1) + face * mipLevels],
+                                                             prevSize,
+                                                             skySubresources[mip + face * mipLevels]);
+            }
+        }
+
+        if (!ResourceUploadUtility::CreateTextureCubeFromFloatFacesWithMips(*m_device,
                                                      cmdList,
-                                                     skyFaces,
+                                                     skySubresources,
                                                      skyFaceSize,
-                                                     1,
+                                                     mipLevels,
                                                      m_skyboxTexture,
                                                      m_skyboxTextureUpload)) {
             return false;
@@ -637,7 +502,7 @@ namespace SasamiRenderer
             return false;
         }
 
-        if (!CreateTextureCubeFromRgba8Faces(*m_device,
+        if (!ResourceUploadUtility::CreateTextureCubeFromRgba8Faces(*m_device,
                                              cmdList,
                                              m_sourceCubemapFaceRgba8,
                                              m_sourceWidth,
@@ -674,7 +539,7 @@ namespace SasamiRenderer
             facePixels[i].assign(fallbackFaces[i], fallbackFaces[i] + 4);
         }
 
-        if (!CreateTextureCubeFromRgba8Faces(*m_device,
+        if (!ResourceUploadUtility::CreateTextureCubeFromRgba8Faces(*m_device,
                                              cmdList,
                                              facePixels,
                                              1,

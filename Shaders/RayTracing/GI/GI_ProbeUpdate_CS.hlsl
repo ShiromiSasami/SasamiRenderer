@@ -12,6 +12,8 @@
 //
 
 #include "RayTracing/SWRT/SWRT_Common.hlsli"
+#include "RayTracing/SWRT/SWRT_LightTypes.hlsli"
+#include "Effects/Sky/ProceduralSky/ProceduralSky.hlsli"
 
 // --------------------------------------------------------------------------
 // Per-dispatch constants  (b0)
@@ -44,6 +46,12 @@ cbuffer GIUpdateCB : register(b0)
     // Ambient / sky colour
     float3 g_ambientColor;
     uint   g_probesThisDispatch;  // Number of probes updated in this call
+
+    // Punctual lights (point + spot) contributing to probe-ray hit shading.
+    uint   g_pointLightCount;
+    uint   g_spotLightCount;
+    uint   g_giCbPad2;
+    uint   g_giCbPad3;
 }
 
 // --------------------------------------------------------------------------
@@ -53,13 +61,22 @@ cbuffer GIUpdateCB : register(b0)
 RWStructuredBuffer<float4> g_probeSHOutput : register(u0);
 
 // --------------------------------------------------------------------------
+// Punctual light buffers (t6/t7) — same layout as SWRT reflection/ReSTIR.
+// --------------------------------------------------------------------------
+StructuredBuffer<GpuPointLightRT> g_pointLights : register(t6);
+StructuredBuffer<GpuSpotLightRT>  g_spotLights  : register(t7);
+
+// --------------------------------------------------------------------------
 // Groupshared reduction buffer
-// 9 SH coefficients ﾃ・64 threads ﾃ・float3 = 9 ﾃ・64 ﾃ・12 = 6912 bytes < 32 KB limit
+// Radiance:  9 SH coeffs x 64 threads x float3 = 9*64*12 = 6912 bytes
+// Distance:  9 SH coeffs x 64 threads x float  = 9*64*4  = 2304 bytes
+// Total 9216 bytes < 32 KB limit
 // --------------------------------------------------------------------------
 static const uint kRaysPerProbe = 64u;
 static const uint kSHCount      = 9u;
 
 groupshared float3 gs_shAccum[kSHCount][kRaysPerProbe];
+groupshared float  gs_distAccum[kSHCount][kRaysPerProbe];
 
 // --------------------------------------------------------------------------
 // SH projection helpers
@@ -92,7 +109,10 @@ void CS_ProbeUpdate(
     // ---- Initialise groupshared ----
     [unroll]
     for (uint ci = 0; ci < kSHCount; ++ci)
-        gs_shAccum[ci][threadId] = float3(0, 0, 0);
+    {
+        gs_shAccum[ci][threadId]   = float3(0, 0, 0);
+        gs_distAccum[ci][threadId] = 0.0f;
+    }
     GroupMemoryBarrierWithGroupSync();
 
     // ---- Trace ray for this thread ----
@@ -113,10 +133,11 @@ void CS_ProbeUpdate(
 
     if (!hit.hit)
     {
-        // Sky contribution 窶・scale with vertical component for horizon gradient
-        float upness   = saturate(dir.y * 0.5f + 0.5f);
-        float skyScale = lerp(0.4f, 1.6f, upness);
-        radiance = g_ambientColor * (g_ambientIntensity * skyScale);
+        // Analytical sky (same ProceduralSky.hlsli model SWRT reflection uses for its miss
+        // shading) instead of a flat ambient colour, so probes pick up horizon/zenith
+        // gradient and sun glow instead of a uniform constant.
+        radiance = ComputeSkyColor(dir, normalize(g_dirLightDir), g_dirLightColor, g_dirLightIntensity)
+                 * g_ambientIntensity;
     }
     else
     {
@@ -128,16 +149,27 @@ void CS_ProbeUpdate(
         radiance = ShadePBRAtHit(hitPos, hitNorm, -dir, mat);
     }
 
-    // Project onto SH  (weight = 4ﾏ / N for uniform sphere sampling)
+    // Directional visibility signal: how far this probe can see along `dir`
+    // before hitting a surface. Misses read as "open" (g_maxTraceDistance),
+    // so the resulting SH-fit distance field naturally rejects blend
+    // contributions across occluders (floors/ceilings/walls) at sample time.
+    float dist = hit.hit ? hit.t : g_maxTraceDistance;
+
+    // Project onto SH (weight = 4*pi / N for uniform sphere sampling)
     const float kWeight = 4.0f * 3.14159265f / float(kRaysPerProbe);
     float3 contrib[kSHCount];
-    [unroll] for (uint c = 0; c < kSHCount; ++c) contrib[c] = float3(0, 0, 0);
+    float  distContrib[kSHCount];
+    [unroll] for (uint c = 0; c < kSHCount; ++c) { contrib[c] = float3(0, 0, 0); distContrib[c] = 0.0f; }
     ProjectOntoSH(dir, radiance * kWeight, contrib);
+    ProjectOntoSH(dir, dist * kWeight, distContrib);
 
     // Write per-thread contribution into groupshared
     [unroll]
     for (uint ci = 0; ci < kSHCount; ++ci)
-        gs_shAccum[ci][threadId] = contrib[ci];
+    {
+        gs_shAccum[ci][threadId]   = contrib[ci];
+        gs_distAccum[ci][threadId] = distContrib[ci];
+    }
     GroupMemoryBarrierWithGroupSync();
 
     // ---- Parallel reduction tree (log2(64) = 6 passes) ----
@@ -148,7 +180,10 @@ void CS_ProbeUpdate(
         {
             [unroll]
             for (uint ci = 0; ci < kSHCount; ++ci)
-                gs_shAccum[ci][threadId] += gs_shAccum[ci][threadId + stride];
+            {
+                gs_shAccum[ci][threadId]   += gs_shAccum[ci][threadId + stride];
+                gs_distAccum[ci][threadId] += gs_distAccum[ci][threadId + stride];
+            }
         }
         GroupMemoryBarrierWithGroupSync();
     }
@@ -160,10 +195,13 @@ void CS_ProbeUpdate(
         [unroll]
         for (uint ci = 0; ci < kSHCount; ++ci)
         {
-            float3 newVal  = gs_shAccum[ci][0];
-            float3 oldVal  = g_probeSHOutput[base + ci].rgb;
-            float3 blended = lerp(oldVal, newVal, g_emaAlpha);
-            g_probeSHOutput[base + ci] = float4(blended, 0.0f);
+            float3 newRad   = gs_shAccum[ci][0];
+            float  newDist  = gs_distAccum[ci][0];
+            float3 oldRad   = g_probeSHOutput[base + ci].rgb;
+            float  oldDist  = g_probeSHOutput[base + ci].w;
+            float3 blendedRad  = lerp(oldRad,  newRad,  g_emaAlpha);
+            float  blendedDist = lerp(oldDist, newDist, g_emaAlpha);
+            g_probeSHOutput[base + ci] = float4(blendedRad, blendedDist);
         }
     }
 }

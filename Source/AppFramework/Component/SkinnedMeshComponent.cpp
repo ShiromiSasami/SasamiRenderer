@@ -5,46 +5,12 @@
 #include <utility>
 
 #include "ApplicationResourcePaths.h"
-#include "Loader/AssetLoader.h"
+#include "Component/CpuTextureLoader.h"
+#include "Foundation/Math/MathUtil.h"
 #include "Loader/ModelLoader.h"
 
 namespace SasamiRenderer
 {
-    namespace
-    {
-        static std::atomic<uint64_t> g_cpuSkinnedTextureIdCounter{ 1000000 };
-
-        std::shared_ptr<const CpuTextureRgba8> LoadCpuTextureFromPath(const std::string& path)
-        {
-            if (path.empty()) {
-                return nullptr;
-            }
-
-            UINT textureWidth = 0;
-            UINT textureHeight = 0;
-            std::vector<uint8_t> pixels;
-            const std::wstring resolvedPath = ApplicationResourcePaths::ResolveAssetPathWide(path);
-            if (!AssetLoader::LoadRgba8ViaWIC(resolvedPath, pixels, textureWidth, textureHeight)) {
-                return nullptr;
-            }
-
-            auto textureData = std::make_shared<CpuTextureRgba8>();
-            textureData->id = g_cpuSkinnedTextureIdCounter.fetch_add(1, std::memory_order_relaxed);
-            textureData->pixels = std::move(pixels);
-            textureData->width = textureWidth;
-            textureData->height = textureHeight;
-            return textureData;
-        }
-
-        bool IsTransparentMaterial(const SurfaceMaterial& material)
-        {
-            static constexpr float kOpaqueAlphaThreshold = 0.999f;
-            static constexpr float kTransparentTransmissionThreshold = 0.01f;
-            return material.baseColor[3] < kOpaqueAlphaThreshold ||
-                   material.transmission > kTransparentTransmissionThreshold;
-        }
-    }
-
     bool SkinnedMeshComponent::LoadModel(const std::string& assetPath, ModelFormat format)
     {
         Clear();
@@ -68,15 +34,21 @@ namespace SasamiRenderer
             m_animationController.Update(0.0f);
         }
 
+        static std::atomic<uint64_t> sNextSkinnedMeshId{ 1 };
+
         m_meshes.reserve(modelData.meshes.size());
         for (size_t i = 0; i < modelData.meshes.size(); ++i) {
             SkinnedMeshSource source;
             source.mesh = std::move(modelData.meshes[i]);
+            source.meshId = sNextSkinnedMeshId.fetch_add(1, std::memory_order_relaxed);
             if (i < modelData.albedoTexturePaths.size()) {
                 source.albedoTexture = LoadCpuTextureFromPath(modelData.albedoTexturePaths[i]);
             }
             if (i < modelData.occlusionTexturePaths.size()) {
                 source.occlusionTexture = LoadCpuTextureFromPath(modelData.occlusionTexturePaths[i]);
+            }
+            if (i < modelData.normalTexturePaths.size()) {
+                source.normalTexture = LoadCpuTextureFromPath(modelData.normalTexturePaths[i]);
             }
             if (i < modelData.materials.size()) {
                 source.material = modelData.materials[i];
@@ -97,9 +69,11 @@ namespace SasamiRenderer
         for (const auto& source : m_meshes) {
             SkinnedRenderProxy proxy;
             proxy.mesh = source.mesh;
+            proxy.meshId = source.meshId;
             proxy.animController = &m_animationController;
             proxy.albedoTexture = source.albedoTexture;
             proxy.occlusionTexture = source.occlusionTexture;
+            proxy.normalTexture = source.normalTexture;
             proxy.material = source.material;
             proxy.transparent = source.transparent;
             for (int i = 0; i < 16; ++i) {
@@ -139,14 +113,19 @@ namespace SasamiRenderer
         m_model[14] = z;
     }
 
+    void SkinnedMeshComponent::SetUniformScale(float scale)
+    {
+        m_model[0]  = scale;
+        m_model[5]  = scale;
+        m_model[10] = scale;
+    }
+
     void SkinnedMeshComponent::Clear()
     {
         m_meshes.clear();
         m_skeleton.reset();
         m_animationController = AnimationController{};
         m_debugAssetPath.clear();
-        for (int i = 0; i < 16; ++i) {
-            m_model[i] = (i % 5 == 0) ? 1.0f : 0.0f;
-        }
+        Math::Identity4x4(m_model);
     }
 }

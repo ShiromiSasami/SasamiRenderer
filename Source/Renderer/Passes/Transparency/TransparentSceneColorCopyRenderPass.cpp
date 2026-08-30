@@ -12,6 +12,11 @@ namespace SasamiRenderer
     void TransparentSceneColorCopyRenderPass::Setup(RenderGraphBuilder& builder) const
     {
         builder.Read("SceneColor");
+        // TransmissionSceneColor is imported into the graph (RendererFrameGraph.cpp), but it is
+        // written here via CopySceneColorForTransmission's own CopyResource barriers (not
+        // UseColorTarget), and those barriers already restore PIXEL_SHADER_RESOURCE afterward.
+        // This Write() only records the dependency edge for TransparentCompositeRenderPass's
+        // Read("TransmissionSceneColor"); the graph never needs to transition it here.
         builder.Write("TransmissionSceneColor");
         builder.DependsOnPrevious();
     }
@@ -21,11 +26,6 @@ namespace SasamiRenderer
         if (!context.IsSatisfied()) {
             DebugLog("TransparentSceneColorCopyRenderPass::Execute: runtime context is invalid.\n");
             return false;
-        }
-
-        const RenderPassExecutionPolicy& policy = context.Policy();
-        if (!policy.executeOpaqueFamilyPasses && !policy.executeLightingFamilyPasses) {
-            return true;
         }
 
         const RenderPassExecutionServices& services = context.Services();

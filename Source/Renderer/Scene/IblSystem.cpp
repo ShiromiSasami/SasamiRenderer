@@ -13,236 +13,6 @@
 #include "Renderer/Utilities/ResourceUploadUtility.h"
 #include "d3dx12.h"
 
-namespace
-{
-    // Upload a float-face cubemap (R16G16B16A16_FLOAT) to an existing or newly created GPU texture.
-    // If preCreated is non-null the caller already allocated the GPU texture (via RHI); creation is skipped.
-    static bool CreateTextureCubeFromFloatFacesWithMips(SasamiRenderer::IRHIDevice& device,
-                                                        SasamiRenderer::CommandList* cmdList,
-                                                        const std::vector<std::vector<float>>& subresourcesRgba,
-                                                        UINT baseFaceSize,
-                                                        UINT mipLevels,
-                                                        SasamiRenderer::Resource& outTexture,
-                                                        SasamiRenderer::Resource& outUpload,
-                                                        SasamiRenderer::Resource* preCreated = nullptr)
-    {
-        if (!cmdList || baseFaceSize == 0 || mipLevels == 0 ||
-            subresourcesRgba.size() != static_cast<size_t>(mipLevels) * 6u) {
-            return false;
-        }
-
-        SasamiRenderer::Resource* gpuTexture = preCreated;
-        if (!gpuTexture) {
-            D3D12_RESOURCE_DESC texDesc = {};
-            texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-            texDesc.Width = baseFaceSize;
-            texDesc.Height = baseFaceSize;
-            texDesc.DepthOrArraySize = 6;
-            texDesc.MipLevels = static_cast<UINT16>(mipLevels);
-            texDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-            texDesc.SampleDesc.Count = 1;
-            texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-            texDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-            CD3DX12_HEAP_PROPERTIES defaultHeapProps(D3D12_HEAP_TYPE_DEFAULT);
-            HRESULT hr = device.CreateCommittedResource(&defaultHeapProps,
-                                                        D3D12_HEAP_FLAG_NONE,
-                                                        &texDesc,
-                                                        D3D12_RESOURCE_STATE_COPY_DEST,
-                                                        nullptr,
-                                                        outTexture);
-            if (FAILED(hr)) {
-                return false;
-            }
-            gpuTexture = &outTexture;
-        }
-
-        const UINT subresourceCount = mipLevels * 6;
-        const UINT64 uploadBufferSize = GetRequiredIntermediateSize(gpuTexture->Get(), 0, subresourceCount);
-        CD3DX12_HEAP_PROPERTIES uploadHeapProps(D3D12_HEAP_TYPE_UPLOAD);
-        CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
-        HRESULT hr = device.CreateCommittedResource(&uploadHeapProps,
-                                                    D3D12_HEAP_FLAG_NONE,
-                                                    &bufferDesc,
-                                                    D3D12_RESOURCE_STATE_GENERIC_READ,
-                                                    nullptr,
-                                                    outUpload);
-        if (FAILED(hr)) {
-            if (!preCreated) outTexture.Reset();
-            return false;
-        }
-
-        std::vector<std::vector<uint16_t>> halfData(subresourceCount);
-        std::vector<D3D12_SUBRESOURCE_DATA> subresourceDescs(subresourceCount);
-        for (UINT face = 0; face < 6; ++face) {
-            for (UINT mip = 0; mip < mipLevels; ++mip) {
-                const UINT subresourceIndex = mip + face * mipLevels;
-                const UINT size = ((baseFaceSize >> mip) > 0) ? (baseFaceSize >> mip) : 1u;
-                const auto& src = subresourcesRgba[subresourceIndex];
-                if (src.size() != static_cast<size_t>(size) * size * 4u) {
-                    return false;
-                }
-
-                auto& dst = halfData[subresourceIndex];
-                dst.resize(src.size());
-                for (size_t i = 0; i < src.size(); ++i) {
-                    dst[i] = SasamiRenderer::Math::FloatToHalf(src[i]);
-                }
-
-                subresourceDescs[subresourceIndex].pData = dst.data();
-                subresourceDescs[subresourceIndex].RowPitch = static_cast<LONG_PTR>(size) * 8;
-                subresourceDescs[subresourceIndex].SlicePitch = subresourceDescs[subresourceIndex].RowPitch * size;
-            }
-        }
-
-        UpdateSubresources(cmdList->Get(), gpuTexture->Get(), outUpload.Get(), 0, 0, subresourceCount, subresourceDescs.data());
-        // Readable by both PS (skybox, IBL lighting) and non-PS shaders (SWRT compute IBL fallback).
-        auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(gpuTexture->Get(),
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-        cmdList->ResourceBarrier(1, &barrier);
-        return true;
-    }
-
-    // Upload float RGBA data as a 2D texture (R16G16B16A16_FLOAT).
-    // If preCreated is non-null the caller already allocated the GPU texture (via RHI); creation is skipped.
-    static bool CreateTexture2DFromFloatRgba(SasamiRenderer::IRHIDevice& device,
-                                             SasamiRenderer::CommandList* cmdList,
-                                             const std::vector<float>& pixels,
-                                             UINT width,
-                                             UINT height,
-                                             SasamiRenderer::Resource& outTexture,
-                                             SasamiRenderer::Resource& outUpload,
-                                             SasamiRenderer::Resource* preCreated = nullptr)
-    {
-        if (!cmdList || width == 0 || height == 0 ||
-            pixels.size() != static_cast<size_t>(width) * height * 4u) {
-            return false;
-        }
-
-        SasamiRenderer::Resource* gpuTexture = preCreated;
-        if (!gpuTexture) {
-            D3D12_RESOURCE_DESC texDesc = {};
-            texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-            texDesc.Width = width;
-            texDesc.Height = height;
-            texDesc.DepthOrArraySize = 1;
-            texDesc.MipLevels = 1;
-            texDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-            texDesc.SampleDesc.Count = 1;
-            texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-            texDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-            CD3DX12_HEAP_PROPERTIES defaultHeapProps(D3D12_HEAP_TYPE_DEFAULT);
-            HRESULT hr = device.CreateCommittedResource(&defaultHeapProps,
-                                                        D3D12_HEAP_FLAG_NONE,
-                                                        &texDesc,
-                                                        D3D12_RESOURCE_STATE_COPY_DEST,
-                                                        nullptr,
-                                                        outTexture);
-            if (FAILED(hr)) {
-                return false;
-            }
-            gpuTexture = &outTexture;
-        }
-
-        const UINT64 uploadBufferSize = GetRequiredIntermediateSize(gpuTexture->Get(), 0, 1);
-        CD3DX12_HEAP_PROPERTIES uploadHeapProps(D3D12_HEAP_TYPE_UPLOAD);
-        CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
-        HRESULT hr = device.CreateCommittedResource(&uploadHeapProps,
-                                                    D3D12_HEAP_FLAG_NONE,
-                                                    &bufferDesc,
-                                                    D3D12_RESOURCE_STATE_GENERIC_READ,
-                                                    nullptr,
-                                                    outUpload);
-        if (FAILED(hr)) {
-            if (!preCreated) outTexture.Reset();
-            return false;
-        }
-
-        std::vector<uint16_t> halfPixels(pixels.size());
-        for (size_t i = 0; i < pixels.size(); ++i) {
-            halfPixels[i] = SasamiRenderer::Math::FloatToHalf(pixels[i]);
-        }
-
-        D3D12_SUBRESOURCE_DATA subresource = {};
-        subresource.pData = halfPixels.data();
-        subresource.RowPitch = static_cast<LONG_PTR>(width) * 8;
-        subresource.SlicePitch = subresource.RowPitch * height;
-        UpdateSubresources(cmdList->Get(), gpuTexture->Get(), outUpload.Get(), 0, 0, 1, &subresource);
-
-        auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(gpuTexture->Get(),
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-        cmdList->ResourceBarrier(1, &barrier);
-        return true;
-    }
-
-    // Upload RGBA8 face data as a cubemap texture (R8G8B8A8_UNORM). Used for fallback (1×1) textures.
-    static bool CreateTextureCubeFromRgba8Faces(SasamiRenderer::IRHIDevice& device,
-                                                SasamiRenderer::CommandList* cmdList,
-                                                const std::vector<std::vector<uint8_t>>& facePixels,
-                                                UINT width,
-                                                UINT height,
-                                                SasamiRenderer::Resource& outTexture,
-                                                SasamiRenderer::Resource& outUpload)
-    {
-        if (!cmdList || facePixels.size() != 6 || width == 0 || height == 0) {
-            return false;
-        }
-
-        D3D12_RESOURCE_DESC texDesc = {};
-        texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        texDesc.Width = width;
-        texDesc.Height = height;
-        texDesc.DepthOrArraySize = 6;
-        texDesc.MipLevels = 1;
-        texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        texDesc.SampleDesc.Count = 1;
-        texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        texDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-        CD3DX12_HEAP_PROPERTIES defaultHeapProps(D3D12_HEAP_TYPE_DEFAULT);
-        HRESULT hr = device.CreateCommittedResource(&defaultHeapProps,
-                                                    D3D12_HEAP_FLAG_NONE,
-                                                    &texDesc,
-                                                    D3D12_RESOURCE_STATE_COPY_DEST,
-                                                    nullptr,
-                                                    outTexture);
-        if (FAILED(hr)) {
-            return false;
-        }
-
-        const UINT64 uploadBufferSize = GetRequiredIntermediateSize(outTexture.Get(), 0, 6);
-        CD3DX12_HEAP_PROPERTIES uploadHeapProps(D3D12_HEAP_TYPE_UPLOAD);
-        CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
-        hr = device.CreateCommittedResource(&uploadHeapProps,
-                                            D3D12_HEAP_FLAG_NONE,
-                                            &bufferDesc,
-                                            D3D12_RESOURCE_STATE_GENERIC_READ,
-                                            nullptr,
-                                            outUpload);
-        if (FAILED(hr)) {
-            outTexture.Reset();
-            return false;
-        }
-
-        std::vector<D3D12_SUBRESOURCE_DATA> subresources(6);
-        for (int i = 0; i < 6; ++i) {
-            subresources[i].pData = facePixels[static_cast<size_t>(i)].data();
-            subresources[i].RowPitch = static_cast<LONG_PTR>(width) * 4;
-            subresources[i].SlicePitch = subresources[i].RowPitch * height;
-        }
-        UpdateSubresources(cmdList->Get(), outTexture.Get(), outUpload.Get(), 0, 0, 6, subresources.data());
-
-        auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(outTexture.Get(),
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-        cmdList->ResourceBarrier(1, &barrier);
-        return true;
-    }
-}
-
 namespace SasamiRenderer
 {
     bool IblSystem::Initialize(IRHIDevice& device, const AllocateSrvRangeCallback& allocateSrvRange)
@@ -258,6 +28,7 @@ namespace SasamiRenderer
         m_iblSrv    = iblGpu;
 
         const UINT inc = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        m_iblSpecularSrv = { iblGpu.ptr + static_cast<UINT64>(inc) };
         CpuDescriptorHandle preCpu  = { iblCpu.ptr + static_cast<SIZE_T>(inc) };
         CpuDescriptorHandle brdfCpu = { iblCpu.ptr + static_cast<SIZE_T>(inc) * 2 };
         Resource nullResource;
@@ -325,6 +96,14 @@ namespace SasamiRenderer
         m_cpuPrefilterMipLevels = 0;
         m_cpuBrdfLutWidth       = 0;
         m_cpuBrdfLutHeight      = 0;
+        m_pregenerated.reset();
+    }
+
+    void IblSystem::AdoptPregeneratedIblData(GeneratedIblData&& data)
+    {
+        m_pregenerated = std::make_unique<GeneratedIblData>(std::move(data));
+        m_iblUploaded        = false;
+        m_iblUploadAttempted = false;
     }
 
     void IblSystem::EnsureTexturesUploaded(CommandList* cmdList,
@@ -337,6 +116,31 @@ namespace SasamiRenderer
             return;
         }
         m_iblUploadAttempted = true;
+
+        if (m_pregenerated) {
+            std::unique_ptr<GeneratedIblData> pregenerated = std::move(m_pregenerated);
+            m_pregenerated.reset();
+
+            if (UploadGeneratedIblTextures(cmdList, *pregenerated)) {
+                const float maxMip = (pregenerated->prefilterMipLevels > 0u)
+                    ? static_cast<float>(pregenerated->prefilterMipLevels - 1u)
+                    : 0.0f;
+                ApplyIblMetadata(true, maxMip, true, pregenerated->diffuseShCoefficients);
+                m_iblUploaded = true;
+                return;
+            }
+
+            Reset();
+            m_iblUploadAttempted = true;
+            DebugLog("Pregenerated IBL upload failed. Fallback IBL will be used.\n");
+
+            if (!UploadFallbackIblTextures(cmdList)) {
+                return;
+            }
+            ApplyIblMetadata(false, 0.0f, false, nullptr);
+            m_iblUploaded = true;
+            return;
+        }
 
         if (equirectLoaded) {
             GeneratedIblData generated{};
@@ -365,7 +169,7 @@ namespace SasamiRenderer
     bool IblSystem::GenerateHdrIblData(const std::vector<float>& equirectPixels,
                                         UINT equirectWidth,
                                         UINT equirectHeight,
-                                        GeneratedIblData& outData) const
+                                        GeneratedIblData& outData)
     {
         if (equirectPixels.empty() || equirectWidth == 0 || equirectHeight == 0) {
             return false;
@@ -432,7 +236,7 @@ namespace SasamiRenderer
             }
             irrPreCreated = m_iblIrradianceCompat;
         }
-        const bool irrOk = CreateTextureCubeFromFloatFacesWithMips(*m_device,
+        const bool irrOk = ResourceUploadUtility::CreateTextureCubeFromFloatFacesWithMips(*m_device,
                                                                     cmdList,
                                                                     data.irradianceFaces,
                                                                     irradianceSize,
@@ -460,7 +264,7 @@ namespace SasamiRenderer
             }
             prePreCreated = m_iblPrefilterCompat;
         }
-        const bool preOk = CreateTextureCubeFromFloatFacesWithMips(*m_device,
+        const bool preOk = ResourceUploadUtility::CreateTextureCubeFromFloatFacesWithMips(*m_device,
                                                                     cmdList,
                                                                     data.prefilterSubresources,
                                                                     prefilterSize,
@@ -488,7 +292,7 @@ namespace SasamiRenderer
             }
             brdfPreCreated = m_iblBrdfLutCompat;
         }
-        const bool brdfOk = CreateTexture2DFromFloatRgba(*m_device,
+        const bool brdfOk = ResourceUploadUtility::CreateTexture2DFromFloatRgba(*m_device,
                                                           cmdList,
                                                           data.brdfLutPixels,
                                                           brdfLutSize,
@@ -529,12 +333,12 @@ namespace SasamiRenderer
         prefilterFaces.assign(6, std::vector<uint8_t>(blackFace, blackFace + 4));
         brdfPixels.assign(midFace, midFace + 4);
 
-        if (!CreateTextureCubeFromRgba8Faces(*m_device, cmdList,
+        if (!ResourceUploadUtility::CreateTextureCubeFromRgba8Faces(*m_device, cmdList,
                                              irradianceFaces, 1, 1,
                                              m_iblIrradianceTexture, m_iblIrradianceUpload)) {
             return false;
         }
-        if (!CreateTextureCubeFromRgba8Faces(*m_device, cmdList,
+        if (!ResourceUploadUtility::CreateTextureCubeFromRgba8Faces(*m_device, cmdList,
                                              prefilterFaces, 1, 1,
                                              m_iblPrefilterTexture, m_iblPrefilterUpload)) {
             return false;
@@ -557,6 +361,7 @@ namespace SasamiRenderer
         }
 
         const UINT inc = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        m_iblSpecularSrv = { m_iblSrv.ptr + static_cast<UINT64>(inc) };
         CpuDescriptorHandle irrCpu  = m_iblSrvCpu;
         CpuDescriptorHandle preCpu  = { m_iblSrvCpu.ptr + static_cast<SIZE_T>(inc) };
         CpuDescriptorHandle brdfCpu = { m_iblSrvCpu.ptr + static_cast<SIZE_T>(inc) * 2 };

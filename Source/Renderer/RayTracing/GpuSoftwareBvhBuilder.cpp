@@ -4,6 +4,8 @@
 #define NOMINMAX
 #include "Renderer/RayTracing/GpuSoftwareRayTracer.h"
 
+#include "Foundation/Jobs/ParallelFor.h"
+
 #include <algorithm>
 #include <cfloat>
 #include <cstdint>
@@ -15,7 +17,6 @@ namespace SasamiRenderer
     namespace
     {
         // ---- Lightweight math types ----
-        struct F2 { float x = 0.f, y = 0.f; };
         struct F3 { float x = 0.f, y = 0.f, z = 0.f; };
 
         F3 operator+(const F3& a, const F3& b) { return { a.x+b.x, a.y+b.y, a.z+b.z }; }
@@ -269,9 +270,11 @@ namespace SasamiRenderer
         m_meshAccelerations.clear();
         m_meshAccelerations.resize(m_scene.meshes.size());
 
-        for (size_t meshIdx=0; meshIdx<m_scene.meshes.size(); ++meshIdx) {
-            BuildMeshBvhSah((uint32_t)meshIdx);
-        }
+        // BuildMeshBvhSah(i) only writes m_meshAccelerations[i] and only reads m_scene, so
+        // per-mesh builds are independent and safe to fan out. ParallelFor blocks this
+        // calling thread (a JobSystem worker, since RebuildAccelerationStructures now runs
+        // as an async build job) while the per-mesh sub-jobs run on the other workers.
+        ParallelFor(static_cast<uint32_t>(m_scene.meshes.size()), [this](uint32_t i){ BuildMeshBvhSah(i); });
 
         // Compute flat offsets for GPU buffer layout
         uint32_t nodeOff=0, triOff=0;

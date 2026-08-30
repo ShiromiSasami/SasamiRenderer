@@ -45,6 +45,7 @@ namespace SasamiRenderer
                      uint32_t renderWidth,
                      uint32_t renderHeight,
                      const std::function<bool(const LightSystem::ShadowPassContext&)>& softwareShadowCallback,
-                     const DrawCallback& drawCallback) const;
+                     const DrawCallback& drawCallback,
+                     const DrawCallback& drawSkinnedCallback) const;
     };
 }

@@ -6,32 +6,21 @@
 #include <limits>
 
 #include "Foundation/Tools/DebugOutput.h"
+#include "Foundation/Tools/ScopedPerfTimer.h"
 #include "Foundation/Math/MathUtil.h"
 #include "Renderer/Scene/MeshBuffer.h"
 #include "Renderer/Scene/SkinnedMeshBuffer.h"
 #include "Renderer/RayTracing/RayTracingScene.h"
 #include "Renderer/RayTracing/DxrRayTracer.h"
 #include "Renderer/Utilities/ResourceUploadUtility.h"
+#include "Renderer/Utilities/TextureMipChain.h"
+#include "Renderer/Utilities/HashUtility.h"
 #include "Renderer/Structures/Skeleton.h"
 
 namespace SasamiRenderer
 {
     namespace
     {
-        void HashBytes(uint64_t& hash, const void* data, size_t size)
-        {
-            static constexpr uint64_t kFnvOffsetBasis = 14695981039346656037ull;
-            static constexpr uint64_t kFnvPrime       = 1099511628211ull;
-            if (hash == 0ull) {
-                hash = kFnvOffsetBasis;
-            }
-            const auto* bytes = static_cast<const uint8_t*>(data);
-            for (size_t i = 0; i < size; ++i) {
-                hash ^= static_cast<uint64_t>(bytes[i]);
-                hash *= kFnvPrime;
-            }
-        }
-
         uint64_t ComputeMeshGeometryHash(const Mesh& mesh)
         {
             uint64_t hash = 0ull;
@@ -147,6 +136,7 @@ namespace SasamiRenderer
         m_dxrRayTracer       = params.dxrRayTracer;
         m_srvAllocFn         = params.srvAllocFn;
         m_srvIndexFn         = params.srvIndexFn;
+        m_deferredUploadSink = params.deferredUploadSink;
     }
 
     Texture* SceneSubmitter::CreateTextureFromRgba8Data(const CpuTextureRgba8& src,
@@ -157,7 +147,15 @@ namespace SasamiRenderer
             return nullptr;
         }
 
-        if (m_device &&
+        // The backend RHI creation path below blocks with a per-texture WaitForGPU inside
+        // CreateRhiTexture2DFromRgba8. When the caller supplied a batch command list
+        // (D3D12 compatibility surface), prefer the batched staging path further down:
+        // it executes once per submit and retires staging via fence instead of stalling.
+        const bool preferBatchedUpload =
+            cmdList != nullptr &&
+            m_device && m_device->GetCapabilities().supportsD3D12CompatibilitySurface;
+
+        if (m_device && !preferBatchedUpload &&
             m_device->GetCapabilities().supportsRhiResourceCreation &&
             m_device->GetCapabilities().supportsRhiDescriptorCreation) {
             RhiTextureHandle rhiTexture = m_device->CreateRhiTexture2DFromRgba8(src.width,
@@ -185,6 +183,8 @@ namespace SasamiRenderer
                     RhiTextureViewDesc srvDesc{};
                     srvDesc.format = RhiFormat::R8G8B8A8UNorm;
                     srvDesc.dimension = RhiTextureViewDimension::Texture2D;
+                    // The RHI texture creation API cannot yet accept mip levels, so this
+                    // path remains single-mip. DX12 always uses the batched upload path.
                     srvDesc.mipLevelCount = 1;
                     srvDesc.arrayLayerCount = 1;
                     if (m_device->CreateRhiShaderResourceView(rhiTexture, srvDesc, rhiCpu)) {
@@ -208,15 +208,29 @@ namespace SasamiRenderer
             return nullptr;
         }
 
+        // Material textures are sampled as R8G8B8A8_UNORM without an sRGB decode
+        // (OpaqueGBuffer_PS.hlsl), so the chain is filtered in stored space to match the
+        // hardware's own bilinear filtering of those values.
+        const TextureMipChain mipChain =
+            TextureMipChainBuilder::BuildRgba8(src.pixels.data(), src.width, src.height, false);
+
         Resource texture;
         Resource upload;
-        if (!ResourceUploadUtility::CreateTexture2DFromRgba8(*m_device,
-                                                             cmdList,
-                                                             src.pixels.data(),
-                                                             src.width,
-                                                             src.height,
-                                                             texture,
-                                                             upload)) {
+        UINT uploadedMipCount = 1;
+        if (mipChain.IsValid() &&
+            ResourceUploadUtility::CreateTexture2DFromRgba8WithMips(*m_device,
+                                                                    cmdList,
+                                                                    mipChain,
+                                                                    texture,
+                                                                    upload)) {
+            uploadedMipCount = mipChain.LevelCount();
+        } else if (!ResourceUploadUtility::CreateTexture2DFromRgba8(*m_device,
+                                                                     cmdList,
+                                                                     src.pixels.data(),
+                                                                     src.width,
+                                                                     src.height,
+                                                                     texture,
+                                                                     upload)) {
             return nullptr;
         }
 
@@ -230,7 +244,7 @@ namespace SasamiRenderer
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srvDesc.Format                  = DXGI_FORMAT_R8G8B8A8_UNORM;
         srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
-        srvDesc.Texture2D.MipLevels     = 1;
+        srvDesc.Texture2D.MipLevels     = uploadedMipCount;
         m_device->CreateShaderResourceView(texture, &srvDesc, cpu);
 
         auto texObj = std::make_unique<Texture>();
@@ -238,7 +252,7 @@ namespace SasamiRenderer
         texObj->srv          = gpu;
         texObj->desc.width   = src.width;
         texObj->desc.height  = src.height;
-        texObj->desc.mips    = 1;
+        texObj->desc.mips    = uploadedMipCount;
         texObj->desc.format  = DXGI_FORMAT_R8G8B8A8_UNORM;
 
         uploads.push_back(upload);
@@ -246,7 +260,8 @@ namespace SasamiRenderer
         return m_sceneTextures.back().get();
     }
 
-    Texture* SceneSubmitter::ResolveSceneTexture(const std::shared_ptr<const CpuTextureRgba8>& textureData)
+    Texture* SceneSubmitter::ResolveSceneTexture(const std::shared_ptr<const CpuTextureRgba8>& textureData,
+                                                 TextureUploadBatch& batch)
     {
         if (!textureData) {
             return nullptr;
@@ -261,37 +276,57 @@ namespace SasamiRenderer
             return cached->second;
         }
 
-        std::vector<Resource> uploads;
         Texture* texture = nullptr;
-        CommandAllocator uploadAlloc;
-        CommandList      uploadList;
-        HRESULT hr = S_OK;
         if (m_device->GetCapabilities().supportsD3D12CompatibilitySurface) {
-            hr = m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, uploadAlloc);
-            if (SUCCEEDED(hr)) {
-                hr = m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, uploadAlloc, nullptr, uploadList);
+            if (!batch.open) {
+                HRESULT hr = m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, batch.allocator);
+                if (SUCCEEDED(hr)) {
+                    hr = m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, batch.allocator, nullptr, batch.commandList);
+                }
+                if (FAILED(hr)) {
+                    return nullptr;
+                }
+                batch.open = true;
             }
-            if (FAILED(hr)) {
-                return nullptr;
-            }
-            texture = CreateTextureFromRgba8Data(*textureData, &uploadList, uploads);
+            texture = CreateTextureFromRgba8Data(*textureData, &batch.commandList, batch.uploads);
         } else {
+            std::vector<Resource> uploads;
             texture = CreateTextureFromRgba8Data(*textureData, nullptr, uploads);
         }
         if (!texture) {
             return nullptr;
         }
 
-        if (m_device->GetCapabilities().supportsD3D12CompatibilitySurface) {
-            uploadList->Close();
-            ID3D12CommandList* lists[] = { uploadList.Get() };
-            m_device->GetCommandQueue()->ExecuteCommandLists(1, lists);
-            m_device->WaitForGPU();
-            uploads.clear();
-        }
-
         m_textureCache[textureId] = texture;
         return texture;
+    }
+
+    void SceneSubmitter::FlushTextureUploadBatch(TextureUploadBatch& batch)
+    {
+        if (!batch.open) {
+            return;
+        }
+
+        batch.commandList->Close();
+        if (batch.uploads.empty()) {
+            // Nothing was recorded (e.g. every miss failed) — drop the batch silently.
+            batch.open = false;
+            return;
+        }
+        ID3D12CommandList* lists[] = { batch.commandList.Get() };
+        m_device->GetCommandQueue()->ExecuteCommandLists(1, lists);
+
+        const size_t textureCount = batch.uploads.size();
+        if (m_deferredUploadSink) {
+            m_deferredUploadSink(std::move(batch.allocator), std::move(batch.commandList), std::move(batch.uploads));
+        } else {
+            m_device->WaitForGPU();
+        }
+        const std::string perfMessage = "[Perf] SceneSubmitter: texture upload batch: " +
+                                        std::to_string(textureCount) + " textures, 1 submit\n";
+        DebugLog(perfMessage.c_str());
+
+        batch.open = false;
     }
 
     void SceneSubmitter::SubmitRenderProxies(std::vector<RenderProxy>&& proxies)
@@ -309,18 +344,26 @@ namespace SasamiRenderer
             rayTracingMeshBuckets[meshHash].push_back(existingMeshIndex);
         }
 
+        TextureUploadBatch textureUploadBatch;
         for (auto& proxy : proxies) {
             const size_t meshIndex = m_meshes.size();
             m_meshes.push_back(std::move(proxy.mesh));
 
+            // Kept in lock-step with m_meshes (pushed once per mesh, same index) so the
+            // ray-tracing mesh bounds below can reuse it instead of recomputing.
+            MeshLocalBounds& localBounds = m_meshLocalBoundsCache.emplace_back();
+            localBounds.valid = !m_meshes.back().vertices.empty();
+            ComputeMeshBounds(m_meshes.back(), localBounds.min, localBounds.max);
+
             DrawItem item;
             item.meshIndex = meshIndex;
-            Texture* resolvedAlbedoTexture = ResolveSceneTexture(proxy.albedoTexture);
+            Texture* resolvedAlbedoTexture = ResolveSceneTexture(proxy.albedoTexture, textureUploadBatch);
             item.texture = resolvedAlbedoTexture;
             if (!resolvedAlbedoTexture && proxy.albedoTexture) {
                 DebugLog("SceneSubmitter::SubmitRenderProxies: failed to resolve albedo texture. White fallback is bound.\n");
             }
-            item.occlusionTexture = ResolveSceneTexture(proxy.occlusionTexture);
+            item.occlusionTexture = ResolveSceneTexture(proxy.occlusionTexture, textureUploadBatch);
+            item.normalTexture    = ResolveSceneTexture(proxy.normalTexture, textureUploadBatch);
             item.usesMetallicRoughnessTexture = proxy.usesMetallicRoughnessTexture;
             item.material    = proxy.material;
             item.transparent = proxy.transparent;
@@ -329,6 +372,11 @@ namespace SasamiRenderer
                 DebugLog("SceneSubmitter::SubmitRenderProxies: failed to resolve occlusion texture. AO fallback is bound.\n");
             }
             std::memcpy(item.model, proxy.model, sizeof(item.model));
+            if (localBounds.valid) {
+                TransformBounds(item.model, localBounds.min, localBounds.max,
+                                item.worldBoundsMin, item.worldBoundsMax);
+                item.hasWorldBounds = true;
+            }
             m_drawItems.push_back(item);
 
             const uint64_t meshHash = ComputeMeshGeometryHash(m_meshes.back());
@@ -352,7 +400,11 @@ namespace SasamiRenderer
                 rayTracingMeshIndex = static_cast<uint32_t>(m_rayTracingScene->meshes.size());
                 RayTracingMesh rayTracingMesh{};
                 rayTracingMesh.mesh = m_meshes.back();
-                ComputeMeshBounds(rayTracingMesh.mesh, rayTracingMesh.localBoundsMin, rayTracingMesh.localBoundsMax);
+                // Reuse the just-computed local bounds cache entry for this same mesh
+                // (m_meshLocalBoundsCache stays in lock-step with m_meshes) instead of
+                // walking its vertices a second time.
+                std::memcpy(rayTracingMesh.localBoundsMin, localBounds.min, sizeof(rayTracingMesh.localBoundsMin));
+                std::memcpy(rayTracingMesh.localBoundsMax, localBounds.max, sizeof(rayTracingMesh.localBoundsMax));
                 m_rayTracingScene->meshes.push_back(std::move(rayTracingMesh));
                 rayTracingMeshBuckets[meshHash].push_back(rayTracingMeshIndex);
             }
@@ -386,26 +438,75 @@ namespace SasamiRenderer
             m_rayTracingScene->instances.push_back(std::move(rayTracingInstance));
         }
 
-        m_meshBuffer->Upload(*m_device, m_meshes);
+        const size_t texturesUploaded = textureUploadBatch.uploads.size();
+        FlushTextureUploadBatch(textureUploadBatch);
+
+        m_meshBuffer->Upload(*m_device, m_meshes, m_deferredUploadSink ? &m_deferredUploadSink : nullptr);
+
+        // Fence-deferred retirement lets small submits overlap with rendering, but a
+        // bulk submit (a full scene streaming in) queues far more copy work than the
+        // frame ring can outrun: the coordinator recycles a command allocator after N
+        // frames, which then trips "allocator reset before previous executions
+        // completed" and takes the device down. Draining once here costs a single stall
+        // on the frame the scene lands and keeps the per-texture stalls gone.
+        constexpr size_t kBulkUploadTextureThreshold = 64u;
+        constexpr size_t kBulkUploadMeshThreshold = 256u;
+        if (texturesUploaded >= kBulkUploadTextureThreshold || m_meshes.size() >= kBulkUploadMeshThreshold) {
+            m_device->WaitForGPU();
+        }
+
         ++m_rayTracingScene->geometryVersion;
         ++m_rayTracingScene->materialVersion;
         ++m_rayTracingScene->instanceVersion;
-        m_dxrRayTracer->UpdateScene(*m_device, *m_rayTracingScene);
+        // DXR acceleration structures are rebuilt lazily right before hardware RT is
+        // dispatched (Renderer's executeRayTracing service), keyed off the version bumps
+        // above. Rebuilding here would stall scene submission (WaitForGPU + full BLAS
+        // rebuild) even when the DXR path is never used.
+
+        // See EnsureMeshletsBuilt: meshlets are rebuilt lazily on first actual use of the
+        // mesh-shader path, not here. Marking the flag is free; scenes that never touch
+        // that path never pay the Build()/Upload() cost.
+        m_meshletsDirty = true;
     }
 
     void SceneSubmitter::ClearSubmittedRenderProxies()
     {
         m_drawItems.clear();
         m_meshes.clear();
+        m_meshLocalBoundsCache.clear();
         m_rayTracingScene->Clear();
-        if (m_device) {
-            m_dxrRayTracer->UpdateScene(*m_device, *m_rayTracingScene);
+        // See SubmitRenderProxies: DXR AS teardown/rebuild happens lazily at dispatch
+        // time. A stale TLAS is harmless while hardware RT is not being dispatched.
+
+        m_meshletBuffer.Release();
+        m_meshletsDirty = true;
+    }
+
+    const MeshletBuffer& SceneSubmitter::EnsureMeshletsBuilt()
+    {
+        if (!m_meshletsDirty) {
+            return m_meshletBuffer;
         }
+        m_meshletsDirty = false;
+
+        if (!m_device || m_meshes.empty()) {
+            m_meshletBuffer.Release();
+            return m_meshletBuffer;
+        }
+
+        // Build() is a linear pass over already-parsed indices/vertices (bounding-sphere
+        // math only, no triangulation/dedup), so this is expected to be cheap relative to
+        // model loading -- but it is still real work done exactly once per mesh-list
+        // change, hence the timer.
+        ScopedPerfTimer timer("SceneSubmitter::EnsureMeshletsBuilt");
+        m_meshletBuffer.Build(m_meshes);
+        m_meshletBuffer.Upload(*m_device);
+        return m_meshletBuffer;
     }
 
     void SceneSubmitter::SubmitSkinnedRenderProxies(std::vector<SkinnedRenderProxy>&& proxies,
-                                                    RendererFrameCoordinator& frameCoord,
-                                                    RendererFrameCoordinator::FrameContext& frame)
+                                                    RendererFrameCoordinator* frameCoord,
+                                                    RendererFrameCoordinator::FrameContext* frame)
     {
         if (!m_device || !m_skinnedMeshBuffer) return;
         if (proxies.empty()) {
@@ -413,42 +514,79 @@ namespace SasamiRenderer
             return;
         }
 
-        // Ensure enough bone CB slots for this frame's skinned objects
-        frameCoord.EnsureBoneBuffers(frame, static_cast<UINT>(proxies.size()));
+        // Ensure enough bone CB slots for this frame's skinned objects (DX12 CB-upload path only)
+        if (frameCoord && frame) {
+            frameCoord->EnsureBoneBuffers(*frame, static_cast<UINT>(proxies.size()));
+        }
+
+        // Skinning happens on the GPU (bone CB), so the vertex/index data is
+        // static per mesh set. Re-uploading every frame released buffers the
+        // GPU was still reading (in-flight destroy -> device fault), so only
+        // rebuild the GPU buffers when the mesh set identity actually changes.
+        bool meshSetChanged = m_residentSkinnedMeshIds.size() != proxies.size();
+        if (!meshSetChanged) {
+            for (size_t i = 0; i < proxies.size(); ++i) {
+                if (m_residentSkinnedMeshIds[i] != proxies[i].meshId) { meshSetChanged = true; break; }
+            }
+        }
 
         m_skinnedDrawItems.clear();
-        m_skinnedMeshes.clear();
-        m_skinnedMeshes.reserve(proxies.size());
         m_skinnedDrawItems.reserve(proxies.size());
+        if (meshSetChanged) {
+            m_skinnedMeshes.clear();
+            m_skinnedMeshes.reserve(proxies.size());
+            m_residentSkinnedMeshIds.clear();
+            m_residentSkinnedMeshIds.reserve(proxies.size());
+        }
 
+        TextureUploadBatch textureUploadBatch;
         for (auto& proxy : proxies) {
-            const size_t meshIndex = m_skinnedMeshes.size();
-            m_skinnedMeshes.push_back(std::move(proxy.mesh));
+            if (meshSetChanged) {
+                m_residentSkinnedMeshIds.push_back(proxy.meshId);
+                m_skinnedMeshes.push_back(std::move(proxy.mesh));
+            }
 
             SkinnedDrawItem item;
-            item.meshIndex       = meshIndex;
-            item.texture         = ResolveSceneTexture(proxy.albedoTexture);
-            item.occlusionTexture = ResolveSceneTexture(proxy.occlusionTexture);
+            item.meshIndex       = m_skinnedDrawItems.size();
+            item.texture         = ResolveSceneTexture(proxy.albedoTexture, textureUploadBatch);
+            item.occlusionTexture = ResolveSceneTexture(proxy.occlusionTexture, textureUploadBatch);
+            item.normalTexture   = ResolveSceneTexture(proxy.normalTexture, textureUploadBatch);
             item.material        = proxy.material;
             item.transparent     = proxy.transparent;
             std::memcpy(item.model, proxy.model, sizeof(item.model));
 
-            // Evaluate bone matrices and upload to per-frame CB
+            // Evaluate bone matrices, then either upload to the DX12 per-frame CB
+            // or stash the raw array for a native backend to bind directly.
             if (proxy.animController && proxy.animController->HasSkeleton()) {
                 float boneMatrices[Skeleton::kMaxBones * 16];
                 proxy.animController->GetBoneMatrices(boneMatrices);
-                item.boneMatricesCbGpu = frameCoord.PushBoneCB(frame, boneMatrices);
+                if (frameCoord && frame) {
+                    item.boneMatricesCbGpu = frameCoord->PushBoneCB(*frame, boneMatrices);
+                } else {
+                    item.boneMatricesNative.assign(boneMatrices, boneMatrices + Skeleton::kMaxBones * 16);
+                }
             }
 
             m_skinnedDrawItems.push_back(item);
         }
 
-        m_skinnedMeshBuffer->Upload(*m_device, m_skinnedMeshes);
+        FlushTextureUploadBatch(textureUploadBatch);
+
+        if (meshSetChanged) {
+            // Replacing a live buffer set: wait for in-flight frames that may
+            // still reference the old vertex/index buffers before Upload()
+            // releases them. Rare (model load/unload only).
+            if (!m_skinnedMeshBuffer->Items().empty()) {
+                m_device->WaitForGPU();
+            }
+            m_skinnedMeshBuffer->Upload(*m_device, m_skinnedMeshes, m_deferredUploadSink ? &m_deferredUploadSink : nullptr);
+        }
     }
 
     void SceneSubmitter::ClearSkinnedRenderProxies()
     {
         m_skinnedDrawItems.clear();
         m_skinnedMeshes.clear();
+        m_residentSkinnedMeshIds.clear();
     }
 }

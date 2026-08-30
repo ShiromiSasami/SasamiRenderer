@@ -8,22 +8,6 @@ float3 FresnelSchlick(float cosTheta, float3 F0)
     return F0 + (1.0f - F0) * pow(saturate(1.0f - cosTheta), 5.0f);
 }
 
-float GGX_D(float NdotH, float roughness)
-{
-    float a  = roughness * roughness;
-    float a2 = a * a;
-    float d  = (NdotH * NdotH) * (a2 - 1.0f) + 1.0f;
-    return a2 / (3.14159265f * d * d);
-}
-
-float GGX_V(float NdotL, float NdotV, float roughness)
-{
-    float r = roughness + 1.0f; float k = (r * r) / 8.0f;
-    float gL = NdotL / (NdotL * (1.0f - k) + k);
-    float gV = NdotV / (NdotV * (1.0f - k) + k);
-    return gL * gV;
-}
-
 float3 EvalPBR(float3 N, float3 L, float3 V, float3 albedo, float roughness, float metallic,
                float3 lightRadiance)
 {

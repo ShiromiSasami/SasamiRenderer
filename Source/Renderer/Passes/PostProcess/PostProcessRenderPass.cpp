@@ -9,6 +9,7 @@ namespace SasamiRenderer
 
     void PostProcessRenderPass::Setup(RenderGraphBuilder& builder) const
     {
+        builder.Read("SceneColor");
         builder.Write("BackBuffer");
         builder.UseColorTarget("BackBuffer");
         builder.DependsOnPrevious();
@@ -24,14 +25,6 @@ namespace SasamiRenderer
             !services.toneMapSceneColor()) {
             return false;
         }
-        Execute({});
         return true;
-    }
-
-    void PostProcessRenderPass::Execute(const std::function<void()>& ensureSceneTargetsPrepared) const
-    {
-        if (ensureSceneTargetsPrepared) {
-            ensureSceneTargetsPrepared();
-        }
     }
 }

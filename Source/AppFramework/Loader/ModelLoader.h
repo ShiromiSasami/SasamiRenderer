@@ -17,6 +17,7 @@ namespace SasamiRenderer
     {
         Obj,
         Gltf,
+        Fbx,
         GltfStatic = Gltf, // Backward compatibility alias
     };
 
@@ -25,6 +26,7 @@ namespace SasamiRenderer
         Mesh mesh;
         std::string texturePath;
         std::string occlusionTexturePath;
+        std::string normalTexturePath;
         std::string metallicRoughnessTexturePath;
         SurfaceMaterial material;
         float localTransform[16] = {
@@ -42,6 +44,7 @@ namespace SasamiRenderer
     struct GltfMaterial {
         int baseColorTexture = -1; // index into textures array
         int occlusionTexture = -1; // index into textures array
+        int normalTexture = -1; // index into textures array
         int metallicRoughnessTexture = -1; // index into textures array
         int emissiveTexture = -1; // index into textures array
         float baseColorFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -55,6 +58,7 @@ namespace SasamiRenderer
         float thicknessFactor = 0.0f;
         float attenuationColor[3] = { 1.0f, 1.0f, 1.0f };
         float attenuationDistance = 1.0f;
+        bool doubleSided = false; // glTF "doubleSided" material property
     };
 
     struct GltfPrimitiveInstance {
@@ -88,6 +92,7 @@ namespace SasamiRenderer
         // Per-mesh texture paths (parallel to meshes)
         std::vector<std::string>       albedoTexturePaths;
         std::vector<std::string>       occlusionTexturePaths;
+        std::vector<std::string>       normalTexturePaths;
         std::vector<SurfaceMaterial>   materials;
     };
 

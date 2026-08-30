@@ -5,7 +5,6 @@
 
 namespace SasamiRenderer
 {
-    using RasterShaderMode         = RendererEnums::RasterShaderMode;
     using GBufferDebugView         = RendererEnums::GBufferDebugView;
     using RenderPathMode           = RendererEnums::RenderPathMode;
     using RayTracingPerformancePreset = RendererEnums::RayTracingPerformancePreset;
@@ -20,7 +19,6 @@ namespace SasamiRenderer
         bool     tessDebugColorsEnabled                             = false;  // flat-shade by per-patch hash color
         bool     meshletDebugViewEnabled                            = false;
         bool     useMeshShader                                      = true;  // default: Mesh Shader path
-        RasterShaderMode rasterShaderMode                          = RasterShaderMode::Lighting;
         RenderPathMode   renderPathMode                            = RenderPathMode::Raster;
         RayTracingPerformancePreset rayTracingPerformancePreset     = RayTracingPerformancePreset::Balanced;
         bool     rayTracingDynamicResolutionEnabled                 = true;
@@ -28,6 +26,14 @@ namespace SasamiRenderer
         bool     rasterSoftwareRayTracedDirectionalShadowEnabled    = false;
         bool     rasterSoftwareRayTracedReflectionEnabled           = false;
         bool     rasterScreenSpaceReflectionEnabled                 = false;
+        float    ssrMaxDistance                                     = 28.0f;   // world-space ray march distance
+        float    ssrThickness                                       = 0.18f;   // view-space depth thickness test
+        float    ssrStepCount                                       = 48.0f;   // max ray-march steps
+        float    ssrRoughnessCutoff                                 = 0.78f;   // roughness above which SSR fully fades out
+        float    ssrRefineSteps                                     = 4.0f;    // binary refinement steps
+        float    ssrEdgeFade                                        = 0.075f;  // screen edge fade width
+        float    ssrNormalOffset                                    = 0.02f;   // ray origin normal bias
+        float    ssrIntensity                                       = 1.0f;    // reflection intensity multiplier
         bool     rasterSoftwareRayTracedAmbientOcclusionEnabled     = false;
         AmbientOcclusionMode ambientOcclusionMode                  = AmbientOcclusionMode::Hybrid;
         RuntimeAmbientOcclusionMethod runtimeAoMethod              = RuntimeAmbientOcclusionMethod::SSAO;
@@ -50,11 +56,14 @@ namespace SasamiRenderer
         float    runtimeAoBias                                      = 0.025f;
         float    runtimeAoIntensity                                 = 1.0f;
         float    aoMinOcclusion                                     = 0.1f;  // UE MinOcclusion: 0=full black, >0=min brightness floor
+        float    aoDirectLightingStrength                           = 0.5f;  // AO applied to direct lighting (0=indirect only, 1=full, UE-style)
         float    runtimeAoThickness                                 = 0.15f;
         uint32_t runtimeAoQuality                                   = 1u;
         uint32_t swrtAoSampleCount                                  = 16u;
         GBufferDebugView gBufferDebugView                          = GBufferDebugView::FinalLit;
         float    hardwareRayTracingResolutionScale                  = 0.75f;
         bool     vsmBlurEnabled                                     = true;
+        float    exposure                                           = 1.3f;    // tone map exposure multiplier (ToneMap_PS.hlsl, pre-ACES)
+        bool     fxaaEnabled                                        = true;
     };
 }

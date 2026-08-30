@@ -4,6 +4,72 @@
 
 namespace SasamiRenderer
 {
+    bool RenderTargetPool::CreateOrResizeDepthBuffer(IRHIDevice& device, UINT width, UINT height)
+    {
+        D3D12_RESOURCE_DESC depthDesc = {};
+        depthDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        depthDesc.Width = width;
+        depthDesc.Height = height;
+        depthDesc.DepthOrArraySize = 1;
+        depthDesc.MipLevels = 1;
+        depthDesc.Format = DXGI_FORMAT_R32_TYPELESS;
+        depthDesc.SampleDesc.Count = 1;
+        depthDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        depthDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+        D3D12_CLEAR_VALUE clear = {};
+        clear.Format = DXGI_FORMAT_D32_FLOAT;
+        clear.DepthStencil.Depth = 1.0f;
+        clear.DepthStencil.Stencil = 0;
+
+        CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_DEFAULT);
+        m_depthHandle = {};
+        if (device.GetCapabilities().supportsRhiResourceCreation) {
+            RhiTextureDesc rhiDesc{};
+            rhiDesc.dimension = RhiResourceDimension::Texture2D;
+            rhiDesc.extent = { width, height, 1u };
+            rhiDesc.mipLevels = 1u;
+            rhiDesc.arrayLayers = 1u;
+            rhiDesc.format = RhiFormat::R32Typeless;
+            rhiDesc.usage = RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::DepthStencil;
+            rhiDesc.memoryUsage = RhiMemoryUsage::GpuOnly;
+            rhiDesc.initialState = RhiResourceState::DepthWrite;
+            m_depthHandle = device.CreateRhiTexture(rhiDesc);
+            if (Resource* compatibilityResource = device.GetD3D12CompatibilityResource(m_depthHandle)) {
+                m_depth = *compatibilityResource;
+            } else if (m_depthHandle.IsValid()) {
+                device.DestroyRhiResource(m_depthHandle);
+                m_depthHandle = {};
+            }
+        }
+        if (!m_depth.IsValid()) {
+            if (FAILED(device.CreateCommittedResource(&heap,
+                                                      D3D12_HEAP_FLAG_NONE,
+                                                      &depthDesc,
+                                                      D3D12_RESOURCE_STATE_DEPTH_WRITE,
+                                                      &clear,
+                                                      m_depth))) {
+                return false;
+            }
+        }
+
+        D3D12_DESCRIPTOR_HEAP_DESC dsvDesc = {};
+        dsvDesc.NumDescriptors = 1;
+        dsvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+        dsvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+        if (FAILED(device.CreateDescriptorHeap(dsvDesc, m_dsvHeap))) {
+            return false;
+        }
+
+        D3D12_DEPTH_STENCIL_VIEW_DESC dsv = {};
+        dsv.Format = DXGI_FORMAT_D32_FLOAT;
+        dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+        dsv.Flags = D3D12_DSV_FLAG_NONE;
+        device.CreateDepthStencilView(m_depth, &dsv, m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
+
+        return true;
+    }
+
     bool RenderTargetPool::Initialize(IRHIDevice& device, UINT width, UINT height, UINT bufferCount, const SrvAllocFn& allocFn)
     {
         m_device = &device;
@@ -284,66 +350,9 @@ namespace SasamiRenderer
 
         // Depth resource creation
         {
-            D3D12_RESOURCE_DESC depthDesc = {};
-            depthDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-            depthDesc.Width = width;
-            depthDesc.Height = height;
-            depthDesc.DepthOrArraySize = 1;
-            depthDesc.MipLevels = 1;
-            depthDesc.Format = DXGI_FORMAT_R32_TYPELESS;
-            depthDesc.SampleDesc.Count = 1;
-            depthDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-            depthDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-
-            D3D12_CLEAR_VALUE clear = {};
-            clear.Format = DXGI_FORMAT_D32_FLOAT;
-            clear.DepthStencil.Depth = 1.0f;
-            clear.DepthStencil.Stencil = 0;
-
-            CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_DEFAULT);
-            m_depthHandle = {};
-            if (device.GetCapabilities().supportsRhiResourceCreation) {
-                RhiTextureDesc rhiDesc{};
-                rhiDesc.dimension = RhiResourceDimension::Texture2D;
-                rhiDesc.extent = { width, height, 1u };
-                rhiDesc.mipLevels = 1u;
-                rhiDesc.arrayLayers = 1u;
-                rhiDesc.format = RhiFormat::R32Typeless;
-                rhiDesc.usage = RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::DepthStencil;
-                rhiDesc.memoryUsage = RhiMemoryUsage::GpuOnly;
-                rhiDesc.initialState = RhiResourceState::DepthWrite;
-                m_depthHandle = device.CreateRhiTexture(rhiDesc);
-                if (Resource* compatibilityResource = device.GetD3D12CompatibilityResource(m_depthHandle)) {
-                    m_depth = *compatibilityResource;
-                } else if (m_depthHandle.IsValid()) {
-                    device.DestroyRhiResource(m_depthHandle);
-                    m_depthHandle = {};
-                }
-            }
-            if (!m_depth.IsValid()) {
-                if (FAILED(device.CreateCommittedResource(&heap,
-                                                          D3D12_HEAP_FLAG_NONE,
-                                                          &depthDesc,
-                                                          D3D12_RESOURCE_STATE_DEPTH_WRITE,
-                                                          &clear,
-                                                          m_depth))) {
-                    return false;
-                }
-            }
-
-            D3D12_DESCRIPTOR_HEAP_DESC dsvDesc = {};
-            dsvDesc.NumDescriptors = 1;
-            dsvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-            dsvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-            if (FAILED(device.CreateDescriptorHeap(dsvDesc, m_dsvHeap))) {
+            if (!CreateOrResizeDepthBuffer(device, width, height)) {
                 return false;
             }
-
-            D3D12_DEPTH_STENCIL_VIEW_DESC dsv = {};
-            dsv.Format = DXGI_FORMAT_D32_FLOAT;
-            dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-            dsv.Flags = D3D12_DSV_FLAG_NONE;
-            device.CreateDepthStencilView(m_depth, &dsv, m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
 
             D3D12_SHADER_RESOURCE_VIEW_DESC depthSrvDesc = {};
             depthSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -366,65 +375,9 @@ namespace SasamiRenderer
         }
         m_dsvHeap.Reset();
 
-        D3D12_RESOURCE_DESC depthDesc = {};
-        depthDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        depthDesc.Width = width;
-        depthDesc.Height = height;
-        depthDesc.DepthOrArraySize = 1;
-        depthDesc.MipLevels = 1;
-        depthDesc.Format = DXGI_FORMAT_R32_TYPELESS;
-        depthDesc.SampleDesc.Count = 1;
-        depthDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        depthDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-
-        D3D12_CLEAR_VALUE clear = {};
-        clear.Format = DXGI_FORMAT_D32_FLOAT;
-        clear.DepthStencil.Depth = 1.0f;
-        clear.DepthStencil.Stencil = 0;
-
-        CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_DEFAULT);
-        if (device.GetCapabilities().supportsRhiResourceCreation) {
-            RhiTextureDesc rhiDesc{};
-            rhiDesc.dimension = RhiResourceDimension::Texture2D;
-            rhiDesc.extent = { width, height, 1u };
-            rhiDesc.mipLevels = 1u;
-            rhiDesc.arrayLayers = 1u;
-            rhiDesc.format = RhiFormat::R32Typeless;
-            rhiDesc.usage = RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::DepthStencil;
-            rhiDesc.memoryUsage = RhiMemoryUsage::GpuOnly;
-            rhiDesc.initialState = RhiResourceState::DepthWrite;
-            m_depthHandle = device.CreateRhiTexture(rhiDesc);
-            if (Resource* compatibilityResource = device.GetD3D12CompatibilityResource(m_depthHandle)) {
-                m_depth = *compatibilityResource;
-            } else if (m_depthHandle.IsValid()) {
-                device.DestroyRhiResource(m_depthHandle);
-                m_depthHandle = {};
-            }
-        }
-        if (!m_depth.IsValid()) {
-            if (FAILED(device.CreateCommittedResource(&heap,
-                                                      D3D12_HEAP_FLAG_NONE,
-                                                      &depthDesc,
-                                                      D3D12_RESOURCE_STATE_DEPTH_WRITE,
-                                                      &clear,
-                                                      m_depth))) {
-                return;
-            }
-        }
-
-        D3D12_DESCRIPTOR_HEAP_DESC dsvDesc = {};
-        dsvDesc.NumDescriptors = 1;
-        dsvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-        dsvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-        if (FAILED(device.CreateDescriptorHeap(dsvDesc, m_dsvHeap))) {
+        if (!CreateOrResizeDepthBuffer(device, width, height)) {
             return;
         }
-
-        D3D12_DEPTH_STENCIL_VIEW_DESC dsv = {};
-        dsv.Format = DXGI_FORMAT_D32_FLOAT;
-        dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-        dsv.Flags = D3D12_DSV_FLAG_NONE;
-        device.CreateDepthStencilView(m_depth, &dsv, m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
 
         if (m_depthSrvCpu.ptr != 0) {
             D3D12_SHADER_RESOURCE_VIEW_DESC depthSrvDesc = {};
@@ -726,18 +679,6 @@ namespace SasamiRenderer
         m_sceneColorWidth = 0u;
         m_sceneColorHeight = 0u;
 
-        CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_DEFAULT);
-        D3D12_RESOURCE_DESC desc{};
-        desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        desc.Width = width;
-        desc.Height = height;
-        desc.DepthOrArraySize = 1;
-        desc.MipLevels = 1;
-        desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        desc.SampleDesc.Count = 1;
-        desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-
         D3D12_CLEAR_VALUE clear{};
         clear.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
         clear.Color[0] = 0.2f;
@@ -745,33 +686,14 @@ namespace SasamiRenderer
         clear.Color[2] = 0.2f;
         clear.Color[3] = 1.0f;
 
-        if (device.GetCapabilities().supportsRhiResourceCreation) {
-            RhiTextureDesc rhiDesc{};
-            rhiDesc.dimension = RhiResourceDimension::Texture2D;
-            rhiDesc.extent = { width, height, 1u };
-            rhiDesc.mipLevels = 1u;
-            rhiDesc.arrayLayers = 1u;
-            rhiDesc.format = RhiFormat::R16G16B16A16Float;
-            rhiDesc.usage = RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::RenderTarget;
-            rhiDesc.memoryUsage = RhiMemoryUsage::GpuOnly;
-            rhiDesc.initialState = RhiResourceState::ShaderResource;
-            m_sceneColorHandle = device.CreateRhiTexture(rhiDesc);
-            if (Resource* compatibilityResource = device.GetD3D12CompatibilityResource(m_sceneColorHandle)) {
-                m_sceneColor = *compatibilityResource;
-            } else if (m_sceneColorHandle.IsValid()) {
-                device.DestroyRhiResource(m_sceneColorHandle);
-                m_sceneColorHandle = {};
-            }
-        }
-        if (!m_sceneColor.IsValid()) {
-            if (FAILED(device.CreateCommittedResource(&heap,
-                                                      D3D12_HEAP_FLAG_NONE,
-                                                      &desc,
-                                                      D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                      &clear,
-                                                      m_sceneColor))) {
-                return false;
-            }
+        if (!CreateCompatibleTexture(device, width, height, 1,
+                                     DXGI_FORMAT_R16G16B16A16_FLOAT, RhiFormat::R16G16B16A16Float,
+                                     RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::RenderTarget,
+                                     D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,
+                                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                     RhiResourceState::ShaderResource,
+                                     &clear, m_sceneColor, m_sceneColorHandle)) {
+            return false;
         }
 
         D3D12_RENDER_TARGET_VIEW_DESC rtvDesc{};
@@ -843,56 +765,24 @@ namespace SasamiRenderer
         m_gbufferWidth = 0u;
         m_gbufferHeight = 0u;
 
-        CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
         auto createGBufferTexture = [&](DXGI_FORMAT dxgiFormat,
                                         RhiFormat rhiFormat,
                                         Resource& texture,
                                         RhiTextureHandle& textureHandle,
                                         CpuDescriptorHandle rtv,
                                         CpuDescriptorHandle srvCpu) -> bool {
-            D3D12_RESOURCE_DESC desc{};
-            desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-            desc.Width            = width;
-            desc.Height           = height;
-            desc.DepthOrArraySize = 1;
-            desc.MipLevels        = 1;
-            desc.Format           = dxgiFormat;
-            desc.SampleDesc.Count = 1;
-            desc.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-            desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-
             D3D12_CLEAR_VALUE clearZero{};
             clearZero.Format = dxgiFormat;
             clearZero.Color[0] = clearZero.Color[1] = clearZero.Color[2] = clearZero.Color[3] = 0.0f;
 
-            if (device.GetCapabilities().supportsRhiResourceCreation) {
-                RhiTextureDesc rhiDesc{};
-                rhiDesc.dimension = RhiResourceDimension::Texture2D;
-                rhiDesc.extent = { width, height, 1u };
-                rhiDesc.mipLevels = 1u;
-                rhiDesc.arrayLayers = 1u;
-                rhiDesc.format = rhiFormat;
-                rhiDesc.usage = RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::RenderTarget;
-                rhiDesc.memoryUsage = RhiMemoryUsage::GpuOnly;
-                rhiDesc.initialState = RhiResourceState::ShaderResource;
-                textureHandle = device.CreateRhiTexture(rhiDesc);
-                if (Resource* compatibilityResource = device.GetD3D12CompatibilityResource(textureHandle)) {
-                    texture = *compatibilityResource;
-                } else if (textureHandle.IsValid()) {
-                    device.DestroyRhiResource(textureHandle);
-                    textureHandle = {};
-                }
-            }
-
-            if (!texture.IsValid()) {
-                if (FAILED(device.CreateCommittedResource(&defaultHeap,
-                                                          D3D12_HEAP_FLAG_NONE,
-                                                          &desc,
-                                                          D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                          &clearZero,
-                                                          texture))) {
-                    return false;
-                }
+            if (!CreateCompatibleTexture(device, width, height, 1,
+                                         dxgiFormat, rhiFormat,
+                                         RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::RenderTarget,
+                                         D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,
+                                         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                         RhiResourceState::ShaderResource,
+                                         &clearZero, texture, textureHandle)) {
+                return false;
             }
 
             D3D12_RENDER_TARGET_VIEW_DESC rtvDesc{};
@@ -995,17 +885,6 @@ namespace SasamiRenderer
         m_ssaoWidth = 0u;
         m_ssaoHeight = 0u;
 
-        D3D12_RESOURCE_DESC ssaoDesc{};
-        ssaoDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        ssaoDesc.Width = width;
-        ssaoDesc.Height = height;
-        ssaoDesc.DepthOrArraySize = 1;
-        ssaoDesc.MipLevels = 1;
-        ssaoDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        ssaoDesc.SampleDesc.Count = 1;
-        ssaoDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        ssaoDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-
         D3D12_CLEAR_VALUE ssaoClear{};
         ssaoClear.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
         ssaoClear.Color[0] = 1.0f;
@@ -1013,34 +892,14 @@ namespace SasamiRenderer
         ssaoClear.Color[2] = 1.0f;
         ssaoClear.Color[3] = 1.0f;
 
-        CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
-        if (device.GetCapabilities().supportsRhiResourceCreation) {
-            RhiTextureDesc rhiDesc{};
-            rhiDesc.dimension = RhiResourceDimension::Texture2D;
-            rhiDesc.extent = { width, height, 1u };
-            rhiDesc.mipLevels = 1u;
-            rhiDesc.arrayLayers = 1u;
-            rhiDesc.format = RhiFormat::R8G8B8A8UNorm;
-            rhiDesc.usage = RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::RenderTarget;
-            rhiDesc.memoryUsage = RhiMemoryUsage::GpuOnly;
-            rhiDesc.initialState = RhiResourceState::ShaderResource;
-            m_ssaoTextureHandle = device.CreateRhiTexture(rhiDesc);
-            if (Resource* compatibilityResource = device.GetD3D12CompatibilityResource(m_ssaoTextureHandle)) {
-                m_ssaoTexture = *compatibilityResource;
-            } else if (m_ssaoTextureHandle.IsValid()) {
-                device.DestroyRhiResource(m_ssaoTextureHandle);
-                m_ssaoTextureHandle = {};
-            }
-        }
-        if (!m_ssaoTexture.IsValid()) {
-            if (FAILED(device.CreateCommittedResource(&defaultHeap,
-                                                      D3D12_HEAP_FLAG_NONE,
-                                                      &ssaoDesc,
-                                                      D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                      &ssaoClear,
-                                                      m_ssaoTexture))) {
-                return false;
-            }
+        if (!CreateCompatibleTexture(device, width, height, 1,
+                                     DXGI_FORMAT_R8G8B8A8_UNORM, RhiFormat::R8G8B8A8UNorm,
+                                     RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::RenderTarget,
+                                     D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,
+                                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                     RhiResourceState::ShaderResource,
+                                     &ssaoClear, m_ssaoTexture, m_ssaoTextureHandle)) {
+            return false;
         }
 
         D3D12_RENDER_TARGET_VIEW_DESC rtvDesc{};
@@ -1056,35 +915,14 @@ namespace SasamiRenderer
         device.CreateShaderResourceView(m_ssaoTexture, &srvDesc, m_ssaoSrvCpu);
 
         if (m_ssaoBlurSrvCpu.ptr != 0 && m_ssaoBlurRtvCpu.ptr != 0) {
-            D3D12_RESOURCE_DESC blurDesc = ssaoDesc;
-            D3D12_CLEAR_VALUE blurClear = ssaoClear;
-            if (device.GetCapabilities().supportsRhiResourceCreation) {
-                RhiTextureDesc rhiDesc{};
-                rhiDesc.dimension = RhiResourceDimension::Texture2D;
-                rhiDesc.extent = { width, height, 1u };
-                rhiDesc.mipLevels = 1u;
-                rhiDesc.arrayLayers = 1u;
-                rhiDesc.format = RhiFormat::R8G8B8A8UNorm;
-                rhiDesc.usage = RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::RenderTarget;
-                rhiDesc.memoryUsage = RhiMemoryUsage::GpuOnly;
-                rhiDesc.initialState = RhiResourceState::ShaderResource;
-                m_ssaoBlurTextureHandle = device.CreateRhiTexture(rhiDesc);
-                if (Resource* compatibilityResource = device.GetD3D12CompatibilityResource(m_ssaoBlurTextureHandle)) {
-                    m_ssaoBlurTexture = *compatibilityResource;
-                } else if (m_ssaoBlurTextureHandle.IsValid()) {
-                    device.DestroyRhiResource(m_ssaoBlurTextureHandle);
-                    m_ssaoBlurTextureHandle = {};
-                }
-            }
-            if (!m_ssaoBlurTexture.IsValid()) {
-                if (FAILED(device.CreateCommittedResource(&defaultHeap,
-                                                          D3D12_HEAP_FLAG_NONE,
-                                                          &blurDesc,
-                                                          D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                          &blurClear,
-                                                          m_ssaoBlurTexture))) {
-                    return false;
-                }
+            if (!CreateCompatibleTexture(device, width, height, 1,
+                                         DXGI_FORMAT_R8G8B8A8_UNORM, RhiFormat::R8G8B8A8UNorm,
+                                         RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::RenderTarget,
+                                         D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,
+                                         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                         RhiResourceState::ShaderResource,
+                                         &ssaoClear, m_ssaoBlurTexture, m_ssaoBlurTextureHandle)) {
+                return false;
             }
 
             D3D12_RENDER_TARGET_VIEW_DESC blurRtvDesc{};

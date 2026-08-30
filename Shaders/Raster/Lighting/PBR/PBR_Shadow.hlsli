@@ -1,6 +1,8 @@
 #ifndef SASAMI_PBR_SHADOW_HLSLI
 #define SASAMI_PBR_SHADOW_HLSLI
 
+#include "Shared/Common/MicroShadowing.hlsli"
+
 // 16-tap Poisson disk kernel (van der Corput layout, unit disk).
 // Gives soft, alias-free shadow edges when combined with per-pixel rotation.
 static const float2 kPoisson16[16] =
@@ -104,6 +106,17 @@ float ShadowVisibilityVSM(float3 worldPos, float3 normal, float NdotL)
 
 float ShadowVisibility(float3 worldPos, float3 normal, float3 lightDir, float NdotL)
 {
+    // u_dirColor.w: directional shadow source mode (see LightCBData.h / LightSystem::
+    // SetDirectionalShadowSourceState). 2 = SWRT is enabled but its texture is not trustworthy
+    // this frame (never rendered / stale fallback bound at ShadowMapTex) - stay unshadowed
+    // rather than sample it. 0 (raster) and 1 (SWRT, trustworthy) both fall through unchanged:
+    // when SWRT is active, LightSystem::BuildStableDirectionalShadowPassContext already uploads
+    // cascadeCount == 1, so the existing cascade-selection loop below naturally samples cascade
+    // index 0 (the single SWRT-rendered light-space slice) without any further branching.
+    if (u_dirColor.w > 1.5) {
+        return 1.0;
+    }
+
     if (u_vsmParams.x > 1.5) {
         return ShadowVisibilityVSM(worldPos, normal, NdotL);
     }
@@ -145,14 +158,99 @@ float ShadowVisibility(float3 worldPos, float3 normal, float3 lightDir, float Nd
     return lerp(visibility, nextVisibility, t);
 }
 
-float ComputeDirectionalContactShadow(float3 worldPos, float3 normal, float3 lightDir)
+float SamplePointShadow(float3 worldPos, float3 normal, float3 lightPos, int shadowIndex)
+{
+    if (u_pointShadowParams.z <= 0.5 || shadowIndex < 0) {
+        return 1.0;
+    }
+    int clampedIndex = min(max(shadowIndex, 0), MAX_POINT_SHADOWS - 1);
+
+    float dist = length(worldPos - lightPos);
+    float3 biasedWorldPos = worldPos + normal * (u_pointShadowParams.y * dist);
+
+    float3 d = biasedWorldPos - lightPos;
+    float3 ad = abs(d);
+    uint faceIndex;
+    if (ad.x >= ad.y && ad.x >= ad.z) {
+        faceIndex = (d.x >= 0.0) ? 0 : 1;
+    } else if (ad.y >= ad.x && ad.y >= ad.z) {
+        faceIndex = (d.y >= 0.0) ? 2 : 3;
+    } else {
+        faceIndex = (d.z >= 0.0) ? 4 : 5;
+    }
+
+    float4 sc = mul(float4(biasedWorldPos, 1.0), u_pointLightVP[clampedIndex][faceIndex]);
+    sc.xyz /= sc.w;
+    float2 shadowUV = sc.xy * 0.5 + 0.5;
+    shadowUV.y = 1.0 - shadowUV.y;
+    float shadowDepth = sc.z - u_pointShadowParams.x; // depth bias
+
+    if (!(all(shadowUV >= 0.0) && all(shadowUV <= 1.0) && sc.w > 0.0)) {
+        return 1.0;
+    }
+
+    float sliceIndex = float(clampedIndex * 6 + faceIndex);
+    float texelSize = 1.0 / u_pointShadowParams.w;
+    float shadowSum = 0.0;
+    [unroll] for (int sy = -1; sy <= 1; ++sy)
+    [unroll] for (int sx = -1; sx <= 1; ++sx)
+    {
+        // Compare-then-average: SampleCmpLevelZero runs the depth test per texel and
+        // returns the filtered *occlusion*. Sampling the depth map with a plain linear
+        // sampler and thresholding afterwards would interpolate depth values instead,
+        // which is not PCF and cannot produce a correct penumbra.
+        // The ShadowCmp sampler clamps, so an edge tap stays on this cube face rather
+        // than folding around to the opposite side (the range test above only guards
+        // the centre tap, not these eight neighbours).
+        float2 tapUV = shadowUV + float2(sx, sy) * texelSize;
+        shadowSum += PointShadowMapTex.SampleCmpLevelZero(ShadowCmp, float3(tapUV, sliceIndex), shadowDepth).r;
+    }
+    return shadowSum / 9.0;
+}
+
+// Spot light shadow, 3x3 PCF. Shares one definition with the deferred path: this block
+// used to be copy-pasted into CookTorranceGGX_PS.hlsl and DeferredLighting_PS.hlsl, where
+// the two copies could silently drift apart.
+// SpotShadowMapTex / u_spotLightVP / u_spotShadowParams are declared by the including shader.
+float SampleSpotShadow(float3 worldPos, float3 normal, float distToLight, int shadowIndex)
+{
+    if (shadowIndex < 0 || u_spotShadowParams.z <= 0.5) {
+        return 1.0;
+    }
+    int clampedIndex = min(max(shadowIndex, 0), MAX_SPOT_SHADOWS - 1);
+
+    float3 biasedWorldPos = worldPos + normal * (u_spotShadowParams.y * distToLight);
+    float4 sc = mul(float4(biasedWorldPos, 1.0), u_spotLightVP[clampedIndex]);
+    sc.xyz /= sc.w;
+    float2 shadowUV = sc.xy * 0.5 + 0.5;
+    shadowUV.y = 1.0 - shadowUV.y;
+    float shadowDepth = sc.z - u_spotShadowParams.x; // depth bias
+
+    if (!(all(shadowUV >= 0.0) && all(shadowUV <= 1.0) && sc.w > 0.0)) {
+        return 1.0;
+    }
+
+    float texelSize = 1.0 / u_spotShadowParams.w;
+    float shadowSum = 0.0;
+    [unroll] for (int sy = -1; sy <= 1; ++sy)
+    [unroll] for (int sx = -1; sx <= 1; ++sx)
+    {
+        // Compare-then-average via the clamped comparison sampler; see SamplePointShadow
+        // above for why thresholding a linearly-filtered depth is not PCF.
+        float2 tapUV = shadowUV + float2(sx, sy) * texelSize;
+        shadowSum += SpotShadowMapTex.SampleCmpLevelZero(ShadowCmp, float3(tapUV, clampedIndex), shadowDepth).r;
+    }
+    return shadowSum / 9.0;
+}
+
+float ComputeContactShadowAlongRay(float3 worldPos, float3 normal, float3 rayDir, float maxDistanceIn)
 {
     if (u_contactShadowParams.x < 0.5 || u_reflectionParams.z <= 0.5 || u_reflectionParams.w <= 0.5) {
         return 1.0;
     }
 
     const int stepCount = max((int)u_contactShadowParams.w, 1);
-    const float maxDistance = max(u_contactShadowParams.y, 1e-3);
+    const float maxDistance = max(maxDistanceIn, 1e-3);
     const float thickness = max(u_contactShadowParams.z, 1e-4);
     const float stepLength = maxDistance / stepCount;
 
@@ -161,7 +259,7 @@ float ComputeDirectionalContactShadow(float3 worldPos, float3 normal, float3 lig
 
     [loop]
     for (int stepIndex = 1; stepIndex <= stepCount; ++stepIndex) {
-        float3 samplePos = rayOrigin + lightDir * (stepLength * stepIndex);
+        float3 samplePos = rayOrigin + rayDir * (stepLength * stepIndex);
         float4 sampleClip = mul(float4(samplePos, 1.0), u_cameraPV);
         if (sampleClip.w <= 1e-5) {
             continue;
@@ -184,6 +282,20 @@ float ComputeDirectionalContactShadow(float3 worldPos, float3 normal, float3 lig
     }
 
     return 1.0;
+}
+
+float ComputeDirectionalContactShadow(float3 worldPos, float3 normal, float3 lightDir)
+{
+    return ComputeContactShadowAlongRay(worldPos, normal, lightDir, u_contactShadowParams.y);
+}
+
+// Screen-space contact shadow for point/spot lights (UE contact shadows /
+// Filament punctual screenSpaceContactShadow): march toward the light position,
+// never past it.
+float ComputePunctualContactShadow(float3 worldPos, float3 normal, float3 lightDir, float distToLight)
+{
+    return ComputeContactShadowAlongRay(worldPos, normal, lightDir,
+                                        min(u_contactShadowParams.y, distToLight));
 }
 
 #endif // SASAMI_PBR_SHADOW_HLSLI

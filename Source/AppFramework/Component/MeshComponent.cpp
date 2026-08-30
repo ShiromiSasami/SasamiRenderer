@@ -1,49 +1,17 @@
 #include "Component/MeshComponent.h"
 
-#include <atomic>
-#include <cstdint>
-
 #include "ApplicationResourcePaths.h"
+#include "Component/CpuTextureLoader.h"
 #include "Foundation/Math/MathUtil.h"
-#include "Loader/AssetLoader.h"
 #include "Loader/ModelLoader.h"
 
 namespace SasamiRenderer
 {
     using Math::Mul4x4;
 
-    namespace
+    bool MeshComponent::LoadStaticMeshSources(const std::string& assetPath, ModelFormat format,
+                                              float uniformScale, std::vector<StaticMeshSource>& outMeshes)
     {
-        static std::atomic<uint64_t> g_cpuTextureIdCounter{ 1 };
-
-        static std::shared_ptr<const CpuTextureRgba8> LoadCpuTextureFromPath(const std::string& path)
-        {
-            if (path.empty()) {
-                return nullptr;
-            }
-
-            UINT textureWidth = 0;
-            UINT textureHeight = 0;
-            std::vector<uint8_t> pixels;
-            const std::wstring resolvedPath = ApplicationResourcePaths::ResolveAssetPathWide(path);
-            if (!AssetLoader::LoadRgba8ViaWIC(resolvedPath, pixels, textureWidth, textureHeight)) {
-                return nullptr;
-            }
-
-            auto textureData = std::make_shared<CpuTextureRgba8>();
-            textureData->id = g_cpuTextureIdCounter.fetch_add(1, std::memory_order_relaxed);
-            textureData->pixels = std::move(pixels);
-            textureData->width = textureWidth;
-            textureData->height = textureHeight;
-            return textureData;
-        }
-
-    }
-
-    bool MeshComponent::LoadModel(const std::string& assetPath, ModelFormat format, float uniformScale)
-    {
-        Clear();
-        m_debugAssetPath.clear();
         const std::string fullPath = ApplicationResourcePaths::ResolveAssetPathString(assetPath);
 
         StaticModelFormat loaderFormat = StaticModelFormat::Obj;
@@ -54,6 +22,9 @@ namespace SasamiRenderer
         case ModelFormat::Gltf:
             loaderFormat = StaticModelFormat::Gltf;
             break;
+        case ModelFormat::Fbx:
+            loaderFormat = StaticModelFormat::Fbx;
+            break;
         default:
             return false;
         }
@@ -63,12 +34,13 @@ namespace SasamiRenderer
             return false;
         }
 
-        m_staticMeshes.reserve(loadedMeshes.size());
+        outMeshes.reserve(outMeshes.size() + loadedMeshes.size());
         for (auto& loaded : loadedMeshes) {
             StaticMeshSource src;
             src.mesh = std::move(loaded.mesh);
             src.albedoTexture = LoadCpuTextureFromPath(loaded.texturePath);
             src.occlusionTexture = LoadCpuTextureFromPath(loaded.occlusionTexturePath);
+            src.normalTexture = LoadCpuTextureFromPath(loaded.normalTexturePath);
             src.material = loaded.material;
             if (!loaded.metallicRoughnessTexturePath.empty()) {
                 src.usesMetallicRoughnessTexture = true;
@@ -84,41 +56,61 @@ namespace SasamiRenderer
             for (int i = 0; i < 16; ++i) {
                 src.localTransform[i] = loaded.localTransform[i];
             }
-            m_staticMeshes.push_back(std::move(src));
+            outMeshes.push_back(std::move(src));
         }
 
-        if (!m_staticMeshes.empty()) {
-            m_debugAssetPath = assetPath;
-            m_loadedFormat = format;
-            m_loadedUniformScale = uniformScale;
+        return !loadedMeshes.empty();
+    }
+
+    void MeshComponent::AdoptLoadedMeshes(std::vector<StaticMeshSource>&& meshes, const std::string& assetPath,
+                                          ModelFormat format, float uniformScale)
+    {
+        Clear();
+        m_staticMeshes = std::move(meshes);
+        m_debugAssetPath = assetPath;
+        m_loadedFormat = format;
+        m_loadedUniformScale = uniformScale;
+        m_loadState = MeshLoadState::Ready;
+    }
+
+    bool MeshComponent::LoadModel(const std::string& assetPath, ModelFormat format, float uniformScale)
+    {
+        std::vector<StaticMeshSource> loadedMeshes;
+        if (!LoadStaticMeshSources(assetPath, format, uniformScale, loadedMeshes)) {
+            m_loadState = MeshLoadState::Failed;
+            return false;
         }
-        return !m_staticMeshes.empty();
+
+        AdoptLoadedMeshes(std::move(loadedMeshes), assetPath, format, uniformScale);
+        return true;
     }
 
     void MeshComponent::AddStaticMesh(Mesh mesh,
                                       const std::string& albedoTexturePath,
-                                      const std::string& occlusionTexturePath)
+                                      const std::string& occlusionTexturePath,
+                                      const std::string& normalTexturePath)
     {
-        AddStaticMesh(std::move(mesh), SurfaceMaterial{}, albedoTexturePath, occlusionTexturePath);
+        AddStaticMesh(std::move(mesh), SurfaceMaterial{}, albedoTexturePath, occlusionTexturePath, normalTexturePath);
     }
 
     void MeshComponent::AddStaticMesh(Mesh mesh,
                                       const SurfaceMaterial& material,
                                       const std::string& albedoTexturePath,
-                                      const std::string& occlusionTexturePath)
+                                      const std::string& occlusionTexturePath,
+                                      const std::string& normalTexturePath)
     {
         StaticMeshSource src;
         src.mesh = std::move(mesh);
         src.albedoTexture = LoadCpuTextureFromPath(albedoTexturePath);
         src.occlusionTexture = LoadCpuTextureFromPath(occlusionTexturePath);
+        src.normalTexture = LoadCpuTextureFromPath(normalTexturePath);
         src.material = material;
         m_staticMeshes.push_back(std::move(src));
+        m_loadState = MeshLoadState::Ready;
     }
 
     std::vector<RenderProxy> MeshComponent::BuildRenderProxies() const
     {
-        static constexpr float kOpaqueAlphaThreshold = 0.999f;
-        static constexpr float kTransparentTransmissionThreshold = 0.01f;
 
         std::vector<RenderProxy> proxies;
         proxies.reserve(m_staticMeshes.size());
@@ -128,11 +120,10 @@ namespace SasamiRenderer
             proxy.mesh = src.mesh;
             proxy.albedoTexture = src.albedoTexture;
             proxy.occlusionTexture = src.occlusionTexture;
+            proxy.normalTexture = src.normalTexture;
             proxy.usesMetallicRoughnessTexture = src.usesMetallicRoughnessTexture;
             proxy.material = src.material;
-            proxy.transparent =
-                (src.material.baseColor[3] < kOpaqueAlphaThreshold) ||
-                (src.material.transmission > kTransparentTransmissionThreshold);
+            proxy.transparent = IsTransparentMaterial(src.material);
             proxy.debugLabel = m_debugAssetPath;
             // Final model matrix for draw = local mesh transform * component transform.
             Mul4x4(src.localTransform, m_model, proxy.model);
@@ -165,9 +156,8 @@ namespace SasamiRenderer
     {
         m_staticMeshes.clear();
         m_debugAssetPath.clear();
-        for (int i = 0; i < 16; ++i) {
-            m_model[i] = (i % 5 == 0) ? 1.0f : 0.0f;
-        }
+        Math::Identity4x4(m_model);
+        m_loadState = MeshLoadState::Empty;
     }
 
     void MeshComponent::SetTranslation(float x, float y, float z)

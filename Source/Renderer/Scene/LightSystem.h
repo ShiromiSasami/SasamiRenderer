@@ -129,11 +129,40 @@ namespace SasamiRenderer
                                uint32_t renderWidth,
                                uint32_t renderHeight,
                                const DrawShadowCallback& drawCallback,
+                               const DrawShadowCallback& drawSkinnedCallback,
                                bool vsmBlurEnabled = true);
 
-        GpuDescriptorHandle GetShadowSrv()     const { return m_shadowMapManager.GetShadowSrv(); }
-        GpuDescriptorHandle GetSpotShadowSrv() const { return m_shadowMapManager.GetSpotShadowSrv(); }
-        GpuDescriptorHandle GetVsmSrv()        const { return m_shadowMapManager.GetVsmSrv(); }
+        // Renders spot-light and point-light (cube) shadow maps. Split out of ExecuteShadowPass
+        // so callers that replace only the directional cascade rendering (e.g. SWRT) can still
+        // invoke local-light shadow rendering, which must run regardless of the directional path.
+        void ExecuteLocalLightShadowPasses(CommandList* cmdList,
+                                           FrameResources& frame,
+                                           RenderPipelineStateCache& pipelineStateCache,
+                                           DescriptorHeap& srvHeap,
+                                           bool useTessellationPath,
+                                           const DrawShadowCallback& drawCallback,
+                                           const DrawShadowCallback& drawSkinnedCallback);
+
+        GpuDescriptorHandle GetShadowSrv()      const { return m_shadowMapManager.GetShadowSrv(); }
+        GpuDescriptorHandle GetSpotShadowSrv()  const { return m_shadowMapManager.GetSpotShadowSrv(); }
+        GpuDescriptorHandle GetPointShadowSrv() const { return m_shadowMapManager.GetPointShadowSrv(); }
+        GpuDescriptorHandle GetVsmSrv()         const { return m_shadowMapManager.GetVsmSrv(); }
+
+        // Lazily creates the raster directional shadow map resources/SRV without rendering into
+        // them. Used by Renderer::BuildRenderPassFrameInputs to guarantee a dimension-matching,
+        // validly-allocated fallback descriptor for ShadowMapTex when the SWRT directional shadow
+        // path is enabled but its texture is not trustworthy this frame (its content is never
+        // sampled in that case, see SetDirectionalShadowSourceState / dirColor.w mode 2).
+        bool EnsureDirectionalShadowResources() { return m_shadowMapManager.EnsureShadowResources(); }
+
+        // Records whether the SWRT directional shadow path is active this frame and, if so,
+        // whether its texture currently holds trustworthy visibility data. Must be called before
+        // UpdateFrameLighting() runs each frame (see Renderer::BuildRenderPassExecutionPolicy);
+        // consumed by UpdateFrameLighting() to set the LightCB dirColor.w shadow-source-mode flag.
+        void SetDirectionalShadowSourceState(bool useSwrt, bool swrtDataTrustworthy)
+        {
+            m_directionalShadowSourceMode = !useSwrt ? 0.0f : (swrtDataTrustworthy ? 1.0f : 2.0f);
+        }
 
         DirectionalLightSettings GetDirectionalLightSettings() const;
         void SetDirectionalLightSettings(const DirectionalLightSettings& settings);
@@ -154,8 +183,35 @@ namespace SasamiRenderer
             m_aoMinOcclusion = v;
         }
 
+        float GetAoDirectLightingStrength() const { return m_aoDirectLightingStrength; }
+        void SetAoDirectLightingStrength(float v)
+        {
+            if (v < 0.0f) {
+                v = 0.0f;
+            } else if (v > 1.0f) {
+                v = 1.0f;
+            }
+            m_aoDirectLightingStrength = v;
+        }
+
     private:
         void EnsureLightBuffers(FrameResources& frame, size_t pointCount, size_t spotCount);
+
+        // Renders the directional cascade shadow depth (and VSM moments/blur if enabled).
+        // Returns false if shadow resources could not be ensured (mirrors the original
+        // ExecuteShadowPass early-return, which also skipped local-light shadow passes).
+        bool ExecuteDirectionalShadowPass(CommandList* cmdList,
+                                          FrameResources& frame,
+                                          RenderPipelineStateCache& pipelineStateCache,
+                                          DescriptorHeap& srvHeap,
+                                          const float cameraPos[3],
+                                          const float cameraPV[16],
+                                          bool useTessellationPath,
+                                          uint32_t shadowMapWidth,
+                                          uint32_t shadowMapHeight,
+                                          const DrawShadowCallback& drawCallback,
+                                          const DrawShadowCallback& drawSkinnedCallback,
+                                          bool vsmBlurEnabled);
 
         IRHIDevice* m_device = nullptr;
 
@@ -170,6 +226,10 @@ namespace SasamiRenderer
         float m_dirColor[3] = { 1.0f, 1.0f, 1.0f };
         float m_dirIntensity = 1.0f;
         float m_aoMinOcclusion = 0.0f;
+        float m_aoDirectLightingStrength = 0.5f;
+        // See SetDirectionalShadowSourceState: 0 = raster cascades, 1 = SWRT (trustworthy),
+        // 2 = SWRT enabled but not trustworthy this frame (fallback, unshadowed).
+        float m_directionalShadowSourceMode = 0.0f;
         DirectionalShadowMode m_shadowMode = DirectionalShadowMode::Csm4;
         float m_shadowDistance = 80.0f;
         float m_cascadeDistributionExponent = 2.0f;

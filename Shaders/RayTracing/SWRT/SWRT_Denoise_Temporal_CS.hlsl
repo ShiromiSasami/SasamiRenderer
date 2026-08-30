@@ -36,7 +36,7 @@ cbuffer ReSTIRFrameConstants : register(b0)
     float3 g_dirLightDir;
     float  g_dirLightIntensity;
     float3 g_dirLightColor;
-    float  g_shadowBias;
+    float  g_microShadowStrength;
     float3 g_ambientColor;
     float  g_ambientIntensity;
     uint   g_pointLightCount;
@@ -53,7 +53,7 @@ Texture2D<float4> g_gbuffer     : register(t9);   // scratch SRV[3]
 RWTexture2D<float2> g_momentsOut : register(u0);  // scratch UAV[0]
 RWTexture2D<float4> g_colorOut   : register(u1);  // scratch UAV[1]
 
-float Luminance(float3 c) { return dot(c, float3(0.2126f, 0.7152f, 0.0722f)); }
+#include "SWRT_Denoise_Common.hlsli"
 
 [numthreads(16, 16, 1)]
 void CS_Denoise_Temporal(uint3 id : SV_DispatchThreadID)

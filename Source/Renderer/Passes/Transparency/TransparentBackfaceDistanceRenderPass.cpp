@@ -29,8 +29,7 @@ namespace SasamiRenderer
         }
 
         const RenderPassExecutionPolicy& policy = context.Policy();
-        if (policy.renderPathMode != RendererEnums::RenderPathMode::Raster ||
-            (!policy.executeOpaqueFamilyPasses && !policy.executeLightingFamilyPasses)) {
+        if (policy.renderPathMode != RendererEnums::RenderPathMode::Raster) {
             return true;
         }
 

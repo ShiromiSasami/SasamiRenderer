@@ -7,7 +7,7 @@
 //     → EnsureLightBuffers() でアップロードバッファを確保・拡張
 //     → UpdateFrameLighting() でライトデータを書き込み
 //     → ExecuteShadowPass() でシャドウマップを描画
-//     → LightingRenderPass が SRV を参照してライティングを実行
+//     → DeferredLightingRenderPass が SRV を参照してライティングを実行
 // =============================================================================
 
 #include "Renderer/Scene/LightSystem.h"
@@ -48,50 +48,7 @@ namespace
         float params[4];         // x: コーン外角のコサイン値, yzw: 未使用
     };
 
-    inline float Dot3(const float a[3], const float b[3])
-    {
-        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    }
-
-    inline void TransformPoint(const float m[16], const float p[3], float out[3])
-    {
-        const float x = p[0] * m[0] + p[1] * m[4] + p[2] * m[8]  + m[12];
-        const float y = p[0] * m[1] + p[1] * m[5] + p[2] * m[9]  + m[13];
-        const float z = p[0] * m[2] + p[1] * m[6] + p[2] * m[10] + m[14];
-        const float w = p[0] * m[3] + p[1] * m[7] + p[2] * m[11] + m[15];
-
-        if (std::fabs(w) > 1e-7f) {
-            out[0] = x / w;
-            out[1] = y / w;
-            out[2] = z / w;
-        } else {
-            out[0] = x;
-            out[1] = y;
-            out[2] = z;
-        }
-    }
-
-    inline float RoundToMultiple(float value, float step)
-    {
-        if (step <= 1e-7f) {
-            return value;
-        }
-        return std::floor(value / step + 0.5f) * step;
-    }
-
-    inline float Clamp01(float v)
-    {
-        if (v < 0.0f) return 0.0f;
-        if (v > 1.0f) return 1.0f;
-        return v;
-    }
-
-    inline void Lerp3(const float a[3], const float b[3], float t, float out[3])
-    {
-        out[0] = a[0] + (b[0] - a[0]) * t;
-        out[1] = a[1] + (b[1] - a[1]) * t;
-        out[2] = a[2] + (b[2] - a[2]) * t;
-    }
+    using SasamiRenderer::Math::Clamp01;
 }
 
 namespace SasamiRenderer
@@ -138,7 +95,7 @@ namespace SasamiRenderer
             frame.lightCBCompat = m_device->GetD3D12CompatibilityResource(frame.lightCBHandle);
             if (frame.lightCBCompat) {
                 const D3D12_RANGE emptyRange{ 0, 0 };
-                if (FAILED(frame.lightCBCompat->Map(0, &emptyRange, &frame.lightCBPtr))) {
+                if (FAILED(frame.lightCBCompat->Map(0, &emptyRange, &frame.lightCBPtr)) || !frame.lightCBPtr) {
                     frame.lightCBPtr = nullptr;
                     frame.lightCBCompat = nullptr;
                     m_device->DestroyRhiResource(frame.lightCBHandle);
@@ -277,7 +234,7 @@ namespace SasamiRenderer
                 frame.pointLightBufferCompat = m_device->GetD3D12CompatibilityResource(frame.pointLightBufferHandle);
                 if (frame.pointLightBufferCompat) {
                     const D3D12_RANGE emptyRange{ 0, 0 };
-                    if (FAILED(frame.pointLightBufferCompat->Map(0, &emptyRange, &frame.pointLightBufferPtr))) {
+                    if (FAILED(frame.pointLightBufferCompat->Map(0, &emptyRange, &frame.pointLightBufferPtr)) || !frame.pointLightBufferPtr) {
                         frame.pointLightBufferPtr = nullptr;
                         frame.pointLightBufferCompat = nullptr;
                         m_device->DestroyRhiResource(frame.pointLightBufferHandle);
@@ -323,7 +280,7 @@ namespace SasamiRenderer
                 frame.spotLightBufferCompat = m_device->GetD3D12CompatibilityResource(frame.spotLightBufferHandle);
                 if (frame.spotLightBufferCompat) {
                     const D3D12_RANGE emptyRange{ 0, 0 };
-                    if (FAILED(frame.spotLightBufferCompat->Map(0, &emptyRange, &frame.spotLightBufferPtr))) {
+                    if (FAILED(frame.spotLightBufferCompat->Map(0, &emptyRange, &frame.spotLightBufferPtr)) || !frame.spotLightBufferPtr) {
                         frame.spotLightBufferPtr = nullptr;
                         frame.spotLightBufferCompat = nullptr;
                         m_device->DestroyRhiResource(frame.spotLightBufferHandle);

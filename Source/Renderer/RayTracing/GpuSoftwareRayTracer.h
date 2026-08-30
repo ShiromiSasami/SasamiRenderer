@@ -3,6 +3,9 @@
 #include "Renderer/RHI/GraphicsDevice.h"
 #include "Renderer/RayTracing/RayTracingScene.h"
 
+#include "Foundation/Jobs/JobCounter.h"
+
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -143,6 +146,14 @@ namespace SasamiRenderer
             D3D12_GPU_VIRTUAL_ADDRESS materials = 0;
             uint32_t missingMask = 0u;
             bool valid = false;
+            // Monotonic counter bumped by UploadBvhBuffers each time it actually destroys+
+            // recreates the 6 buffers. Lets a repro log correlate "generation a crashing
+            // dispatch was recorded against" with "generation last destroyed at that point".
+            uint64_t generation = 0u;
+            // RHI handle id backing `instances`, so a repro log can be cross-referenced
+            // by exact id against [RhiResourceTrace] created/destroyed handleId=... lines
+            // instead of inferring identity from GPU VA (which the driver recycles).
+            uint64_t instancesHandleId = 0u;
         };
         BvhGpuAddresses GetBvhGpuAddresses() const;
 
@@ -179,7 +190,15 @@ namespace SasamiRenderer
 
         // Must be called every frame before Render* calls.
         // Rebuilds BVH if scene is dirty and re-uploads GPU buffers.
+        // The CPU BVH rebuild (when needed) runs asynchronously on a JobSystem worker;
+        // callers keep rendering against the previous BVH buffers until the build
+        // finishes and a later UpdateScene call publishes (uploads) the result.
         void UpdateScene(const RayTracingScene& scene, IRHIDevice& device, CommandList& cmdList);
+
+        // Blocks until any in-flight async BVH build completes. Must be called before
+        // destroying this object or before any other code mutates m_scene /
+        // m_meshAccelerations, so the worker never outlives the object it operates on.
+        void WaitForAsyncBvhBuild();
 
         // Dispatches shadow compute shader; outTexture must have
         // D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS and be in UAV state on entry.
@@ -307,7 +326,7 @@ namespace SasamiRenderer
             float    specularColor[3];
             float    workflow;
             float    emissive[3];
-            float    occlusionStrength;
+            float    occlusion;  // effective per-material AO baked on CPU (1 = unoccluded)
         };
         static_assert(sizeof(GpuMaterial) == 64u, "GpuMaterial must be 64 bytes to match HLSL");
 
@@ -423,7 +442,7 @@ namespace SasamiRenderer
             float    dirLightDir[3];
             float    dirLightIntensity;
             float    dirLightColor[3];
-            float    shadowBias;
+            float    microShadowStrength;  // direct-light micro-shadowing strength [0,1] (Chan 2018)
             float    ambientColor[3];
             float    ambientIntensity;
             uint32_t pointLightCount;
@@ -450,6 +469,10 @@ namespace SasamiRenderer
         static_assert(sizeof(GpuSpotLightRT) == 48u);
 
         // ---- BVH / scene CPU state ----
+        // NOTE: m_scene / m_meshAccelerations / m_topLevelNodes / m_topLevelInstanceOrder
+        // are only ever touched by the main thread (while m_asyncBvhState != Building) or
+        // by the single async build job (while Building). UpdateScene enforces this by
+        // returning early whenever a build is in flight.
         RayTracingScene              m_scene;
         std::vector<MeshAcceleration> m_meshAccelerations;
         std::vector<TlasNode>         m_topLevelNodes;
@@ -461,6 +484,17 @@ namespace SasamiRenderer
         void RebuildAccelerationStructures();
         void BuildMeshBvhSah(uint32_t meshIdx);
         void RebuildTlas();
+
+        // ---- Async CPU BVH build (moves RebuildAccelerationStructures off the main thread) ----
+        enum class AsyncBvhState : uint8_t { Idle, Building, ReadyToPublish };
+        std::atomic<AsyncBvhState> m_asyncBvhState{AsyncBvhState::Idle};
+        JobCounter m_asyncBvhCounter;
+        uint64_t m_buildingGeometryVersion = 0;   // versions of the snapshot being built
+        uint64_t m_buildingMaterialVersion = 0;
+        uint64_t m_buildingInstanceVersion = 0;
+        bool m_asyncBvhSucceeded = false;
+
+        static void RunAsyncBvhBuildJob(void* userdata);
 
         // ---- GPU buffers ----
         Resource m_bvhNodesBuffer;      // SRV t0 (DX12 fallback)
@@ -484,6 +518,9 @@ namespace SasamiRenderer
         Resource*       m_tlasCompat      = nullptr;
         RhiBufferHandle m_materialHandle{};
         Resource*       m_materialCompat  = nullptr;
+        // Bumped by UploadBvhBuffers each time it actually destroys+recreates the 6 BVH
+        // buffers above; surfaced via BvhGpuAddresses::generation for crash-log correlation.
+        uint64_t m_bvhGeneration = 0u;
         Resource m_frameConstantsBuffer;
         uint8_t* m_frameConstantsMapped = nullptr;
         BvhBuildDiagnostics m_bvhDiagnostics{};

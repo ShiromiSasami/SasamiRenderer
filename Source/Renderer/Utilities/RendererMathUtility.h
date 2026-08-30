@@ -13,6 +13,10 @@ namespace SasamiRenderer
                                             std::uint32_t faceSize,
                                             std::vector<std::vector<float>>& outFaces);
 
+        void DownsampleFaceRgbaFloat(const std::vector<float>& src,
+                                     std::uint32_t srcSize,
+                                     std::vector<float>& outDst);
+
         void GenerateIrradianceCubemapFromEquirect(const std::vector<float>& hdrPixels,
                                                    std::uint32_t hdrWidth,
                                                    std::uint32_t hdrHeight,

@@ -26,5 +26,16 @@ namespace SasamiRenderer
         float thickness = 0.0f;
         float attenuationColor[3] = { 1.0f, 1.0f, 1.0f };
         float attenuationDistance = 1.0f;
+        // Thin geometry (awnings, foliage, curtains) opts in so back faces flip their
+        // normal instead of shading black; front faces are unaffected either way.
+        bool doubleSided = false;
     };
+
+    inline bool IsTransparentMaterial(const SurfaceMaterial& material)
+    {
+        static constexpr float kOpaqueAlphaThreshold = 0.999f;
+        static constexpr float kTransparentTransmissionThreshold = 0.01f;
+        return material.baseColor[3] < kOpaqueAlphaThreshold ||
+               material.transmission > kTransparentTransmissionThreshold;
+    }
 }

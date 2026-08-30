@@ -160,6 +160,27 @@ namespace SasamiRenderer
         UINT GetRayTracingOutputHeight() const { return m_rayTracingOutputHeight; }
 
     private:
+        // Depth resource + DSV heap + DSV view creation shared by Initialize and
+        // OnResize (depth-SRV creation differs between the two and stays inline).
+        bool CreateOrResizeDepthBuffer(IRHIDevice& device, UINT width, UINT height);
+
+        // RHI-texture-with-D3D12-fallback creation, shared by EnsureSceneColor,
+        // EnsureGBuffer and EnsureSSAO (RTV/SRV creation differs per caller and stays inline).
+        static bool CreateCompatibleTexture(IRHIDevice& device,
+                                             uint32_t width,
+                                             uint32_t height,
+                                             uint16_t arrayLayers,
+                                             DXGI_FORMAT dxgiFormat,
+                                             RhiFormat rhiFormat,
+                                             RhiTextureUsageFlags usage,
+                                             D3D12_RESOURCE_FLAGS dx12Flags,
+                                             D3D12_RESOURCE_STATES initialDx12State,
+                                             RhiResourceState initialRhiState,
+                                             const D3D12_CLEAR_VALUE* clearValue,
+                                             Resource& texture,
+                                             RhiTextureHandle& textureHandle);
+        static void ReleaseCompatibleRhiTexture(IRHIDevice& device, Resource& texture, RhiTextureHandle& textureHandle);
+
         // Back buffers
         std::vector<Resource> m_backBuffers;
         std::vector<CpuDescriptorHandle> m_backBufferRtvs;

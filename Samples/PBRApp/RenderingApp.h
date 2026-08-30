@@ -39,11 +39,19 @@ namespace SasamiRenderer
         void SaveSessionState(ApplicationCore& app) const;
         void LoadSessionState(ApplicationCore& app);
 
+        // GI probe grid fit + probe cache load / bake request depend on final scene
+        // bounds and renderer GI/SWRT readiness, so they run after the async Sponza/
+        // bunny loads and the renderer's deferred init tasks complete.
+        void ApplyDeferredGiSessionState(ApplicationCore& app);
+
         Camera* m_camera = nullptr;
         StaticModel* m_sphereModel = nullptr;
         StaticModel* m_boxModel = nullptr;
         StaticModel* m_transparentSphereModel = nullptr;
         StaticModel* m_transparentBoxModel = nullptr;
+        StaticModel* m_bunnyModel = nullptr;
+        StaticModel* m_sponzaModel = nullptr;
+        StaticModel* m_bistroModel = nullptr;
         SurfaceMaterial m_sphereMaterial{};
         SurfaceMaterial m_boxMaterial{};
         SurfaceMaterial m_transparentSphereMaterial{};
@@ -51,6 +59,8 @@ namespace SasamiRenderer
         bool m_showLightGizmo  = true;
         bool m_showLightGizmos = true; // Point / Spot light gizmos
         int m_probeGridPreset = 1;     // 0=Interior, 1=Wide, 2=Very Wide
+        bool m_sessionGiBaked = false;         // "gi/baked" flag stashed by LoadSessionState
+        bool m_pendingGiSessionRestore = true; // true until ApplyDeferredGiSessionState has run
         std::vector<boost::signals2::scoped_connection> m_inputConnections;
     };
 }

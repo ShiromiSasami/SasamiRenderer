@@ -14,15 +14,20 @@ cbuffer CameraCB : register(b0)
 Texture2D AlbedoTex    : register(t0);
 Texture2DArray ShadowMapTex : register(t1);
 TextureCube IrradianceTex    : register(t4);
+TextureCube IblPrefilterTex  : register(t5);
+Texture2D IblBrdfLutTex      : register(t6);
 Texture2D OcclusionTex       : register(t7);
 Texture2D ReflectionTex      : register(t8);
 Texture2D RuntimeAOTex       : register(t9);
 Texture2D SceneDepthTex      : register(t11);
-Texture2D SpotShadowMapTex   : register(t12);
+Texture2DArray SpotShadowMapTex : register(t12);
+Texture2DArray PointShadowMapTex : register(t15);
 Texture2DArray<float2> ShadowVSMTex : register(t13);
 Texture2D<float> TransparentBackfaceDistanceTex : register(t14);
 SamplerState LinearWrap : register(s0);
 
+// s1: depth comparison sampler for shadow PCF (clamped, LESS_EQUAL). See MakeShadowComparisonSampler.
+SamplerComparisonState ShadowCmp : register(s1);
 #include "Shared/Common/LightCB.hlsli"
 #include "RayTracing/GI/GI_Common.hlsli"
 #include "PBR_LightTypes.hlsli"
@@ -43,6 +48,7 @@ struct PSInput
 #include "PBR_BRDF.hlsli"
 #include "PBR_IBL.hlsli"
 #include "PBR_Shadow.hlsli"
+#include "PBR_DirectLighting.hlsli"
 
 struct PSOutput
 {
@@ -52,6 +58,21 @@ struct PSOutput
     float4 material : SV_TARGET3; // GBufferMaterial - roughness(R) metallic(G) iblVisibility(B) reflectionMask(A)
     float4 emissive : SV_TARGET4; // GBufferEmissive — emissive color RGB + 0
 };
+
+// Split-sum specular IBL (Karis 2013, "Real Shading in Unreal Engine 4"):
+// the prefiltered radiance cube supplies the pre-integrated lighting term and the
+// 2D LUT supplies the BRDF term, so a mirror-like environment response is possible
+// where the L2 SH probes used for diffuse GI cannot represent one.
+float3 EvaluateSpecularIbl(float3 N, float3 V, float3 F0, float roughness, float specularOcclusion)
+{
+    if (u_iblParams.x <= 0.5) { return (float3)0; }
+    const float NdotV = saturate(dot(N, V));
+    const float3 R = reflect(-V, N);
+    const float mip = saturate(roughness) * max(u_iblParams.z, 0.0);
+    const float3 prefiltered = IblPrefilterTex.SampleLevel(LinearWrap, R, mip).rgb;
+    const float2 ab = IblBrdfLutTex.SampleLevel(LinearWrap, saturate(float2(NdotV, roughness)), 0).rg;
+    return prefiltered * (F0 * ab.x + ab.y) * specularOcclusion * u_iblParams.y;
+}
 
 PSOutput PSMain(PSInput i)
 {
@@ -156,94 +177,25 @@ PSOutput PSMain(PSInput i)
     // Lambert diffuse: f_d = energy-limited diffuse reflectance / PI
     float3 diffuse = kd * diffuseReflectance / 3.14159265;
     float3 dirColor = u_dirColor.rgb * u_dirDir.w;
-    Lo += (diffuse + spec) * NdotL * dirColor * directionalVisibility;
+    // Micro-shadowing on top of shadow-map visibility (Chan 2018, adopted by Filament).
+    float dirMicroShadow = ComputeMicroShadowing(NdotL, ao, u_debugParams.y);
+    Lo += (diffuse + spec) * NdotL * dirColor * directionalVisibility * dirMicroShadow;
 
-    // Point lights (no shadow)
-    // Distance attenuation (authoring-friendly polynomial):
-    // atten = saturate(1 - d / range)^2
-    int pointCount = (int)u_lightCounts.x;
-    for (int li = 0; li < pointCount; ++li) {
-        PointLight pl = u_pointLights[li];
-        float4 posRange = pl.posRange;
-        float4 colInt = pl.colorIntensity;
-        float3 toL = posRange.xyz - i.worldPos;
-        float dist = length(toL);
-        if (dist < posRange.w && dist > 1e-4 && colInt.w > 0.0) {
-            float3 Lp = toL / dist;
-            float atten = saturate(1.0 - dist / max(posRange.w, 1e-3));
-            atten *= atten;
-            float3 Hp = normalize(V + Lp);
-            float NdotLp = saturate(dot(N, Lp));
-            float NdotHp = saturate(dot(N, Hp));
-            float VdotHp = saturate(dot(V, Hp));
-            float Dp = DistributionGGX(NdotHp, a);
-            float Gp = GeometrySmith(NdotV, NdotLp, k);
-            float3 Fp = FresnelSchlick(VdotHp, F0);
-            float3 specP = (Dp * Gp) * Fp / max(4.0 * NdotV * NdotLp, 1e-4);
-            float3 kdP = (1.0 - Fp);
-            float3 diffP = kdP * diffuseReflectance / 3.14159265;
-            float3 pointColor = colInt.rgb * colInt.w * atten;
-            Lo += (diffP + specP) * NdotLp * pointColor;
-        }
-    }
-
-    // Spot lights with shadow (li==0 samples SpotShadowMapTex at t12)
-    // Cone attenuation:
-    // spot = smoothstep(cosOuter, cosInner, cosTheta)
-    int spotCount = (int)u_lightCounts.y;
-    for (int li = 0; li < spotCount; ++li) {
-        SpotLight sl = u_spotLights[li];
-        float4 posRange = sl.posRange;
-        float4 dirInner = sl.dirCosInner;
-        float4 colInt = sl.colorIntensity;
-        float4 params = sl.params;
-        float3 toL = posRange.xyz - i.worldPos;
-        float dist = length(toL);
-        if (dist < posRange.w && dist > 1e-4 && colInt.w > 0.0) {
-            float3 Ls = toL / dist;
-            float cosTheta = dot(normalize(-Ls), normalize(dirInner.xyz));
-            float spot = smoothstep(params.x, dirInner.w, cosTheta);
-            float atten = saturate(1.0 - dist / max(posRange.w, 1e-3));
-            atten *= atten;
-            float3 Hs = normalize(V + Ls);
-            float NdotLs = saturate(dot(N, Ls));
-            float NdotHs = saturate(dot(N, Hs));
-            float VdotHs = saturate(dot(V, Hs));
-            float Ds = DistributionGGX(NdotHs, a);
-            float Gs = GeometrySmith(NdotV, NdotLs, k);
-            float3 Fs = FresnelSchlick(VdotHs, F0);
-            float3 specS = (Ds * Gs) * Fs / max(4.0 * NdotV * NdotLs, 1e-4);
-            float3 kdS = (1.0 - Fs);
-            float3 diffS = kdS * diffuseReflectance / 3.14159265;
-
-            // Spot shadow: 3x3 PCF for li==0 when shadow is enabled
-            float spotShadow = 1.0;
-            if (li == 0 && u_spotShadowParams.z > 0.5)
-            {
-                float4 sc = mul(float4(i.worldPos, 1.0), u_spotLightVP);
-                sc.xyz /= sc.w;
-                float2 shadowUV = sc.xy * 0.5 + 0.5;
-                shadowUV.y = 1.0 - shadowUV.y;
-                float shadowDepth = sc.z - u_spotShadowParams.x; // depth bias
-                if (all(shadowUV >= 0.0) && all(shadowUV <= 1.0) && sc.w > 0.0)
-                {
-                    float texelSize = 1.0 / u_spotShadowParams.w;
-                    float shadowSum = 0.0;
-                    [unroll] for (int sy = -1; sy <= 1; ++sy)
-                    [unroll] for (int sx = -1; sx <= 1; ++sx)
-                    {
-                        float sampleD = SpotShadowMapTex.Sample(LinearWrap,
-                            shadowUV + float2(sx, sy) * texelSize).r;
-                        shadowSum += (sampleD >= shadowDepth) ? 1.0 : 0.0;
-                    }
-                    spotShadow = shadowSum / 9.0;
-                }
-            }
-
-            float3 spotColor = colInt.rgb * colInt.w * atten * spot * spotShadow;
-            Lo += (diffS + specS) * NdotLs * spotColor;
-        }
-    }
+    // Point/spot direct lighting: identical math to the deferred path (DeferredLighting_PS.hlsl).
+    // See PBR_DirectLighting.hlsli for the shared implementation.
+    PbrSurface surf;
+    surf.worldPos = i.worldPos;
+    surf.N = N;
+    surf.V = V;
+    surf.diffuseReflectance = diffuseReflectance;
+    surf.F0 = F0;
+    surf.roughness = roughness;
+    surf.a = a;
+    surf.k = k;
+    surf.NdotV = NdotV;
+    surf.ao = ao;
+    Lo += AccumulatePointLights(surf, u_debugParams.y);
+    Lo += AccumulateSpotLights(surf, u_debugParams.y);
 
     float3 ambient = 0.03 * albedo * ao;
     float3 localReflection = 0.0;
@@ -265,14 +217,23 @@ PSOutput PSMain(PSInput i)
     float3 Fibl = FresnelSchlick(saturate(dot(N, V)), F0);
     float3 kdIbl = (1.0 - Fibl);
     if (g_giEnabled > 0.5) {
+        // Lambertian BRDF: outgoing radiance is E * albedo / PI. GI_SampleProbeGrid returns
+        // irradiance E -- its SH is convolved with the cosine lobe (A0=PI, A1=2PI/3,
+        // A2=PI/4) -- so the 1/PI still belongs here, exactly like the direct-light
+        // diffuse term above. Without it the indirect diffuse is PI times too bright,
+        // which reads as up-facing surfaces (floors, roofs) being blown out.
         float3 probeIrradiance = GI_SampleProbeGrid(i.worldPos, N);
-        float3 diffuseGI = probeIrradiance * diffuseReflectance;
+        float3 diffuseGI = (probeIrradiance / 3.14159265) * diffuseReflectance;
         indirectDiffuse = kdIbl * diffuseGI * iblVisibility;
     } else if (u_iblParams.x > 0.5) {
-        float3 iblIrradiance = (u_iblParams.w > 0.5)
-            ? EvaluateDiffuseIrradianceFromSh(N)
+        // EvaluateDiffuseIrradianceFromSh returns irradiance E (same cosine-lobe
+        // convolution as the probe SH) and needs the Lambert 1/PI. The prefiltered
+        // cubemap instead stores a cosine-weighted average radiance (E/PI already),
+        // so only the SH variant is divided here.
+        float3 iblDiffuse = (u_iblParams.w > 0.5)
+            ? EvaluateDiffuseIrradianceFromSh(N) / 3.14159265
             : IrradianceTex.Sample(LinearWrap, N).rgb;
-        float3 diffuseIBL = iblIrradiance * diffuseReflectance;
+        float3 diffuseIBL = iblDiffuse * diffuseReflectance;
 
         // AO-driven occlusion for indirect light:
         // - Diffuse IBL uses linear AO.
@@ -283,6 +244,11 @@ PSOutput PSMain(PSInput i)
                           saturate(metallic));
         indirectDiffuse = kdIbl * diffuseIBL * iblVisibility * u_iblParams.y;
     }
+
+    // Specular environment fallback used when SSR/SWRT has no reflection data at this
+    // pixel (see reflectionWeight below). specularAo is the AO term already computed
+    // above for the IBL specular response (relaxed for metals via SpecularOcclusion).
+    fallbackSpecular = EvaluateSpecularIbl(N, V, F0, roughness, specularAo);
 
     // Reflection hierarchy is independent from the IBL toggle:
     // - SWRT/SSR supply the reflected radiance when they have data.
@@ -306,7 +272,7 @@ PSOutput PSMain(PSInput i)
     ambient += kAmbientFloor * albedo * ao;
 
     float3 emissiveColor = u_materialEmissiveRoughness.rgb;
-    float3 color = ambient + Lo + emissiveColor;
+    float3 color = ambient + Lo + emissiveColor * ao;
     float outputAlpha = materialAlpha;
     if (effectiveTransmission > 0.001) {
         const bool hasSceneColorCopy =

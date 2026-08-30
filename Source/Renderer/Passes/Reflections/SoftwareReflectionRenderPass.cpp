@@ -22,8 +22,10 @@ namespace SasamiRenderer
 
     void SoftwareReflectionRenderPass::Setup(RenderGraphBuilder& builder) const
     {
-        builder.Read("SceneColor");
-        builder.Read("SceneDepth");
+        // SWRT_Reflection_CS.hlsl reads the GBuffer normal/material/albedo, not SceneColor or a depth texture.
+        builder.Read("GBufferNormal");
+        builder.Read("GBufferMaterial");
+        builder.Read("GBufferAlbedo");
         builder.Write("SoftwareReflection");
         builder.DependsOnPrevious();
     }

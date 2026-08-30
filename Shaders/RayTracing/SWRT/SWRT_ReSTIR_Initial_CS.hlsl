@@ -33,7 +33,7 @@ cbuffer ReSTIRFrameConstants : register(b0)
     float3 g_dirLightDir;
     float  g_dirLightIntensity;
     float3 g_dirLightColor;
-    float  g_shadowBias;
+    float  g_microShadowStrength;
     float3 g_ambientColor;
     float  g_ambientIntensity;
     uint   g_pointLightCount;
@@ -195,7 +195,12 @@ void CS_ReSTIR_Initial(uint3 id : SV_DispatchThreadID)
     float hitMetallic = saturate(mat.metallic);
 
     g_gbufferOut[pixel]     = float4(hitN, hitDistance);
-    g_hitPositionOut[pixel] = float4(hitPos, 1.0f + hitMetallic);
+    // Pack metallic (5 bits) + baked material AO (5 bits) into w as 1 + k/1024.
+    // Values 1 + k/1024 (k in [0,1023]) are exactly representable in fp16, and
+    // w stays in [1,2) so the w > 0 validity checks downstream are unaffected.
+    uint mQ  = (uint)round(hitMetallic * 31.0f);
+    uint aoQ = (uint)round(saturate(mat.occlusion) * 31.0f);
+    g_hitPositionOut[pixel] = float4(hitPos, 1.0f + float(mQ * 32u + aoQ) / 1024.0f);
     g_hitMaterialOut[pixel] = float4(baseColor, hitRoughness);
 
     uint totalLights = TotalLightCount();

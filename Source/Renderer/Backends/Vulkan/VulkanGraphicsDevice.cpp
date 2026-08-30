@@ -1,8 +1,9 @@
 // VulkanGraphicsDevice.cpp
 // Vulkan ExecuteBackendFrame, D3D12 compatibility wrappers.
 #include "Renderer/Backends/Vulkan/VulkanGraphicsDevice.h"
-#include "Renderer/Backends/Vulkan/VulkanGraphicsDevice_Utils.h"
+#include "Renderer/Backends/Vulkan/VulkanGraphicsDeviceUtils.h"
 #include "Renderer/Resources/ShaderCompilationService.h"
+#include "Renderer/Structures/Skeleton.h"
 #include "Foundation/Math/MathUtil.h"
 
 #if RHI_VULKAN
@@ -100,7 +101,9 @@ namespace SasamiRenderer
             frameOutputLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
             frameOutputAccess = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
             frameOutputStage  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        } else if (frameDesc.mesh.enabled && frameDesc.mesh.draws && frameDesc.mesh.drawCount > 0 &&
+        } else if (frameDesc.mesh.enabled &&
+            ((frameDesc.mesh.draws && frameDesc.mesh.drawCount > 0) ||
+             (frameDesc.mesh.skinnedDraws && frameDesc.mesh.skinnedDrawCount > 0)) &&
             RenderMeshFrame(frame, imageIndex, cmd, frameDesc.mesh, frameDesc.clearColor)) {
             frameOutputLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
             frameOutputAccess = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
@@ -191,7 +194,7 @@ namespace SasamiRenderer
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &cmd;
         submitInfo.signalSemaphoreCount = 1;
-        submitInfo.pSignalSemaphores = &m_renderFinishedSemaphores[frame];
+        submitInfo.pSignalSemaphores = &m_renderFinishedSemaphores[imageIndex];
 
         vkResetFences(m_device, 1, &m_frameFences[frame]);
         result = vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, m_frameFences[frame]);
@@ -202,7 +205,7 @@ namespace SasamiRenderer
         VkPresentInfoKHR presentInfo{};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         presentInfo.waitSemaphoreCount = 1;
-        presentInfo.pWaitSemaphores = &m_renderFinishedSemaphores[frame];
+        presentInfo.pWaitSemaphores = &m_renderFinishedSemaphores[imageIndex];
         presentInfo.swapchainCount = 1;
         presentInfo.pSwapchains = &m_swapchain;
         presentInfo.pImageIndices = &imageIndex;
@@ -216,39 +219,6 @@ namespace SasamiRenderer
         m_currentFrame = (m_currentFrame + 1u) % static_cast<UINT>(m_commandBuffers.size());
         if (recreateAfterPresent || presentNeedsRecreate) {
             return ResizeBackendSwapChain(m_swapchainExtent.width, m_swapchainExtent.height);
-        }
-        return true;
-    }
-
-    bool VulkanGraphicsDevice::CreateSwapChainImageViews()
-    {
-        if (m_device == VK_NULL_HANDLE || m_swapchainImages.empty() || m_swapchainFormat == VK_FORMAT_UNDEFINED) {
-            return false;
-        }
-
-        m_swapchainImageViews.resize(m_swapchainImages.size(), VK_NULL_HANDLE);
-        for (size_t i = 0; i < m_swapchainImages.size(); ++i) {
-            VkImageViewCreateInfo viewInfo{};
-            viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-            viewInfo.image = m_swapchainImages[i];
-            viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            viewInfo.format = m_swapchainFormat;
-            viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            viewInfo.subresourceRange.baseMipLevel = 0;
-            viewInfo.subresourceRange.levelCount = 1;
-            viewInfo.subresourceRange.baseArrayLayer = 0;
-            viewInfo.subresourceRange.layerCount = 1;
-
-            if (vkCreateImageView(m_device, &viewInfo, nullptr, &m_swapchainImageViews[i]) != VK_SUCCESS) {
-                DebugLog("VulkanGraphicsDevice::CreateSwapChainImageViews: vkCreateImageView failed.\n");
-                for (VkImageView imageView : m_swapchainImageViews) {
-                    if (imageView != VK_NULL_HANDLE) {
-                        vkDestroyImageView(m_device, imageView, nullptr);
-                    }
-                }
-                m_swapchainImageViews.clear();
-                return false;
-            }
         }
         return true;
     }
@@ -852,6 +822,372 @@ namespace SasamiRenderer
         return true;
     }
 
+    VkDescriptorSet VulkanGraphicsDevice::GetOrCreateNativeMeshTextureDescriptorSet(uint64_t albedoSrv)
+    {
+        auto found = m_nativeMeshDescSets.find(albedoSrv);
+        if (found != m_nativeMeshDescSets.end()) {
+            return found->second;
+        }
+        if (albedoSrv == 0) {
+            return m_nativeMeshDescSets[0];
+        }
+
+        auto srvIt = m_rhiImageViews.find(albedoSrv);
+        if (srvIt == m_rhiImageViews.end() || srvIt->second == VK_NULL_HANDLE) {
+            return m_nativeMeshDescSets[0];
+        }
+
+        VkDescriptorSetAllocateInfo texAlloc{};
+        texAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        texAlloc.descriptorPool     = m_nativeMeshDescPool;
+        texAlloc.descriptorSetCount = 1;
+        texAlloc.pSetLayouts        = &m_nativeMeshDescSetLayout;
+        VkDescriptorSet newSet = VK_NULL_HANDLE;
+        if (vkAllocateDescriptorSets(m_device, &texAlloc, &newSet) != VK_SUCCESS) {
+            return m_nativeMeshDescSets[0];
+        }
+
+        VkDescriptorImageInfo imgInfo{};
+        imgInfo.imageView   = srvIt->second;
+        imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkDescriptorImageInfo smpInfo{};
+        smpInfo.sampler = m_nativeMeshSampler;
+
+        VkWriteDescriptorSet writes[2]{};
+        writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[0].dstSet          = newSet;
+        writes[0].dstBinding      = 100;
+        writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        writes[0].descriptorCount = 1;
+        writes[0].pImageInfo      = &imgInfo;
+        writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[1].dstSet          = newSet;
+        writes[1].dstBinding      = 200;
+        writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLER;
+        writes[1].descriptorCount = 1;
+        writes[1].pImageInfo      = &smpInfo;
+        vkUpdateDescriptorSets(m_device, 2, writes, 0, nullptr);
+
+        m_nativeMeshDescSets[albedoSrv] = newSet;
+        return newSet;
+    }
+
+    void VulkanGraphicsDevice::DestroyNativeSkinnedMeshResources()
+    {
+        if (m_device != VK_NULL_HANDLE) {
+            if (m_nativeSkinnedMeshPipeline != VK_NULL_HANDLE) {
+                vkDestroyPipeline(m_device, m_nativeSkinnedMeshPipeline, nullptr);
+            }
+            if (m_nativeSkinnedMeshPipelineLayout != VK_NULL_HANDLE) {
+                vkDestroyPipelineLayout(m_device, m_nativeSkinnedMeshPipelineLayout, nullptr);
+            }
+            // Destroy descriptor pool first (implicitly frees the bone descriptor set)
+            if (m_nativeSkinnedMeshBoneDescPool != VK_NULL_HANDLE) {
+                vkDestroyDescriptorPool(m_device, m_nativeSkinnedMeshBoneDescPool, nullptr);
+            }
+            if (m_nativeSkinnedMeshBoneDescSetLayout != VK_NULL_HANDLE) {
+                vkDestroyDescriptorSetLayout(m_device, m_nativeSkinnedMeshBoneDescSetLayout, nullptr);
+            }
+            if (m_nativeSkinnedMeshBoneUboMapped != nullptr && m_nativeSkinnedMeshBoneUboMemory != VK_NULL_HANDLE) {
+                vkUnmapMemory(m_device, m_nativeSkinnedMeshBoneUboMemory);
+            }
+            if (m_nativeSkinnedMeshBoneUbo != VK_NULL_HANDLE) {
+                vkDestroyBuffer(m_device, m_nativeSkinnedMeshBoneUbo, nullptr);
+            }
+            if (m_nativeSkinnedMeshBoneUboMemory != VK_NULL_HANDLE) {
+                vkFreeMemory(m_device, m_nativeSkinnedMeshBoneUboMemory, nullptr);
+            }
+        }
+
+        m_nativeSkinnedMeshPipeline          = VK_NULL_HANDLE;
+        m_nativeSkinnedMeshPipelineLayout    = VK_NULL_HANDLE;
+        m_nativeSkinnedMeshBoneDescPool      = VK_NULL_HANDLE;
+        m_nativeSkinnedMeshBoneDescSetLayout = VK_NULL_HANDLE;
+        m_nativeSkinnedMeshBoneDescSet       = VK_NULL_HANDLE;
+        m_nativeSkinnedMeshBoneUbo           = VK_NULL_HANDLE;
+        m_nativeSkinnedMeshBoneUboMemory     = VK_NULL_HANDLE;
+        m_nativeSkinnedMeshBoneUboMapped     = nullptr;
+        m_nativeSkinnedMeshBoneSlotStride    = 0;
+    }
+
+    bool VulkanGraphicsDevice::EnsureNativeSkinnedMeshResources()
+    {
+        // Depends on the static mesh render pass, set-0 texture descriptor layout, sampler,
+        // and dummy texture — skinned draws are submitted inside the same render pass scope
+        // as static draws (see RenderMeshFrame), so no dedicated render pass/framebuffers here.
+        if (!EnsureNativeMeshResources()) {
+            return false;
+        }
+        if (m_nativeSkinnedMeshPipeline != VK_NULL_HANDLE) {
+            return true;
+        }
+
+        DestroyNativeSkinnedMeshResources();
+
+        constexpr uint32_t kMaxSimultaneousSkinnedDraws = 16;
+        const VkDeviceSize boneBufferBytes = static_cast<VkDeviceSize>(Skeleton::kMaxBones) * 16 * sizeof(float);
+
+        VkPhysicalDeviceProperties physProps{};
+        vkGetPhysicalDeviceProperties(m_physicalDevice, &physProps);
+        const VkDeviceSize minAlign = physProps.limits.minUniformBufferOffsetAlignment;
+        VkDeviceSize slotStride = boneBufferBytes;
+        if (minAlign > 0) {
+            slotStride = (boneBufferBytes + minAlign - 1) / minAlign * minAlign;
+        }
+        m_nativeSkinnedMeshBoneSlotStride = slotStride;
+
+        // --- bone palette UBO: persistently-mapped, one aligned slot per simultaneous skinned draw ---
+        {
+            VkBufferCreateInfo boneBufInfo{};
+            boneBufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+            boneBufInfo.size        = slotStride * kMaxSimultaneousSkinnedDraws;
+            boneBufInfo.usage       = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+            boneBufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            if (vkCreateBuffer(m_device, &boneBufInfo, nullptr, &m_nativeSkinnedMeshBoneUbo) != VK_SUCCESS) {
+                DebugLog("VulkanGraphicsDevice::EnsureNativeSkinnedMeshResources: bone UBO create failed.\n");
+                DestroyNativeSkinnedMeshResources();
+                return false;
+            }
+
+            VkMemoryRequirements boneReqs{};
+            vkGetBufferMemoryRequirements(m_device, m_nativeSkinnedMeshBoneUbo, &boneReqs);
+            VkMemoryAllocateInfo boneAllocInfo{};
+            boneAllocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+            boneAllocInfo.allocationSize  = boneReqs.size;
+            boneAllocInfo.memoryTypeIndex = FindMemoryType(boneReqs.memoryTypeBits,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            if (boneAllocInfo.memoryTypeIndex == UINT32_MAX ||
+                vkAllocateMemory(m_device, &boneAllocInfo, nullptr, &m_nativeSkinnedMeshBoneUboMemory) != VK_SUCCESS ||
+                vkBindBufferMemory(m_device, m_nativeSkinnedMeshBoneUbo, m_nativeSkinnedMeshBoneUboMemory, 0) != VK_SUCCESS) {
+                DebugLog("VulkanGraphicsDevice::EnsureNativeSkinnedMeshResources: bone UBO memory failed.\n");
+                DestroyNativeSkinnedMeshResources();
+                return false;
+            }
+            if (vkMapMemory(m_device, m_nativeSkinnedMeshBoneUboMemory, 0, boneBufInfo.size, 0,
+                    &m_nativeSkinnedMeshBoneUboMapped) != VK_SUCCESS || !m_nativeSkinnedMeshBoneUboMapped) {
+                DebugLog("VulkanGraphicsDevice::EnsureNativeSkinnedMeshResources: bone UBO map failed.\n");
+                DestroyNativeSkinnedMeshResources();
+                return false;
+            }
+        }
+
+        // --- bone descriptor set layout/pool/set (set 1, binding 0, dynamic UBO, vertex stage) ---
+        {
+            VkDescriptorSetLayoutBinding boneBinding{};
+            boneBinding.binding         = 0;
+            boneBinding.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+            boneBinding.descriptorCount = 1;
+            boneBinding.stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
+            VkDescriptorSetLayoutCreateInfo boneLayoutInfo{};
+            boneLayoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+            boneLayoutInfo.bindingCount = 1;
+            boneLayoutInfo.pBindings    = &boneBinding;
+            if (vkCreateDescriptorSetLayout(m_device, &boneLayoutInfo, nullptr, &m_nativeSkinnedMeshBoneDescSetLayout) != VK_SUCCESS) {
+                DebugLog("VulkanGraphicsDevice::EnsureNativeSkinnedMeshResources: bone descriptor set layout failed.\n");
+                DestroyNativeSkinnedMeshResources();
+                return false;
+            }
+
+            VkDescriptorPoolSize bonePoolSize{};
+            bonePoolSize.type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+            bonePoolSize.descriptorCount = 1;
+            VkDescriptorPoolCreateInfo bonePoolInfo{};
+            bonePoolInfo.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+            bonePoolInfo.maxSets       = 1;
+            bonePoolInfo.poolSizeCount = 1;
+            bonePoolInfo.pPoolSizes    = &bonePoolSize;
+            if (vkCreateDescriptorPool(m_device, &bonePoolInfo, nullptr, &m_nativeSkinnedMeshBoneDescPool) != VK_SUCCESS) {
+                DebugLog("VulkanGraphicsDevice::EnsureNativeSkinnedMeshResources: bone descriptor pool failed.\n");
+                DestroyNativeSkinnedMeshResources();
+                return false;
+            }
+
+            VkDescriptorSetAllocateInfo boneSetAlloc{};
+            boneSetAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            boneSetAlloc.descriptorPool     = m_nativeSkinnedMeshBoneDescPool;
+            boneSetAlloc.descriptorSetCount = 1;
+            boneSetAlloc.pSetLayouts        = &m_nativeSkinnedMeshBoneDescSetLayout;
+            if (vkAllocateDescriptorSets(m_device, &boneSetAlloc, &m_nativeSkinnedMeshBoneDescSet) != VK_SUCCESS) {
+                DebugLog("VulkanGraphicsDevice::EnsureNativeSkinnedMeshResources: bone descriptor set alloc failed.\n");
+                DestroyNativeSkinnedMeshResources();
+                return false;
+            }
+
+            VkDescriptorBufferInfo boneBufferInfo{};
+            boneBufferInfo.buffer = m_nativeSkinnedMeshBoneUbo;
+            boneBufferInfo.offset = 0;
+            boneBufferInfo.range  = slotStride;
+            VkWriteDescriptorSet boneWrite{};
+            boneWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            boneWrite.dstSet          = m_nativeSkinnedMeshBoneDescSet;
+            boneWrite.dstBinding      = 0;
+            boneWrite.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+            boneWrite.descriptorCount = 1;
+            boneWrite.pBufferInfo     = &boneBufferInfo;
+            vkUpdateDescriptorSets(m_device, 1, &boneWrite, 0, nullptr);
+        }
+
+        // --- pipeline layout: set0 = texture (shared with static mesh), set1 = bone UBO ---
+        VkPushConstantRange skinnedPushRange{};
+        skinnedPushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        skinnedPushRange.offset = 0;
+        skinnedPushRange.size = sizeof(VulkanNativeMeshPushConstants);
+
+        const VkDescriptorSetLayout skinnedSetLayouts[] = {
+            m_nativeMeshDescSetLayout,
+            m_nativeSkinnedMeshBoneDescSetLayout,
+        };
+        VkPipelineLayoutCreateInfo skinnedLayoutInfo{};
+        skinnedLayoutInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        skinnedLayoutInfo.setLayoutCount         = static_cast<uint32_t>(std::size(skinnedSetLayouts));
+        skinnedLayoutInfo.pSetLayouts            = skinnedSetLayouts;
+        skinnedLayoutInfo.pushConstantRangeCount = 1;
+        skinnedLayoutInfo.pPushConstantRanges    = &skinnedPushRange;
+        if (vkCreatePipelineLayout(m_device, &skinnedLayoutInfo, nullptr, &m_nativeSkinnedMeshPipelineLayout) != VK_SUCCESS) {
+            DebugLog("VulkanGraphicsDevice::EnsureNativeSkinnedMeshResources: vkCreatePipelineLayout failed.\n");
+            DestroyNativeSkinnedMeshResources();
+            return false;
+        }
+
+        Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
+        Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+        const std::filesystem::path skinnedShaderPath =
+            ShaderCompilationService::GetShaderSourceRoot() / L"Backend" / L"Native" / L"NativeMeshSkinned.hlsl";
+        if (!ShaderCompilationService::CompileShader(skinnedShaderPath, "VSMain", "vs_6_0", vsBlob, true) ||
+            !ShaderCompilationService::CompileShader(skinnedShaderPath, "PSMain", "ps_6_0", psBlob, true)) {
+            DebugLog("VulkanGraphicsDevice::EnsureNativeSkinnedMeshResources: SPIR-V shader compile failed.\n");
+            DestroyNativeSkinnedMeshResources();
+            return false;
+        }
+
+        VkShaderModuleCreateInfo vsInfo{};
+        vsInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        vsInfo.codeSize = vsBlob->GetBufferSize();
+        vsInfo.pCode = static_cast<const uint32_t*>(vsBlob->GetBufferPointer());
+        VkShaderModule vsModule = VK_NULL_HANDLE;
+        if (vkCreateShaderModule(m_device, &vsInfo, nullptr, &vsModule) != VK_SUCCESS) {
+            DestroyNativeSkinnedMeshResources();
+            return false;
+        }
+
+        VkShaderModuleCreateInfo psInfo{};
+        psInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        psInfo.codeSize = psBlob->GetBufferSize();
+        psInfo.pCode = static_cast<const uint32_t*>(psBlob->GetBufferPointer());
+        VkShaderModule psModule = VK_NULL_HANDLE;
+        if (vkCreateShaderModule(m_device, &psInfo, nullptr, &psModule) != VK_SUCCESS) {
+            vkDestroyShaderModule(m_device, vsModule, nullptr);
+            DestroyNativeSkinnedMeshResources();
+            return false;
+        }
+
+        VkPipelineShaderStageCreateInfo stages[2]{};
+        stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+        stages[0].module = vsModule;
+        stages[0].pName = "VSMain";
+        stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        stages[1].module = psModule;
+        stages[1].pName = "PSMain";
+
+        VkVertexInputBindingDescription skinnedBinding{};
+        skinnedBinding.binding = 0;
+        skinnedBinding.stride = 68;
+        skinnedBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+        std::array<VkVertexInputAttributeDescription, 6> skinnedAttributes = {
+            MakeNativeMeshAttribute(0, VK_FORMAT_R32G32B32_SFLOAT, 0),
+            MakeNativeMeshAttribute(1, VK_FORMAT_R32G32B32_SFLOAT, 12),
+            MakeNativeMeshAttribute(2, VK_FORMAT_R32G32B32A32_SFLOAT, 24),
+            MakeNativeMeshAttribute(3, VK_FORMAT_R32G32_SFLOAT, 40),
+            MakeNativeMeshAttribute(4, VK_FORMAT_R8G8B8A8_UINT, 48),
+            MakeNativeMeshAttribute(5, VK_FORMAT_R32G32B32A32_SFLOAT, 52),
+        };
+
+        VkPipelineVertexInputStateCreateInfo vertexInput{};
+        vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        vertexInput.vertexBindingDescriptionCount = 1;
+        vertexInput.pVertexBindingDescriptions = &skinnedBinding;
+        vertexInput.vertexAttributeDescriptionCount = static_cast<uint32_t>(skinnedAttributes.size());
+        vertexInput.pVertexAttributeDescriptions = skinnedAttributes.data();
+
+        VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+        inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+        VkPipelineViewportStateCreateInfo viewportState{};
+        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        viewportState.viewportCount = 1;
+        viewportState.scissorCount = 1;
+
+        VkPipelineRasterizationStateCreateInfo raster{};
+        raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        raster.polygonMode = VK_POLYGON_MODE_FILL;
+        raster.cullMode = VK_CULL_MODE_NONE;
+        raster.frontFace = VK_FRONT_FACE_CLOCKWISE;
+        raster.lineWidth = 1.0f;
+
+        VkPipelineMultisampleStateCreateInfo multisample{};
+        multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+        VkPipelineDepthStencilStateCreateInfo depthStencil{};
+        depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        depthStencil.depthTestEnable = VK_TRUE;
+        depthStencil.depthWriteEnable = VK_TRUE;
+        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+        VkPipelineColorBlendAttachmentState blendAttachment{};
+        blendAttachment.colorWriteMask =
+            VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        blendAttachment.blendEnable = VK_TRUE;
+        blendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        blendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        blendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+        blendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        blendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        blendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+
+        VkPipelineColorBlendStateCreateInfo blend{};
+        blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        blend.attachmentCount = 1;
+        blend.pAttachments = &blendAttachment;
+
+        VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+        VkPipelineDynamicStateCreateInfo dynamic{};
+        dynamic.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dynamic.dynamicStateCount = 2;
+        dynamic.pDynamicStates = dynamicStates;
+
+        VkGraphicsPipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipelineInfo.stageCount = 2;
+        pipelineInfo.pStages = stages;
+        pipelineInfo.pVertexInputState = &vertexInput;
+        pipelineInfo.pInputAssemblyState = &inputAssembly;
+        pipelineInfo.pViewportState = &viewportState;
+        pipelineInfo.pRasterizationState = &raster;
+        pipelineInfo.pMultisampleState = &multisample;
+        pipelineInfo.pDepthStencilState = &depthStencil;
+        pipelineInfo.pColorBlendState = &blend;
+        pipelineInfo.pDynamicState = &dynamic;
+        pipelineInfo.layout = m_nativeSkinnedMeshPipelineLayout;
+        pipelineInfo.renderPass = m_nativeMeshRenderPass;
+
+        const VkResult skinnedPipelineResult =
+            vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_nativeSkinnedMeshPipeline);
+        vkDestroyShaderModule(m_device, psModule, nullptr);
+        vkDestroyShaderModule(m_device, vsModule, nullptr);
+        if (skinnedPipelineResult != VK_SUCCESS) {
+            DebugLog("VulkanGraphicsDevice::EnsureNativeSkinnedMeshResources: vkCreateGraphicsPipelines failed.\n");
+            DestroyNativeSkinnedMeshResources();
+            return false;
+        }
+
+        return true;
+    }
+
     // -------------------------------------------------------------------------
     // Native ray march frame resources
     // -------------------------------------------------------------------------
@@ -992,7 +1328,7 @@ namespace SasamiRenderer
             return false;
         }
         if (vkMapMemory(m_device, m_nativeRayMarchUboMemory, 0, sizeof(VulkanRayMarchConstants),
-                        0, &m_nativeRayMarchUboMapped) != VK_SUCCESS) {
+                        0, &m_nativeRayMarchUboMapped) != VK_SUCCESS || !m_nativeRayMarchUboMapped) {
             DebugLog("VulkanGraphicsDevice::EnsureRayMarchResources: UBO map failed.\n");
             DestroyRayMarchResources();
             return false;
@@ -1399,43 +1735,7 @@ namespace SasamiRenderer
 
             // Bind texture descriptor set (create and cache on first use per SRV handle)
             {
-                auto dsIt = m_nativeMeshDescSets.find(draw.albedoSrv);
-                if (dsIt == m_nativeMeshDescSets.end() && draw.albedoSrv != 0) {
-                    VkDescriptorSetAllocateInfo texAlloc{};
-                    texAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-                    texAlloc.descriptorPool     = m_nativeMeshDescPool;
-                    texAlloc.descriptorSetCount = 1;
-                    texAlloc.pSetLayouts        = &m_nativeMeshDescSetLayout;
-                    VkDescriptorSet newSet = VK_NULL_HANDLE;
-                    if (vkAllocateDescriptorSets(m_device, &texAlloc, &newSet) == VK_SUCCESS) {
-                        const auto viewIt = m_rhiImageViews.find(draw.albedoSrv);
-                        VkImageView view = (viewIt != m_rhiImageViews.end())
-                            ? viewIt->second : m_nativeMeshDummyImageView;
-                        VkDescriptorImageInfo imgInfo{};
-                        imgInfo.imageView   = view;
-                        imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                        VkDescriptorImageInfo smpInfo{};
-                        smpInfo.sampler = m_nativeMeshSampler;
-                        VkWriteDescriptorSet writes[2]{};
-                        writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                        writes[0].dstSet          = newSet;
-                        writes[0].dstBinding      = 100;
-                        writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-                        writes[0].descriptorCount = 1;
-                        writes[0].pImageInfo      = &imgInfo;
-                        writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                        writes[1].dstSet          = newSet;
-                        writes[1].dstBinding      = 200;
-                        writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLER;
-                        writes[1].descriptorCount = 1;
-                        writes[1].pImageInfo      = &smpInfo;
-                        vkUpdateDescriptorSets(m_device, 2, writes, 0, nullptr);
-                        m_nativeMeshDescSets[draw.albedoSrv] = newSet;
-                        dsIt = m_nativeMeshDescSets.find(draw.albedoSrv);
-                    }
-                }
-                const VkDescriptorSet bindSet = (dsIt != m_nativeMeshDescSets.end())
-                    ? dsIt->second : m_nativeMeshDescSets[0];
+                const VkDescriptorSet bindSet = GetOrCreateNativeMeshTextureDescriptorSet(draw.albedoSrv);
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                     m_nativeMeshPipelineLayout, 0, 1, &bindSet, 0, nullptr);
             }
@@ -1475,6 +1775,82 @@ namespace SasamiRenderer
                 vkCmdDrawIndexed(cmd, draw.indexCount, 1, 0, 0, 0);
             } else if (draw.vertexCount > 0) {
                 vkCmdDraw(cmd, draw.vertexCount, 1, 0, 0);
+            }
+        }
+
+        if (desc.skinnedDrawCount > 0 && desc.skinnedDraws && EnsureNativeSkinnedMeshResources()) {
+            constexpr uint32_t kMaxSimultaneousSkinnedDraws = 16;
+            const uint32_t skinnedDrawCount = std::min<uint32_t>(desc.skinnedDrawCount, kMaxSimultaneousSkinnedDraws);
+            if (desc.skinnedDrawCount > kMaxSimultaneousSkinnedDraws) {
+                DebugLog("VulkanGraphicsDevice::RenderMeshFrame: skinnedDrawCount exceeds the "
+                         "per-frame bone UBO slot budget; extra skinned draws are skipped.\n");
+            }
+
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_nativeSkinnedMeshPipeline);
+
+            for (uint32_t i = 0; i < skinnedDrawCount; ++i) {
+                const RhiBackendSkinnedMeshDrawDesc& draw = desc.skinnedDraws[i];
+                const auto vbIt = m_rhiResources.find(draw.vertexBufferHandle);
+                if (vbIt == m_rhiResources.end() || vbIt->second.buffer == VK_NULL_HANDLE) {
+                    continue;
+                }
+
+                // Upload this draw's bone palette into its dedicated UBO slot. Command buffers
+                // are recorded synchronously here but executed later on the GPU; ExecuteBackendFrame
+                // already waits on this frame-in-flight slot's fence before reaching this point, so
+                // reusing the same fixed slot index per draw ordinal each frame cannot race a still
+                // in-flight read of the same bytes (same pattern as m_nativeRayMarchUboMapped).
+                const VkDeviceSize slotOffset = static_cast<VkDeviceSize>(i) * m_nativeSkinnedMeshBoneSlotStride;
+                if (draw.boneMatrices && m_nativeSkinnedMeshBoneUboMapped) {
+                    std::memcpy(static_cast<uint8_t*>(m_nativeSkinnedMeshBoneUboMapped) + slotOffset,
+                                draw.boneMatrices,
+                                static_cast<size_t>(Skeleton::kMaxBones) * 16 * sizeof(float));
+                }
+
+                const VkDescriptorSet texSet = GetOrCreateNativeMeshTextureDescriptorSet(draw.albedoSrv);
+                const VkDescriptorSet boundSets[] = { texSet, m_nativeSkinnedMeshBoneDescSet };
+                const uint32_t dynamicOffset = static_cast<uint32_t>(slotOffset);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    m_nativeSkinnedMeshPipelineLayout, 0,
+                    static_cast<uint32_t>(std::size(boundSets)), boundSets,
+                    1, &dynamicOffset);
+
+                VulkanNativeMeshPushConstants constants{};
+                Math::Mul4x4(draw.model, desc.viewProjection, constants.modelViewProjection);
+                std::memcpy(constants.baseColor, draw.baseColor, sizeof(constants.baseColor));
+                constants.lightDirIntensity[0] = desc.sunDir[0];
+                constants.lightDirIntensity[1] = desc.sunDir[1];
+                constants.lightDirIntensity[2] = desc.sunDir[2];
+                constants.lightDirIntensity[3] = desc.sunIntensity;
+                constants.lightColor[0] = desc.sunColor[0];
+                constants.lightColor[1] = desc.sunColor[1];
+                constants.lightColor[2] = desc.sunColor[2];
+                constants.lightColor[3] = 1.0f;
+                constants.emissiveRoughness[0] = draw.emissive[0];
+                constants.emissiveRoughness[1] = draw.emissive[1];
+                constants.emissiveRoughness[2] = draw.emissive[2];
+                constants.emissiveRoughness[3] = draw.roughness;
+                vkCmdPushConstants(cmd,
+                                   m_nativeSkinnedMeshPipelineLayout,
+                                   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                   0,
+                                   sizeof(constants),
+                                   &constants);
+
+                VkBuffer vertexBuffer = vbIt->second.buffer;
+                VkDeviceSize offset = 0;
+                vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
+
+                const auto ibIt = m_rhiResources.find(draw.indexBufferHandle);
+                if (draw.indexCount > 0 && ibIt != m_rhiResources.end() && ibIt->second.buffer != VK_NULL_HANDLE) {
+                    vkCmdBindIndexBuffer(cmd,
+                                         ibIt->second.buffer,
+                                         0,
+                                         draw.index32Bit ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
+                    vkCmdDrawIndexed(cmd, draw.indexCount, 1, 0, 0, 0);
+                } else if (draw.vertexCount > 0) {
+                    vkCmdDraw(cmd, draw.vertexCount, 1, 0, 0);
+                }
             }
         }
 
@@ -1924,6 +2300,7 @@ namespace SasamiRenderer
         }
 
         DestroyNativeMeshResources();
+        DestroyNativeSkinnedMeshResources();
         DestroyRayMarchResources();
         for (VkImageView imageView : m_swapchainImageViews) {
             if (imageView != VK_NULL_HANDLE) {
@@ -2015,6 +2392,9 @@ namespace SasamiRenderer
         m_capabilities.supportsRayTracingPipeline     = m_hasVkKhrRayTracingPipeline;
         m_capabilities.supportsRayQuery               = m_hasVkKhrRayQuery;
         m_capabilities.supportsMeshShaders = false;
+        // Device-level creates are allowed concurrently in Vulkan; per-object external sync applies.
+        m_capabilities.supportsThreadedResourceCreation = true;
+        m_capabilities.supportsThreadedPipelineCreation = true;
     }
 
     uint32_t VulkanGraphicsDevice::FindMemoryType(uint32_t typeBits, VkMemoryPropertyFlags properties) const
@@ -2039,6 +2419,7 @@ namespace SasamiRenderer
     void VulkanGraphicsDevice::DestroySwapChain()
     {
         DestroyNativeMeshResources();
+        DestroyNativeSkinnedMeshResources();
         DestroyRayMarchResources();
         if (m_device != VK_NULL_HANDLE) {
             for (VkImageView imageView : m_swapchainImageViews) {

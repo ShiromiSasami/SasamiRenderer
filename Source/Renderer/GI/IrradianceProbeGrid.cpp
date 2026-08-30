@@ -2,6 +2,7 @@
 #include "Renderer/GI/IrradianceProbeGrid.h"
 
 #include "Foundation/Math/MathUtil.h"
+#include "Foundation/Tools/DebugOutput.h"
 #include "Renderer/Utilities/ResourceUploadUtility.h"
 #include "Renderer/Resources/ShaderCompilationService.h"
 
@@ -15,7 +16,6 @@
 #include <windows.h>
 
 #include <d3dcompiler.h>
-#include <dxcapi.h>
 #include <wrl.h>
 
 #include "d3dx12.h"
@@ -26,137 +26,51 @@ namespace SasamiRenderer
 {
     namespace
     {
-        // ---- Minimal DXC helper (mirrors GpuSoftwareRayTracer's helper) ----
-        HRESULT CreateDxcInstance(REFCLSID clsid, REFIID iid, LPVOID* out)
-        {
-            static HMODULE mod = LoadLibraryW(L"dxcompiler.dll");
-            static auto fn = mod
-                ? reinterpret_cast<HRESULT(WINAPI*)(REFCLSID, REFIID, LPVOID*)>(
-                      GetProcAddress(mod, "DxcCreateInstance"))
-                : nullptr;
-            return fn ? fn(clsid, iid, out) : HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND);
-        }
-
-        std::filesystem::path GetExeDir()
-        {
-            wchar_t buf[MAX_PATH]{};
-            GetModuleFileNameW(nullptr, buf, MAX_PATH);
-            return std::filesystem::path(buf).parent_path();
-        }
-
-        std::filesystem::path FindProjectRoot(std::filesystem::path dir)
-        {
-            for (int depth = 0; depth < 16; ++depth) {
-                // Require both Shaders and Source to distinguish project root from build output
-                if (std::filesystem::exists(dir / "Shaders") && std::filesystem::exists(dir / "Source"))
-                    return dir;
-                if (std::filesystem::exists(dir / "Source" / "Renderer" / "Shaders"))
-                    return dir;
-                auto p = dir.parent_path();
-                if (p.empty() || p == dir) break;
-                dir = p;
-            }
-            return {};
-        }
-
-        std::filesystem::path GetShaderRoot()
-        {
-            static const std::filesystem::path root = []() {
-                auto pr = FindProjectRoot(GetExeDir());
-                if (pr.empty()) {
-                    return std::filesystem::path(L"Shaders");
-                }
-                const std::filesystem::path shaderRoot = pr / L"Shaders";
-                return std::filesystem::exists(shaderRoot)
-                    ? shaderRoot
-                    : pr / L"Source" / L"Renderer" / L"Shaders";
-            }();
-            return root;
-        }
-
         bool CompileCS(ID3D12Device* dev, const wchar_t* relPath, const char* entry, ComPtr<ID3DBlob>& outBlob,
                        std::string& outError)
         {
-            const std::filesystem::path srcPath = GetShaderRoot() / relPath;
-            const std::filesystem::path incPath = GetShaderRoot();
+            const std::wstring csTarget = ShaderCompilationService::ResolveEffectiveComputeShaderTarget(dev, "6_6");
+            const std::string profileNarrow(csTarget.begin(), csTarget.end());
 
-            ComPtr<IDxcUtils> utils;
-            ComPtr<IDxcCompiler3> compiler;
-            if (FAILED(CreateDxcInstance(CLSID_DxcUtils, IID_PPV_ARGS(&utils)))) {
-                outError = "DXC: failed to create IDxcUtils";
+            std::vector<uint8_t> bytecode;
+            if (!ShaderCompilationService::GetOrCompileShaderBytecodeDxc(
+                    "GI", relPath, entry, profileNarrow.c_str(), bytecode)) {
+                outError = "ShaderCompilationService: failed to compile shader";
                 return false;
             }
-            if (FAILED(CreateDxcInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&compiler)))) {
-                outError = "DXC: failed to create IDxcCompiler3";
-                return false;
-            }
-
-            ComPtr<IDxcBlobEncoding> src;
-            if (FAILED(utils->LoadFile(srcPath.c_str(), nullptr, &src))) {
-                outError = "DXC: failed to load shader file: " + srcPath.string();
-                OutputDebugStringA(("GI: " + outError + "\n").c_str());
-                return false;
-            }
-
-            ComPtr<IDxcIncludeHandler> incHandler;
-            utils->CreateDefaultIncludeHandler(&incHandler);
-
-            const std::wstring srcW = srcPath.native();
-            const std::wstring entW = [&]() {
-                std::wstring w; for (char c : std::string(entry)) w += c; return w;
-            }();
-            const std::wstring incW = incPath.native();
-
-            const std::string smStr = ShaderCompilationService::ResolveEffectiveShaderModel(dev, "6_6");
-            const std::wstring csTarget = L"cs_" + std::wstring(smStr.begin(), smStr.end());
-
-            std::vector<LPCWSTR> args{
-                srcW.c_str(), L"-E", entW.c_str(),
-                L"-T", csTarget.c_str(),
-                L"-I", incW.c_str(),
-                L"-HV", L"2021",
-                L"-WX",
-            };
-#if defined(_DEBUG)
-            args.push_back(L"-Zi"); args.push_back(L"-Od");
-#else
-            args.push_back(L"-O3");
-#endif
-
-            DxcBuffer buf{ src->GetBufferPointer(), src->GetBufferSize(), DXC_CP_ACP };
-            ComPtr<IDxcResult> result;
-            if (FAILED(compiler->Compile(&buf, args.data(), (UINT32)args.size(), incHandler.Get(), IID_PPV_ARGS(&result)))) {
-                outError = "DXC: Compile() call itself failed (DXC internal error)";
-                return false;
-            }
-
-            ComPtr<IDxcBlobUtf8> errors;
-            if (SUCCEEDED(result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&errors), nullptr)) &&
-                errors && errors->GetStringLength() > 0) {
-                outError = std::string(errors->GetStringPointer(), errors->GetStringLength());
-                OutputDebugStringA(errors->GetStringPointer());
-            }
-
-            HRESULT hr = S_OK;
-            result->GetStatus(&hr);
-            if (FAILED(hr)) {
-                if (outError.empty())
-                    outError = "DXC: compilation failed with no error message (HRESULT=" + std::to_string(static_cast<int>(hr)) + ")";
-                OutputDebugStringA(("GI: shader compilation failed: " + srcPath.string() + "\n").c_str());
-                return false;
-            }
-
-            ComPtr<IDxcBlob> code;
-            result->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&code), nullptr);
-            if (!code) return false;
 
             // Copy to ID3DBlob for compatibility with PSO creation
             ID3DBlob* blob = nullptr;
-            D3DCreateBlob(code->GetBufferSize(), &blob);
-            memcpy(blob->GetBufferPointer(), code->GetBufferPointer(), code->GetBufferSize());
+            if (FAILED(D3DCreateBlob(bytecode.size(), &blob)) || !blob) {
+                return false;
+            }
+            memcpy(blob->GetBufferPointer(), bytecode.data(), bytecode.size());
             outBlob.Attach(blob);
             return true;
         }
+
+        // GPU mirror of GpuPointLightRT / GpuSpotLightRT (RayTracing/SWRT/SWRT_LightTypes.hlsli).
+        // Redeclared here rather than reusing GpuSoftwareRayTracer's private nested types so
+        // this GI-only compute pass carries no dependency on unrelated SWRT reflection/ReSTIR code.
+        struct GIPointLightGpu
+        {
+            float pos[3];
+            float range;
+            float colorIntensity[3];
+            float pad;
+        };
+        static_assert(sizeof(GIPointLightGpu) == 32u);
+
+        struct GISpotLightGpu
+        {
+            float pos[3];
+            float range;
+            float dir[3];
+            float cosInner;
+            float colorIntensity[3];
+            float cosOuter;
+        };
+        static_assert(sizeof(GISpotLightGpu) == 48u);
 
     } // anonymous namespace
 
@@ -174,6 +88,10 @@ namespace SasamiRenderer
             }
         }
         m_cbMapped = nullptr;
+        if (m_lightDataMapped) {
+            m_lightDataBuffer.Unmap(0, nullptr);
+        }
+        m_lightDataMapped = nullptr;
         if (m_device && m_cbBufferHandle.IsValid()) {
             m_device->DestroyRhiResource(m_cbBufferHandle);
         }
@@ -221,6 +139,57 @@ namespace SasamiRenderer
         m_countX = std::max(2u, static_cast<uint32_t>(std::ceil(extX / sx)) + 1u);
         m_countY = std::max(2u, static_cast<uint32_t>(std::ceil(extY / sy)) + 1u);
         m_countZ = std::max(2u, static_cast<uint32_t>(std::ceil(extZ / sz)) + 1u);
+    }
+
+    // =========================================================================
+    // FitToSceneBoundsWithBudget
+    // Auto-sizes the grid to cover the given world AABB while keeping the total
+    // probe count within probeBudget, by coarsening the spacing beforehand.
+    // =========================================================================
+
+    void IrradianceProbeGrid::FitToSceneBoundsWithBudget(float bMinX, float bMinY, float bMinZ,
+                                                          float bMaxX, float bMaxY, float bMaxZ,
+                                                          float margin,
+                                                          std::uint32_t probeBudget)
+    {
+        if (probeBudget == 0u) {
+            FitToSceneBounds(bMinX, bMinY, bMinZ, bMaxX, bMaxY, bMaxZ, margin);
+            return;
+        }
+
+        const float extX = std::max(0.0f, (bMaxX - bMinX) + margin * 2.0f);
+        const float extY = std::max(0.0f, (bMaxY - bMinY) + margin * 2.0f);
+        const float extZ = std::max(0.0f, (bMaxZ - bMinZ) + margin * 2.0f);
+        const double volume = static_cast<double>(extX) * static_cast<double>(extY) * static_cast<double>(extZ);
+
+        if (volume <= 0.0 || extX == 0.0f || extY == 0.0f || extZ == 0.0f) {
+            FitToSceneBounds(bMinX, bMinY, bMinZ, bMaxX, bMaxY, bMaxZ, margin);
+            return;
+        }
+
+        // Target spacing that would yield ~probeBudget probes over this volume.
+        // Never go finer than the current spacing -- this function only coarsens.
+        const double target = std::cbrt(volume / static_cast<double>(probeBudget));
+        const float currentSpacing = std::max(m_spacingX, std::max(m_spacingY, m_spacingZ));
+        float spacing = std::max(currentSpacing, static_cast<float>(target));
+        m_spacingX = m_spacingY = m_spacingZ = spacing;
+
+        FitToSceneBounds(bMinX, bMinY, bMinZ, bMaxX, bMaxY, bMaxZ, margin);
+
+        // Rounding (ceil + 1 per axis) can still push the count past the budget;
+        // coarsen the spacing further and retry until it fits (or we give up).
+        constexpr int kMaxIterations = 16;
+        for (int iter = 0; iter < kMaxIterations; ++iter) {
+            const std::uint64_t totalProbes = static_cast<std::uint64_t>(m_countX) *
+                                              static_cast<std::uint64_t>(m_countY) *
+                                              static_cast<std::uint64_t>(m_countZ);
+            if (totalProbes <= static_cast<std::uint64_t>(probeBudget)) {
+                break;
+            }
+            spacing *= 1.15f;
+            m_spacingX = m_spacingY = m_spacingZ = spacing;
+            FitToSceneBounds(bMinX, bMinY, bMinZ, bMaxX, bMaxY, bMaxZ, margin);
+        }
     }
 
     // =========================================================================
@@ -272,6 +241,20 @@ namespace SasamiRenderer
         // Zero-initialise (giEnabled = 0.0f → GI disabled until first update writes it)
         memset(m_cbMapped, 0, kCbTotalSize);
 
+        // ---- Punctual light data (persistently-mapped upload buffer, root SRVs t6/t7) ----
+        // Bound directly by GPU VA (no descriptor view), same style as the BVH buffers.
+        {
+            const UINT64 lightBufSize =
+                static_cast<UINT64>(kMaxPointLights) * sizeof(GIPointLightGpu) +
+                static_cast<UINT64>(kMaxSpotLights)  * sizeof(GISpotLightGpu);
+            if (!ResourceUploadUtility::CreateUploadBuffer(device, lightBufSize,
+                                                           m_lightDataBuffer,
+                                                           reinterpret_cast<void**>(&m_lightDataMapped))) {
+                return false;
+            }
+            memset(m_lightDataMapped, 0, lightBufSize);
+        }
+
         // ---- Descriptor heap: [0]=probe SRV (t10), [1]=probe UAV (u0) ----
         D3D12_DESCRIPTOR_HEAP_DESC hd{};
         hd.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
@@ -310,6 +293,15 @@ namespace SasamiRenderer
             if (currentProbeBuffer && currentProbeBuffer->IsValid()) {
                 return true;
             }
+        }
+
+        // A buffer created without initial data starts zeroed, so whatever bake progress
+        // was recorded for the previous allocation no longer describes its contents.
+        // Clearing the progress here keeps IsBaked() honest and makes the next pass write
+        // at full weight instead of blending fresh radiance into zeros.
+        if (!initialData) {
+            ResetBakeState();
+            m_everBaked = false;
         }
 
         ID3D12Device* dev = device.GetDevice();
@@ -385,6 +377,9 @@ namespace SasamiRenderer
                     m_probeBufferHandle,
                     viewDesc,
                     RhiCpuDescriptorHandle{ srvCpu.ptr })) {
+                device.DestroyRhiResource(m_probeBufferHandle);
+                m_probeBufferHandle = {};
+                m_probeBufferCompat = nullptr;
                 return false;
             }
         } else {
@@ -416,7 +411,7 @@ namespace SasamiRenderer
         m_probeSrv = {};  // not used for root SRV
         m_probeUav = {};  // not used for root UAV
 
-        // Refresh the GPU CB so any caller of ReallocProbeBuffer() (e.g. FitProbeGridToScene)
+        // Refresh the GPU CB so any caller of ReallocAndClearProbeBuffer() (e.g. FitProbeGridToScene)
         // immediately sees the updated counts/origin in the debug visualization.
         FlushGridCB();
 
@@ -471,9 +466,11 @@ namespace SasamiRenderer
         //  [4] Root SRV  (t3): g_instances
         //  [5] Root SRV  (t4): g_tlasNodes
         //  [6] Root SRV  (t5): g_materials
-        //  [7] Root UAV  (u0): g_probeSHOutput
+        //  [7] Root SRV  (t6): g_pointLights
+        //  [8] Root SRV  (t7): g_spotLights
+        //  [9] Root UAV  (u0): g_probeSHOutput
 
-        D3D12_ROOT_PARAMETER params[8]{};
+        D3D12_ROOT_PARAMETER params[10]{};
 
         // [0] CBV b0
         params[0].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
@@ -489,14 +486,22 @@ namespace SasamiRenderer
             params[1 + i].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
         }
 
-        // [7] UAV u0
-        params[7].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_UAV;
-        params[7].Descriptor.ShaderRegister = 0;
-        params[7].Descriptor.RegisterSpace  = 0;
-        params[7].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
+        // [7-8] SRV t6-t7 (punctual lights)
+        for (UINT i = 0; i < 2u; ++i) {
+            params[7 + i].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
+            params[7 + i].Descriptor.ShaderRegister = 6u + i;
+            params[7 + i].Descriptor.RegisterSpace  = 0;
+            params[7 + i].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
+        }
+
+        // [9] UAV u0
+        params[9].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_UAV;
+        params[9].Descriptor.ShaderRegister = 0;
+        params[9].Descriptor.RegisterSpace  = 0;
+        params[9].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
 
         D3D12_ROOT_SIGNATURE_DESC rsDesc{};
-        rsDesc.NumParameters = 8;
+        rsDesc.NumParameters = 10;
         rsDesc.pParameters   = params;
         rsDesc.Flags         = D3D12_ROOT_SIGNATURE_FLAG_NONE;
 
@@ -562,7 +567,7 @@ namespace SasamiRenderer
         out.probeSpacing[0] = m_spacingX;
         out.probeSpacing[1] = m_spacingY;
         out.probeSpacing[2] = m_spacingZ;
-        out.giEnabled      = (m_enabled && m_pso && IsBaked()) ? 1.0f : 0.0f;
+        out.giEnabled      = (m_enabled && m_pso && m_everBaked) ? 1.0f : 0.0f;
         out.probeCountX    = m_countX;
         out.probeCountY    = m_countY;
         out.probeCountZ    = m_countZ;
@@ -589,7 +594,13 @@ namespace SasamiRenderer
         out.probeCountY     = m_countY;
         out.probeCountZ     = m_countZ;
         out.baseProbeIndex  = baseIdx;
-        out.emaAlpha        = m_emaAlpha;
+        // First pass after a reset writes the traced irradiance at full weight.
+        // The probe buffer is zero-initialised (AllocateProbeBuffer) and every probe is
+        // dispatched exactly once per pass, so blending with m_emaAlpha here would leave
+        // the baked field at alpha * radiance -- e.g. 1% of the correct value at
+        // ema_alpha = 0.01, which reads as "GI does nothing". EMA is meaningful only
+        // once a full pass has produced valid data (continuous-mode refresh passes).
+        out.emaAlpha        = IsBaked() ? m_emaAlpha : 1.0f;
         out.maxTraceDistance = m_maxTraceDistance;
         out.shadowBias      = desc.shadowBias;
         out.frameIndex      = desc.frameIndex;
@@ -605,6 +616,65 @@ namespace SasamiRenderer
         out.ambientColor[1]  = desc.ambientColor[1];
         out.ambientColor[2]  = desc.ambientColor[2];
         out.probesThisDispatch = count;
+
+        out.pointLightCount = desc.pointLights
+            ? std::min(static_cast<uint32_t>(desc.pointLights->size()), kMaxPointLights) : 0u;
+        out.spotLightCount = desc.spotLights
+            ? std::min(static_cast<uint32_t>(desc.spotLights->size()), kMaxSpotLights) : 0u;
+        out.pad2 = 0u;
+        out.pad3 = 0u;
+    }
+
+    // =========================================================================
+    // FillLightDataBuffer
+    // Converts desc.pointLights/spotLights into the GPU light layout expected by
+    // GI_ProbeUpdate_CS.hlsl and writes them into the persistently-mapped light buffer.
+    // Same conversion (yaw/pitch -> direction, color*intensity) as
+    // GpuSoftwareRayTracer's SWRT reflection/ReSTIR light upload.
+    // =========================================================================
+
+    void IrradianceProbeGrid::FillLightDataBuffer(const UpdateDesc& desc) const
+    {
+        if (!m_lightDataMapped) return;
+
+        auto* pointDst = reinterpret_cast<GIPointLightGpu*>(m_lightDataMapped);
+        if (desc.pointLights) {
+            const uint32_t nPt = std::min(static_cast<uint32_t>(desc.pointLights->size()), kMaxPointLights);
+            for (uint32_t i = 0; i < nPt; ++i) {
+                const RenderPointLight& src = (*desc.pointLights)[i];
+                pointDst[i].pos[0] = src.pos[0];
+                pointDst[i].pos[1] = src.pos[1];
+                pointDst[i].pos[2] = src.pos[2];
+                pointDst[i].range  = src.range;
+                pointDst[i].colorIntensity[0] = src.color[0] * src.intensity;
+                pointDst[i].colorIntensity[1] = src.color[1] * src.intensity;
+                pointDst[i].colorIntensity[2] = src.color[2] * src.intensity;
+                pointDst[i].pad = 0.0f;
+            }
+        }
+
+        uint8_t* spotBase = m_lightDataMapped + static_cast<size_t>(kMaxPointLights) * sizeof(GIPointLightGpu);
+        auto* spotDst = reinterpret_cast<GISpotLightGpu*>(spotBase);
+        if (desc.spotLights) {
+            const uint32_t nSp = std::min(static_cast<uint32_t>(desc.spotLights->size()), kMaxSpotLights);
+            for (uint32_t i = 0; i < nSp; ++i) {
+                const RenderSpotLight& src = (*desc.spotLights)[i];
+                spotDst[i].pos[0] = src.pos[0];
+                spotDst[i].pos[1] = src.pos[1];
+                spotDst[i].pos[2] = src.pos[2];
+                spotDst[i].range  = src.range;
+                float dir[3]{};
+                Math::DirectionFromYawPitch(src.yaw, src.pitch, dir);
+                spotDst[i].dir[0] = dir[0];
+                spotDst[i].dir[1] = dir[1];
+                spotDst[i].dir[2] = dir[2];
+                spotDst[i].cosInner = std::cos(src.innerAngle);
+                spotDst[i].colorIntensity[0] = src.color[0] * src.intensity;
+                spotDst[i].colorIntensity[1] = src.color[1] * src.intensity;
+                spotDst[i].colorIntensity[2] = src.color[2] * src.intensity;
+                spotDst[i].cosOuter = std::cos(src.outerAngle);
+            }
+        }
     }
 
     // =========================================================================
@@ -657,6 +727,9 @@ namespace SasamiRenderer
             memcpy(m_cbMapped + 256u, &updateCB, sizeof(updateCB));
         }
 
+        // ---- Write punctual light data (t6/t7) ----
+        FillLightDataBuffer(desc);
+
         ID3D12GraphicsCommandList* cl = cmdList.Get();
         if (!cl) return false;
 
@@ -685,9 +758,25 @@ namespace SasamiRenderer
         cl->SetComputeRootShaderResourceView (4, bvhAddrs.instances);
         cl->SetComputeRootShaderResourceView (5, bvhAddrs.tlasNodes);
         cl->SetComputeRootShaderResourceView (6, bvhAddrs.materials);
-        cl->SetComputeRootUnorderedAccessView(7, probeBuffer->GetGPUVirtualAddress());
+        const D3D12_GPU_VIRTUAL_ADDRESS pointLightsVA = m_lightDataBuffer.GetGPUVirtualAddress();
+        const D3D12_GPU_VIRTUAL_ADDRESS spotLightsVA =
+            pointLightsVA + static_cast<UINT64>(kMaxPointLights) * sizeof(GIPointLightGpu);
+        cl->SetComputeRootShaderResourceView (7, pointLightsVA);
+        cl->SetComputeRootShaderResourceView (8, spotLightsVA);
+        cl->SetComputeRootUnorderedAccessView(9, probeBuffer->GetGPUVirtualAddress());
 
         // One thread group per probe, 64 threads per group
+#if defined(_DEBUG)
+        DebugIncrementDispatchCount();
+        {
+            char buf[256];
+            snprintf(buf, sizeof(buf),
+                "[DispatchDiag] idx=%u pass=IrradianceProbeGrid_UpdateProbes instancesVA=0x%llX gen=%llu instancesHandleId=%llu\n",
+                DebugGetDispatchCount(), (unsigned long long)bvhAddrs.instances,
+                (unsigned long long)bvhAddrs.generation, (unsigned long long)bvhAddrs.instancesHandleId);
+            DebugLog(buf);
+        }
+#endif
         cl->Dispatch(probesThisFrame, 1, 1);
 
         // ---- UAV barrier (ensure writes are visible) ----
@@ -705,20 +794,13 @@ namespace SasamiRenderer
         m_nextProbeIdx           += probesThisFrame;
         m_totalProbesDispatched  += probesThisFrame;
         if (IsBaked()) {
-            // FillProbeGridCB gates giEnabled on IsBaked(); refresh the CB after
+            m_everBaked = true;
+            // FillProbeGridCB gates giEnabled on m_everBaked; refresh the CB after
             // the final dispatch so lighting can consume the completed probes.
             FlushGridCB();
         }
 
         return true;
-    }
-
-    float IrradianceProbeGrid::GetBakeProgress() const
-    {
-        const uint32_t total = GetTotalProbeCount();
-        if (total == 0) return 0.0f;
-        return std::min(1.0f, static_cast<float>(m_totalProbesDispatched) /
-                              static_cast<float>(total));
     }
 
     uint32_t IrradianceProbeGrid::GetBakedProbeCount() const
@@ -737,7 +819,7 @@ namespace SasamiRenderer
     bool IrradianceProbeGrid::ExportProbeData(IRHIDevice& device, std::vector<uint8_t>& outData) const
     {
         outData.clear();
-        if (!m_initialized || !IsBaked() || !m_probeBufferHandle.IsValid()) {
+        if (!m_initialized || !m_everBaked || !m_probeBufferHandle.IsValid()) {
             return false;
         }
 
@@ -842,6 +924,7 @@ namespace SasamiRenderer
 
         m_nextProbeIdx = GetTotalProbeCount();
         m_totalProbesDispatched = GetTotalProbeCount();
+        m_everBaked = true;
         FlushGridCB();
         return true;
     }
@@ -857,6 +940,7 @@ namespace SasamiRenderer
         // Force a fresh zero-initialized allocation by invalidating the current capacity.
         m_probeBufferCapacity = 0u;
         ResetBakeState();
+        m_everBaked = false; // stale SH data was just discarded; lighting must wait for a fresh pass
         return m_initialized ? AllocateProbeBuffer(device) : true;
     }
 

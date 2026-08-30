@@ -39,7 +39,7 @@ cbuffer ReSTIRFrameConstants : register(b0)
     float3 g_dirLightDir;
     float  g_dirLightIntensity;
     float3 g_dirLightColor;
-    float  g_shadowBias;
+    float  g_microShadowStrength;
     float3 g_ambientColor;
     float  g_ambientIntensity;
     uint   g_pointLightCount;
@@ -50,9 +50,7 @@ cbuffer ReSTIRFrameConstants : register(b0)
 
 Texture2D<float4> g_gbuffer : register(t6);  // scratch SRV[0]
 
-struct GpuPointLightRT { float3 pos; float range; float3 colorIntensity; float pad; };
-struct GpuSpotLightRT  { float3 pos; float range; float3 dir; float cosInner;
-                         float3 colorIntensity; float cosOuter; };
+#include "RayTracing/SWRT/SWRT_LightTypes.hlsli"
 StructuredBuffer<GpuPointLightRT> g_pointLights : register(t12);
 StructuredBuffer<GpuSpotLightRT>  g_spotLights  : register(t13);
 

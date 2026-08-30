@@ -37,7 +37,7 @@ cbuffer ReSTIRFrameConstants : register(b0)
     float3 g_dirLightDir;
     float  g_dirLightIntensity;
     float3 g_dirLightColor;
-    float  g_shadowBias;
+    float  g_microShadowStrength;
     float3 g_ambientColor;
     float  g_ambientIntensity;
     uint   g_pointLightCount;
@@ -50,36 +50,14 @@ Texture2D<float4> g_gbuffer     : register(t6);  // secondary normal.xyz + hit d
 Texture2D<float4> g_hitMaterial : register(t7);  // secondary baseColor.rgb + roughness
 Texture2D<float4> g_hitPosition : register(t8);  // secondary world position.xyz + valid
 
-struct GpuPointLightRT { float3 pos; float range; float3 colorIntensity; float pad; };
-struct GpuSpotLightRT  { float3 pos; float range; float3 dir; float cosInner;
-                         float3 colorIntensity; float cosOuter; };
+#include "RayTracing/SWRT/SWRT_LightTypes.hlsli"
 StructuredBuffer<GpuPointLightRT> g_pointLights : register(t12);
 StructuredBuffer<GpuSpotLightRT>  g_spotLights  : register(t13);
 
 StructuredBuffer<Reservoir>   g_reservoirIn  : register(t14);
 RWStructuredBuffer<Reservoir> g_reservoirOut : register(u3);
 
-float EvalPhat(uint i, float3 pos, float3 N)
-{
-    if (i == 0xFFFFFFFFu) return 0.0f;
-    uint totalLights = g_pointLightCount + g_spotLightCount;
-    if (i >= totalLights) return 0.0f;
-    if (i < g_pointLightCount)
-    {
-        GpuPointLightRT pl = g_pointLights[i];
-        return PhatPoint(pos, N, pl.pos, pl.colorIntensity, pl.range);
-    }
-    uint si = i - g_pointLightCount;
-    GpuSpotLightRT sl = g_spotLights[si];
-    float3 toLight = sl.pos - pos;
-    float  dist    = length(toLight);
-    if (dist >= sl.range) return 0.0f;
-    float3 L = toLight / dist;
-    float  cosA = dot(-L, normalize(sl.dir));
-    if (cosA < sl.cosOuter) return 0.0f;
-    float spotA = smoothstep(sl.cosOuter, sl.cosInner, cosA);
-    return PhatPoint(pos, N, sl.pos, sl.colorIntensity * spotA, sl.range);
-}
+#include "RayTracing/SWRT/SWRT_ReSTIR_LightEval.hlsli"
 
 // Maximum spatial search radius (pixels) for fully diffuse surfaces (roughness=1).
 // Smooth/specular surfaces use a much smaller radius so the reflection lobe

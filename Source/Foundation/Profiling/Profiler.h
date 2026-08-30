@@ -12,11 +12,9 @@ namespace SasamiRenderer::Profiler
 
     void BeginCpuEvent(const char* name);
     void EndCpuEvent(const char* name);
-    void MarkCpuEvent(const char* name);
 
     void BeginGpuEvent(CommandList* cmdList, const char* name);
     void EndGpuEvent(CommandList* cmdList);
-    void MarkGpuEvent(CommandList* cmdList, const char* name);
 
     class ScopedCpuEvent
     {

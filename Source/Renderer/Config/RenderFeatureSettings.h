@@ -163,5 +163,15 @@ namespace SasamiRenderer
             }
             aoMinOcclusion = v;
         }
+
+        void SetAoDirectLightingStrength(float v)
+        {
+            if (v < 0.0f) {
+                v = 0.0f;
+            } else if (v > 1.0f) {
+                v = 1.0f;
+            }
+            aoDirectLightingStrength = v;
+        }
     };
 }

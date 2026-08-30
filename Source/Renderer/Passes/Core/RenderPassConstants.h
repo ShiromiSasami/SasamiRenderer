@@ -10,21 +10,25 @@ namespace SasamiRenderer
     {
         using RenderPassType = RendererEnums::RenderPassType;
 
-        // Default forward render path order.
-        constexpr std::array<RenderPassType, 16> kDefaultRenderPathSequence = {
+        // Deferred opaque, then forward transparency:
+        //   Shadow -> OpaqueGBuffer -> AO -> Lighting        (opaque, deferred)
+        //   -> reflections -> Skybox
+        //   -> TransparentBackfaceDistance/SceneColorCopy
+        //   -> TransparentLighting -> TransparentComposite   (transparency, forward OIT)
+        //   -> PostProcess
+        constexpr std::array<RenderPassType, 15> kDefaultRenderPathSequence = {
             RenderPassType::Shadow,
-            RenderPassType::Opaque,
             RenderPassType::OpaqueGBuffer,
             RenderPassType::RuntimeAO,
             RenderPassType::RuntimeAOBlur,
             RenderPassType::Lighting,
             RenderPassType::ScreenSpaceReflection,
+            RenderPassType::ScreenSpaceReflectionComposite,
             RenderPassType::SoftwareReflection,
             RenderPassType::SoftwareReflectionComposite,
             RenderPassType::Skybox,
             RenderPassType::TransparentBackfaceDistance,
             RenderPassType::TransparentSceneColorCopy,
-            RenderPassType::Transparent,
             RenderPassType::TransparentLighting,
             RenderPassType::TransparentComposite,
             RenderPassType::PostProcess,

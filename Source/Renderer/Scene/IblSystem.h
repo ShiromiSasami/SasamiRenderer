@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <vector>
 
 namespace SasamiRenderer
@@ -14,7 +15,7 @@ namespace SasamiRenderer
     // BRDF LUT, and diffuse SH coefficients.
     //
     // Owned by Skybox, which feeds it equirect environment data.
-    // Consumers (LightSystem, LightingRenderPass, SWRT) access IBL via Skybox getter shims.
+    // Consumers (LightSystem, DeferredLightingRenderPass, SWRT) access IBL via Skybox getter shims.
     //
     class IblSystem
     {
@@ -22,6 +23,27 @@ namespace SasamiRenderer
         using AllocateSrvRangeCallback = std::function<bool(UINT count,
                                                              CpuDescriptorHandle& outCpu,
                                                              GpuDescriptorHandle& outGpu)>;
+
+        struct GeneratedIblData
+        {
+            std::vector<std::vector<float>> irradianceFaces;
+            std::vector<std::vector<float>> prefilterSubresources;
+            std::vector<float> brdfLutPixels;
+            float diffuseShCoefficients[9][3] = {};
+            UINT prefilterMipLevels = 0;
+        };
+
+        // Pure-CPU IBL generation from equirect pixels (no device access) -- callable
+        // from a JobSystem worker so the multi-second generation never blocks a frame.
+        static bool GenerateHdrIblData(const std::vector<float>& equirectPixels,
+                                       UINT equirectWidth,
+                                       UINT equirectHeight,
+                                       GeneratedIblData& outData);
+
+        // Stores worker-generated IBL data; the next EnsureTexturesUploaded() uploads it
+        // directly instead of regenerating on the frame thread. Re-arms the upload flags
+        // so a previously uploaded fallback gets replaced.
+        void AdoptPregeneratedIblData(GeneratedIblData&& data);
 
         bool Initialize(IRHIDevice& device, const AllocateSrvRangeCallback& allocateSrvRange);
         void Shutdown();
@@ -43,6 +65,8 @@ namespace SasamiRenderer
         bool IsEnabled() const { return m_iblEnabled; }
         float GetPrefilterMaxMip() const { return m_iblPrefilterMaxMip; }
         GpuDescriptorHandle GetSrvTable() const { return m_iblSrv; }
+        // GPU handle for the second slot of the IBL table (prefiltered cube + BRDF LUT), t17-t18.
+        GpuDescriptorHandle GetSpecularSrvTable() const { return m_iblSpecularSrv; }
         ID3D12Resource* GetPrefilterResource() const {
             if (m_iblPrefilterCompat) return m_iblPrefilterCompat->Get();
             return m_iblPrefilterTexture.Get();
@@ -60,19 +84,6 @@ namespace SasamiRenderer
         UINT GetCpuBrdfLutHeight() const { return m_cpuBrdfLutHeight; }
 
     private:
-        struct GeneratedIblData
-        {
-            std::vector<std::vector<float>> irradianceFaces;
-            std::vector<std::vector<float>> prefilterSubresources;
-            std::vector<float> brdfLutPixels;
-            float diffuseShCoefficients[9][3] = {};
-            UINT prefilterMipLevels = 0;
-        };
-
-        bool GenerateHdrIblData(const std::vector<float>& equirectPixels,
-                                 UINT equirectWidth,
-                                 UINT equirectHeight,
-                                 GeneratedIblData& outData) const;
         bool UploadGeneratedIblTextures(CommandList* cmdList, const GeneratedIblData& data);
         bool UploadFallbackIblTextures(CommandList* cmdList);
         void PublishIblSrvs(DXGI_FORMAT cubeFormat, DXGI_FORMAT brdfFormat, UINT prefilterMipLevels);
@@ -83,6 +94,7 @@ namespace SasamiRenderer
 
         CpuDescriptorHandle m_iblSrvCpu{};
         GpuDescriptorHandle m_iblSrv{};
+        GpuDescriptorHandle m_iblSpecularSrv{};
 
         Resource m_iblIrradianceTexture;
         Resource m_iblIrradianceUpload;
@@ -104,6 +116,9 @@ namespace SasamiRenderer
         float m_iblPrefilterMaxMip = 0.0f;
         bool  m_diffuseShValid     = false;
         float m_diffuseSh[9][3]    = {};
+
+        // Worker-generated data waiting for its GPU upload (see AdoptPregeneratedIblData).
+        std::unique_ptr<GeneratedIblData> m_pregenerated;
 
         std::vector<std::vector<float>> m_cpuPrefilterSubresources;
         std::vector<float>              m_cpuBrdfLutPixels;

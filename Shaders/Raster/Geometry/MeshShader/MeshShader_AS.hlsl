@@ -39,9 +39,6 @@ StructuredBuffer<MeshletDesc> g_meshletDescs : register(t0);
 struct ASPayload
 {
     uint     meshletIndex;  // global meshlet index
-    uint     lodLevel;      // 0=full, 1=half, 2=quarter triangle count
-    uint     pad0;
-    uint     pad1;
     row_major float4x4 model;
     row_major float4x4 inverseModel;
 };
@@ -86,9 +83,6 @@ void AS_Meshlet(uint dtid : SV_DispatchThreadID)
 {
     ASPayload payload;
     payload.meshletIndex  = 0u;
-    payload.lodLevel      = 0u;
-    payload.pad0          = 0u;
-    payload.pad1          = 0u;
     payload.model         = g_draw.model;
     payload.inverseModel  = g_draw.inverseModel;
 
@@ -105,16 +99,13 @@ void AS_Meshlet(uint dtid : SV_DispatchThreadID)
         float sz = length(g_draw.model[2].xyz);
         float worldRadius = desc.boundsRadius * max(max(sx, sy), sz);
 
-        // Distance-based LOD mirrors Tessellation_HS.hlsl thresholds.
-        float dist = length(worldCenter - g_cameraPos);
-        uint lod = 0u;
-        if      (dist >= 15.0f) lod = 2u;
-        else if (dist >=  5.0f) lod = 1u;
+        // Distance cull mirrors Tessellation_HS.hlsl's culled-LOD threshold.
+        float dist    = length(worldCenter - g_cameraPos);
+        bool inRange  = dist < 15.0f;
 
         payload.meshletIndex = globalMeshletIdx;
-        payload.lodLevel     = lod;
 
-        visible = (lod < 2u) && IsSphereVisible(worldCenter, worldRadius, g_viewProj);
+        visible = inRange && IsSphereVisible(worldCenter, worldRadius, g_viewProj);
     }
 
     // D3D12 amplification shaders must call DispatchMesh exactly once on all paths.

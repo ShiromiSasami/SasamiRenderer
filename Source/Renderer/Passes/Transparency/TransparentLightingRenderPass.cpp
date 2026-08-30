@@ -30,10 +30,6 @@ namespace SasamiRenderer
             DebugLog("TransparentLightingRenderPass::Execute: runtime context is invalid.\n");
             return false;
         }
-        const RenderPassExecutionPolicy& policy = context.Policy();
-        if (!policy.executeLightingFamilyPasses) {
-            return true;
-        }
         const RenderPassFrameInputs& inputs = context.Inputs();
         const RenderPassExecutionServices& services = context.Services();
 
@@ -42,13 +38,12 @@ namespace SasamiRenderer
                 *inputs.execution.srvHeap,
                 *inputs.execution.viewport,
                 *inputs.execution.scissorRect,
-                false,
                 inputs.shadow.shadowSrv,
                 inputs.shadow.spotShadowSrv,
+                inputs.shadow.pointShadowSrv,
                 inputs.shadow.vsmSrv,
                 inputs.lighting.lightSrvTable,
                 inputs.lighting.iblSrvTable,
-                inputs.ao.aoSrv,
                 inputs.transmissionSceneColorSrv,
                 inputs.gbuffer.depthSrv,
                 inputs.transparentBackfaceDistanceSrv,
@@ -63,13 +58,12 @@ namespace SasamiRenderer
                                                 DescriptorHeap& srvHeap,
                                                 const Viewport& viewport,
                                                 const Rect& scissorRect,
-                                                bool useTessellation,
                                                 GpuDescriptorHandle shadowSrv,
                                                 GpuDescriptorHandle spotShadowSrv,
+                                                GpuDescriptorHandle pointShadowSrv,
                                                 GpuDescriptorHandle vsmSrv,
                                                 GpuDescriptorHandle lightSrvTable,
                                                 GpuDescriptorHandle iblSrvTable,
-                                                GpuDescriptorHandle aoSrv,
                                                 GpuDescriptorHandle transmissionSceneColorSrv,
                                                 GpuDescriptorHandle sceneDepthSrv,
                                                 GpuDescriptorHandle transparentBackfaceDistanceSrv,
@@ -85,23 +79,20 @@ namespace SasamiRenderer
         enc->SetViewports(reinterpret_cast<const RhiViewport*>(&viewport), 1);
         enc->SetScissors(reinterpret_cast<const RhiRect*>(&scissorRect), 1);
 
-        if (useTessellation) {
-            enc->SetGraphicsPipeline(RenderPipelineStateCache::MakePipelineHandle(pipelineStateCache.GetTessellationPipelineState()));
-            enc->SetPrimitiveTopology(RhiPrimitiveTopology::PatchList);
-        } else {
-            enc->SetGraphicsPipeline(RenderPipelineStateCache::MakePipelineHandle(pipelineStateCache.GetTransparentOitPipelineState()));
-            enc->SetPrimitiveTopology(RhiPrimitiveTopology::TriangleList);
-        }
+        // Tessellation is the opaque pass's responsibility; the OIT transparent pass has no such path.
+        enc->SetGraphicsPipeline(RenderPipelineStateCache::MakePipelineHandle(pipelineStateCache.GetTransparentOitPipelineState()));
+        enc->SetPrimitiveTopology(RhiPrimitiveTopology::TriangleList);
 
         enc->SetDescriptorHeap(RenderPipelineStateCache::MakeDescriptorHeapHandle(srvHeap));
         enc->SetGraphicsDescriptorTable(1,  { shadowSrv.ptr });
         enc->SetGraphicsDescriptorTable(4,  { lightSrvTable.ptr });
         enc->SetGraphicsDescriptorTable(5,  { iblSrvTable.ptr });
-        enc->SetGraphicsDescriptorTable(6,  { aoSrv.ptr });
+        // Root parameter 6 (material occlusion texture, t7) is overwritten per draw item by the draw loop; binding it here is always discarded.
         enc->SetGraphicsDescriptorTable(7,  { transmissionSceneColorSrv.ptr });
         enc->SetGraphicsDescriptorTable(11, { sceneDepthSrv.ptr });
         enc->SetGraphicsDescriptorTable(12, { spotShadowSrv.ptr });
         enc->SetGraphicsDescriptorTable(13, { vsmSrv.ptr });
+        enc->SetGraphicsDescriptorTable(15, { pointShadowSrv.ptr });
         enc->SetGraphicsDescriptorTable(14, { transparentBackfaceDistanceSrv.ptr });
 
         if (lightCbGpu != 0) {
@@ -119,11 +110,11 @@ namespace SasamiRenderer
             enc->SetGraphicsDescriptorTable(1,  { shadowSrv.ptr });
             enc->SetGraphicsDescriptorTable(4,  { lightSrvTable.ptr });
             enc->SetGraphicsDescriptorTable(5,  { iblSrvTable.ptr });
-            enc->SetGraphicsDescriptorTable(6,  { aoSrv.ptr });
             enc->SetGraphicsDescriptorTable(7,  { transmissionSceneColorSrv.ptr });
             enc->SetGraphicsDescriptorTable(11, { sceneDepthSrv.ptr });
             enc->SetGraphicsDescriptorTable(12, { spotShadowSrv.ptr });
             enc->SetGraphicsDescriptorTable(13, { vsmSrv.ptr });
+            enc->SetGraphicsDescriptorTable(15, { pointShadowSrv.ptr });
             enc->SetGraphicsDescriptorTable(14, { transparentBackfaceDistanceSrv.ptr });
             if (lightCbGpu != 0) {
                 enc->SetGraphicsConstantBufferView(3, lightCbGpu);

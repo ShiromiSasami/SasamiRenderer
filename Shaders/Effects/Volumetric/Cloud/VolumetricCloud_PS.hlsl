@@ -63,8 +63,7 @@ PSOutput PSMain(PSInput input)
     float  topAlt    = u_worldData[3].w;
 
     // Reconstruct world-space ray direction from screen UV.
-    float2 ndcXY = float2(input.uv.x * 2.0f - 1.0f,
-                          1.0f - input.uv.y * 2.0f);
+    float2 ndcXY = float2(input.uv.x * 2.0f - 1.0f, 1.0f - input.uv.y * 2.0f);
     float4 nearH = mul(float4(ndcXY, 0.0f, 1.0f), u_invVP);
     float4 farH  = mul(float4(ndcXY, 1.0f, 1.0f), u_invVP);
     if (abs(nearH.w) < 1e-7f || abs(farH.w) < 1e-7f)

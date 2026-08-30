@@ -3,8 +3,6 @@
 #include "Renderer/Passes/Core/IRenderPass.h"
 #include "Renderer/Passes/Core/RenderPassSetupContext.h"
 
-#include <functional>
-
 namespace SasamiRenderer
 {
     class PostProcessRenderPass : public IRenderPass
@@ -15,7 +13,5 @@ namespace SasamiRenderer
         void BuildRequirements(RenderPassRequirementBuilder& builder) const override;
         void Setup(RenderGraphBuilder& builder) const override;
         bool Execute(const RenderPassContextView& context) const override;
-
-        void Execute(const std::function<void()>& ensureSceneTargetsPrepared) const;
     };
 }

@@ -1,6 +1,9 @@
 #ifndef SASAMI_SSAO_SAMPLING_HLSLI
 #define SASAMI_SSAO_SAMPLING_HLSLI
 
+#include "SSAO_NormalDecode.hlsli"
+#include "Shared/Common/WorldPosReconstruction.hlsli"
+
 // SSAO kernel, reconstruction, normal decode, and sampling helpers.
 
 static const float PI = 3.14159265f;
@@ -42,25 +45,10 @@ static const float3 g_ssaoKernel[kMaxKernelSamples] =
     float3( 0.8320f, -0.5510f,  0.0560f)
 };
 
-float3 ReconstructWorldPos(float2 uv, float depth)
-{
-    float4 ndc = float4(uv.x * 2.0f - 1.0f,
-                        (1.0f - uv.y) * 2.0f - 1.0f,
-                        depth,
-                        1.0f);
-    float4 worldH = mul(ndc, u_cameraInvPV);
-    return worldH.xyz / max(worldH.w, 1e-6f);
-}
-
 float3 DecodeNormal(float2 uv)
 {
     float3 encoded = NormalTex.SampleLevel(PointClamp, uv, 0).xyz;
-    float3 normal = encoded * 2.0f - 1.0f;
-    float lenSq = dot(normal, normal);
-    if (lenSq <= 1e-5f) {
-        return float3(0.0f, 1.0f, 0.0f);
-    }
-    return normalize(normal);
+    return DecodeNormalFromEncoded(encoded);
 }
 
 float Hash12(float2 p)

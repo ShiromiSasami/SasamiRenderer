@@ -269,6 +269,32 @@ namespace SasamiRenderer
             }
         }
 
+        void DownsampleFaceRgbaFloat(const std::vector<float>& src,
+                                     std::uint32_t srcSize,
+                                     std::vector<float>& outDst)
+        {
+            // Box-filter downsample of a single RGBA float cubemap face by half (2x2 average).
+            // Used to build a mip chain from a generated base face without re-sampling the source equirect.
+            const std::uint32_t dstSize = (srcSize > 1u) ? (srcSize / 2u) : 1u;
+            outDst.assign(static_cast<std::size_t>(dstSize) * dstSize * 4u, 0.0f);
+            for (std::uint32_t y = 0; y < dstSize; ++y) {
+                const std::uint32_t sy0 = y * 2u;
+                const std::uint32_t sy1 = (sy0 + 1u < srcSize) ? (sy0 + 1u) : sy0;
+                for (std::uint32_t x = 0; x < dstSize; ++x) {
+                    const std::uint32_t sx0 = x * 2u;
+                    const std::uint32_t sx1 = (sx0 + 1u < srcSize) ? (sx0 + 1u) : sx0;
+                    const std::size_t dstIdx = (static_cast<std::size_t>(y) * dstSize + x) * 4u;
+                    for (std::uint32_t c = 0; c < 4u; ++c) {
+                        const float s00 = src[(static_cast<std::size_t>(sy0) * srcSize + sx0) * 4u + c];
+                        const float s10 = src[(static_cast<std::size_t>(sy0) * srcSize + sx1) * 4u + c];
+                        const float s01 = src[(static_cast<std::size_t>(sy1) * srcSize + sx0) * 4u + c];
+                        const float s11 = src[(static_cast<std::size_t>(sy1) * srcSize + sx1) * 4u + c];
+                        outDst[dstIdx + c] = (s00 + s10 + s01 + s11) * 0.25f;
+                    }
+                }
+            }
+        }
+
         void GenerateIrradianceCubemapFromEquirect(const std::vector<float>& hdrPixels,
                                                    std::uint32_t hdrWidth,
                                                    std::uint32_t hdrHeight,

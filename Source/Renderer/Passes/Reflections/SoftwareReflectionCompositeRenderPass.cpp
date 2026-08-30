@@ -13,6 +13,7 @@ namespace SasamiRenderer
     {
         builder.Read("SoftwareReflection");
         builder.Write("SceneColor");
+        builder.UseColorTarget("SceneColor");
         builder.DependsOnPrevious();
     }
 

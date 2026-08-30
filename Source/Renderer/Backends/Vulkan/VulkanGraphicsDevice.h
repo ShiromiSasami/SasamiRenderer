@@ -131,10 +131,12 @@ namespace SasamiRenderer
         bool CreateDevice();
         bool CreateSwapChain(UINT width, UINT height, UINT bufferCount);
         bool CreateFrameResources(UINT bufferCount);
-        bool CreateSwapChainImageViews();
         bool EnsureRhiDescriptorPool();
         bool EnsureNativeMeshResources();
         void DestroyNativeMeshResources();
+        bool EnsureNativeSkinnedMeshResources();
+        void DestroyNativeSkinnedMeshResources();
+        VkDescriptorSet GetOrCreateNativeMeshTextureDescriptorSet(uint64_t albedoSrv);
         bool RenderMeshFrame(uint32_t frame,
                              uint32_t imageIndex,
                              VkCommandBuffer cmd,
@@ -326,6 +328,19 @@ namespace SasamiRenderer
         std::vector<VkImage> m_nativeMeshDepthImages;
         std::vector<VkDeviceMemory> m_nativeMeshDepthMemory;
         std::vector<VkImageView> m_nativeMeshDepthViews;
+
+        // Skinned-mesh draws share m_nativeMeshRenderPass/Framebuffers/DescSetLayout/Sampler
+        // (same render pass scope, same set-0 texture binding) — only the pipeline, the
+        // extra set-1 bone descriptor, and the bone UBO are dedicated to this path.
+        VkPipelineLayout      m_nativeSkinnedMeshPipelineLayout    = VK_NULL_HANDLE;
+        VkPipeline            m_nativeSkinnedMeshPipeline          = VK_NULL_HANDLE;
+        VkDescriptorSetLayout m_nativeSkinnedMeshBoneDescSetLayout = VK_NULL_HANDLE;
+        VkDescriptorPool      m_nativeSkinnedMeshBoneDescPool      = VK_NULL_HANDLE;
+        VkDescriptorSet       m_nativeSkinnedMeshBoneDescSet       = VK_NULL_HANDLE;
+        VkBuffer              m_nativeSkinnedMeshBoneUbo           = VK_NULL_HANDLE;
+        VkDeviceMemory        m_nativeSkinnedMeshBoneUboMemory     = VK_NULL_HANDLE;
+        void*                 m_nativeSkinnedMeshBoneUboMapped     = nullptr;
+        VkDeviceSize          m_nativeSkinnedMeshBoneSlotStride    = 0;
 
         VkRenderPass            m_nativeRayMarchRenderPass     = VK_NULL_HANDLE;
         VkDescriptorSetLayout   m_nativeRayMarchDescSetLayout  = VK_NULL_HANDLE;

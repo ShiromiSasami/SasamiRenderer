@@ -142,6 +142,8 @@ namespace SasamiRenderer
         bool RenderRayMarchFrame(const RhiBackendRayMarchFrameDesc& desc);
         bool EnsureMeshFrameResources(UINT width, UINT height);
         bool RenderMeshFrame(const RhiBackendMeshFrameDesc& desc);
+        bool EnsureSkinnedMeshFrameResources(UINT width, UINT height);
+        bool RenderSkinnedMeshFrame(const RhiBackendMeshFrameDesc& desc);
 
         Microsoft::WRL::ComPtr<ID3D11Device> m_device;
         Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_context;
@@ -160,6 +162,11 @@ namespace SasamiRenderer
         Microsoft::WRL::ComPtr<ID3D11RasterizerState> m_meshRasterizerState;
         Microsoft::WRL::ComPtr<ID3D11DepthStencilState> m_meshDepthStencilState;
         Microsoft::WRL::ComPtr<ID3D11BlendState> m_meshBlendState;
+
+        Microsoft::WRL::ComPtr<ID3D11VertexShader> m_skinnedMeshVertexShader;
+        Microsoft::WRL::ComPtr<ID3D11InputLayout> m_skinnedMeshInputLayout;
+        Microsoft::WRL::ComPtr<ID3D11Buffer> m_skinnedMeshConstantBuffer;
+        Microsoft::WRL::ComPtr<ID3D11Buffer> m_skinnedMeshBoneConstantBuffer;
         UINT m_backBufferDepthWidth = 0;
         UINT m_backBufferDepthHeight = 0;
         RhiBackendCapabilities m_capabilities{};

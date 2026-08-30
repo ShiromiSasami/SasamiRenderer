@@ -5,41 +5,7 @@
 #include <string>
 #include <windows.h>
 
-namespace SasamiRenderer::Internal
-{
-    inline std::ofstream& GetDebugLogFile()
-    {
-        static std::ofstream sFile = []() {
-            std::ofstream f;
-            wchar_t exePath[MAX_PATH] = {};
-            GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-            std::wstring logPath = std::wstring(exePath) + L".log";
-            f.open(logPath, std::ios::out | std::ios::trunc);
-            return f;
-        }();
-        return sFile;
-    }
-
-    inline void WriteToLogFile(const char* message)
-    {
-        auto& f = GetDebugLogFile();
-        if (f.is_open() && message) {
-            f << message;
-            f.flush();
-        }
-    }
-
-    inline void WriteToLogFile(const wchar_t* message)
-    {
-        auto& f = GetDebugLogFile();
-        if (f.is_open() && message) {
-            while (*message) {
-                f << static_cast<char>(*message++);
-            }
-            f.flush();
-        }
-    }
-}
+#include "Foundation/Tools/DebugLogSystem.h"
 
 namespace SasamiRenderer
 {
@@ -77,8 +43,7 @@ namespace SasamiRenderer
         if (!message) {
             return;
         }
-        ::OutputDebugStringA(message);
-        Internal::WriteToLogFile(message);
+        DebugLogSystem::Instance().Log(DebugLogLevel::Info, message);
     }
 
     inline void DebugLog(const wchar_t* message)
@@ -86,8 +51,7 @@ namespace SasamiRenderer
         if (!message) {
             return;
         }
-        ::OutputDebugStringW(message);
-        Internal::WriteToLogFile(message);
+        DebugLogSystem::Instance().Log(DebugLogLevel::Info, message);
     }
 
     inline int DebugLogDialog(const wchar_t* message,
@@ -149,4 +113,38 @@ namespace SasamiRenderer
             ::MessageBoxW(nullptr, fullMessage.c_str(), L"SasamiRenderer Exception", MB_OK | MB_ICONERROR);
         }
     }
+
+#if defined(_DEBUG)
+    namespace Internal
+    {
+        inline unsigned int& GetDebugDrawCounter()
+        {
+            static unsigned int sCount = 0;
+            return sCount;
+        }
+    }
+
+    // Running count of Draw/DrawIndexed calls issued this frame. Lets RenderGraph
+    // correlate a D3D12 GPU-based-validation "Draw Index: [N]" report back to the
+    // render pass that issued it, without a PIX/RenderDoc GPU capture attached.
+    inline void DebugResetDrawCount() { Internal::GetDebugDrawCounter() = 0; }
+    inline void DebugIncrementDrawCount() { ++Internal::GetDebugDrawCounter(); }
+    inline unsigned int DebugGetDrawCount() { return Internal::GetDebugDrawCounter(); }
+
+    namespace Internal
+    {
+        inline unsigned int& GetDebugDispatchCounter()
+        {
+            static unsigned int sCount = 0;
+            return sCount;
+        }
+    }
+
+    // Running count of Dispatch calls issued this frame. Same purpose as the Draw
+    // counter above, but for compute dispatches — correlates a GPU-based-validation
+    // "Dispatch Index: [N]" report back to the compute pass that issued it.
+    inline void DebugResetDispatchCount() { Internal::GetDebugDispatchCounter() = 0; }
+    inline void DebugIncrementDispatchCount() { ++Internal::GetDebugDispatchCounter(); }
+    inline unsigned int DebugGetDispatchCount() { return Internal::GetDebugDispatchCounter(); }
+#endif
 }

@@ -12,6 +12,63 @@ namespace SasamiRenderer
         // rad = deg * PI / 180
         inline float Deg(float degree) { return degree * 3.1415926535f / 180.0f; }
 
+        inline float Clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
+
+        // Default reflection strength from roughness/metallic: metallic surfaces reflect,
+        // and higher roughness scatters/weakens the reflection.
+        inline float DefaultReflectionStrength(float roughness, float metallic)
+        {
+            return Clamp01(Clamp01(metallic) * (1.0f - Clamp01(roughness)));
+        }
+
+        inline float Dot3(const float a[3], const float b[3])
+        {
+            return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        }
+
+        inline void Lerp3(const float a[3], const float b[3], float t, float out[3])
+        {
+            out[0] = a[0] + (b[0] - a[0]) * t;
+            out[1] = a[1] + (b[1] - a[1]) * t;
+            out[2] = a[2] + (b[2] - a[2]) * t;
+        }
+
+        inline float RoundToMultiple(float value, float step)
+        {
+            if (step <= 1e-7f) {
+                return value;
+            }
+            return std::floor(value / step + 0.5f) * step;
+        }
+
+        // Transforms a point by a row-major 4x4 matrix (row-vector convention) with
+        // perspective divide; falls back to the un-divided result if w is degenerate.
+        inline void TransformPoint(const float m[16], const float p[3], float out[3])
+        {
+            const float x = p[0] * m[0] + p[1] * m[4] + p[2] * m[8]  + m[12];
+            const float y = p[0] * m[1] + p[1] * m[5] + p[2] * m[9]  + m[13];
+            const float z = p[0] * m[2] + p[1] * m[6] + p[2] * m[10] + m[14];
+            const float w = p[0] * m[3] + p[1] * m[7] + p[2] * m[11] + m[15];
+
+            if (std::fabs(w) > 1e-7f) {
+                out[0] = x / w;
+                out[1] = y / w;
+                out[2] = z / w;
+            } else {
+                out[0] = x;
+                out[1] = y;
+                out[2] = z;
+            }
+        }
+
+        // Row-major 4x4 identity matrix.
+        inline void Identity4x4(float out[16])
+        {
+            for (int i = 0; i < 16; ++i) {
+                out[i] = (i % 5 == 0) ? 1.0f : 0.0f;
+            }
+        }
+
         // Row-major 4x4 multiplication (row-vector convention): out = a * b
         // out[r,c] = sum_{k=0..3} a[r,k] * b[k,c]
         inline void Mul4x4(const float a[16], const float b[16], float out[16])
@@ -208,19 +265,22 @@ namespace SasamiRenderer
         inline void DirectionFromYawPitch(float yaw, float pitch, float outDirection[3])
         {
             // Yaw/Pitch to forward vector.
-            // Current convention (engine-local):
-            // x = -sin(yaw)
-            // y =  sin(pitch) * cos(yaw)
-            // z = -cos(pitch) * cos(yaw)
+            // Standard spherical convention, matching Camera::ComputeForward
+            // (Source/AppFramework/Object/Camera.cpp), which is the confirmed-correct
+            // reference (verified against the real camera view on hardware):
+            // x =  sin(yaw) * cos(pitch)
+            // y = -sin(pitch)
+            // z =  cos(yaw) * cos(pitch)
+            // (Sign convention is engine-specific: +pitch looks downward.)
             // The result is normalized to protect against drift.
             const float cy = std::cos(yaw);
             const float sy = std::sin(yaw);
             const float cp = std::cos(pitch);
             const float sp = std::sin(pitch);
 
-            outDirection[0] = -sy;
-            outDirection[1] = sp * cy;
-            outDirection[2] = -cp * cy;
+            outDirection[0] = sy * cp;
+            outDirection[1] = -sp;
+            outDirection[2] = cy * cp;
             Normalize(outDirection);
         }
 
@@ -322,6 +382,14 @@ namespace SasamiRenderer
                 referenceUp[2] = 1.0f;
             }
 
+            // NOTE: This computes right = fwd x up, which is the mirror image of the
+            // right = up x fwd used by DirectXMath's XMMatrixLookToLH (LH convention).
+            // It is intentionally left as-is: the shadow map render pass and the shader-side
+            // world-to-light-space projection both consume this same VP matrix, so the mirrored
+            // basis is self-consistent, and the shadow PSO sets D3D12_CULL_MODE_NONE
+            // (see RenderPipelineStateCache.cpp), so the resulting winding-order flip is never
+            // culled. Do NOT "fix" this ordering. If back-face culling is ever enabled for
+            // shadow rendering, this basis must be swapped to the LH convention first.
             float right[3] = {};
             Cross(fwd, referenceUp, right);
             Normalize(right);
@@ -345,6 +413,80 @@ namespace SasamiRenderer
 
             // Perspective projection (LH, 0-1 depth, square frustum, row-major).
             const float invTan = (halfAngle > 0.0f) ? (1.0f / std::tan(halfAngle)) : 1.0f;
+            const float n = nearZ, f = farZ;
+            const float proj[16] = {
+                invTan, 0.0f,   0.0f,          0.0f,
+                0.0f,   invTan, 0.0f,          0.0f,
+                0.0f,   0.0f,   f / (f - n),   1.0f,
+                0.0f,   0.0f,  -n*f / (f - n), 0.0f,
+            };
+
+            Mul4x4(view, proj, outVP);
+        }
+
+        // Row-major perspective VP matrix for one face of a point light cube shadow map.
+        // Convention: same row-vector/LH/0-1-depth convention as BuildSpotLightViewProjection.
+        // Face index order matches the D3D cubemap array-slice convention: 0:+X, 1:-X, 2:+Y, 3:-Y, 4:+Z, 5:-Z.
+        // Each face uses a fixed axis-aligned forward/up pair, so (unlike the spot-light case) no
+        // singularity-avoidance branch is needed.
+        // @param pos          point light world-space position (float[3])
+        // @param faceIndex    cube face index (0-5), see convention above
+        // @param nearZ, farZ  depth range for the perspective frustum
+        // @param outVP        output 16-float row-major view-projection matrix
+        inline void BuildCubeFaceViewProjection(const float pos[3],
+                                                 uint32_t faceIndex,
+                                                 float nearZ,
+                                                 float farZ,
+                                                 float outVP[16])
+        {
+            static constexpr float kFaceForward[6][3] = {
+                {  1.0f,  0.0f,  0.0f }, // +X
+                { -1.0f,  0.0f,  0.0f }, // -X
+                {  0.0f,  1.0f,  0.0f }, // +Y
+                {  0.0f, -1.0f,  0.0f }, // -Y
+                {  0.0f,  0.0f,  1.0f }, // +Z
+                {  0.0f,  0.0f, -1.0f }, // -Z
+            };
+            static constexpr float kFaceUp[6][3] = {
+                { 0.0f, 1.0f,  0.0f }, // +X
+                { 0.0f, 1.0f,  0.0f }, // -X
+                { 0.0f, 0.0f, -1.0f }, // +Y
+                { 0.0f, 0.0f,  1.0f }, // -Y
+                { 0.0f, 1.0f,  0.0f }, // +Z
+                { 0.0f, 1.0f,  0.0f }, // -Z
+            };
+
+            const uint32_t face = faceIndex < 6u ? faceIndex : 0u;
+            const float* fwd = kFaceForward[face];
+            const float* up = kFaceUp[face];
+
+            // NOTE: right = fwd x up here, using the fixed kFaceUp table above, which is the
+            // mirror of the right = up x fwd used by DirectXMath's XMMatrixLookToLH (LH
+            // convention). This is intentional, not a bug: the cube shadow map is rendered and
+            // sampled with this exact VP matrix, so the mirrored basis is self-consistent, and
+            // the shadow PSO uses D3D12_CULL_MODE_NONE (see RenderPipelineStateCache.cpp), so the
+            // per-face winding-order flip is never culled. Do NOT reorder this Cross() call. If
+            // back-face culling is ever enabled for point-light shadow rendering, this basis must
+            // be converted to the LH convention first.
+            float right[3] = {};
+            Cross(fwd, up, right);
+            Normalize(right);
+
+            // Combined view matrix (rotation + position, row-major row-vector convention).
+            // worldPos * view = lightSpacePos
+            const float tx = -(right[0]*pos[0] + right[1]*pos[1] + right[2]*pos[2]);
+            const float ty = -(up[0]   *pos[0] + up[1]   *pos[1] + up[2]   *pos[2]);
+            const float tz = -(fwd[0]  *pos[0] + fwd[1]  *pos[1] + fwd[2]  *pos[2]);
+
+            const float view[16] = {
+                right[0], up[0], fwd[0], 0.0f,
+                right[1], up[1], fwd[1], 0.0f,
+                right[2], up[2], fwd[2], 0.0f,
+                tx,       ty,    tz,     1.0f,
+            };
+
+            // Perspective projection (LH, 0-1 depth, square 90-degree frustum, row-major).
+            const float invTan = 1.0f; // tan(45 deg) == 1, i.e. 90 degree FOV to cover one cube face.
             const float n = nearZ, f = farZ;
             const float proj[16] = {
                 invTan, 0.0f,   0.0f,          0.0f,

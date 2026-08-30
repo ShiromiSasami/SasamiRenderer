@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -21,6 +21,12 @@
     </Filter>
     <Filter Include="Header Files\Tool">
       <UniqueIdentifier>{c8aff3b3-f7c9-45e2-9d0b-1c79d6271b58}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Jobs">
+      <UniqueIdentifier>{cd009959-fc6c-42d8-bd9b-2c7ad452b810}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Jobs">
+      <UniqueIdentifier>{2bfc43d8-219e-4967-b08e-da372d65ca75}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files\RenderPass">
       <UniqueIdentifier>{c9fa0440-879d-43ab-a838-02979f67a3f3}</UniqueIdentifier>
@@ -57,9 +63,6 @@
     </Filter>
     <Filter Include="Shader Files\Raster\Lighting\Deferred">
       <UniqueIdentifier>{2bc0b9ea-f88f-4b21-bf6a-71704ac35a33}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Shader Files\Raster\Geometry\Opaque">
-      <UniqueIdentifier>{538f8593-c97f-4848-b4c8-2cba0baf2d04}</UniqueIdentifier>
     </Filter>
     <Filter Include="Shader Files\Raster\Geometry\OpaqueGBuffer">
       <UniqueIdentifier>{c4f5ea6e-b7a4-4c63-84f0-8513bd5a4d3a}</UniqueIdentifier>
@@ -115,6 +118,18 @@
     <Filter Include="Source Files\GI">
       <UniqueIdentifier>{a1b2c3d4-e5f6-7890-ab01-23cd45ef6789}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\Fluid">
+      <UniqueIdentifier>{fc36667e-48a4-445b-ae3a-ed09df890650}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Fluid">
+      <UniqueIdentifier>{baa1505e-df4d-4d65-91fa-1c06449a0cf0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Particles">
+      <UniqueIdentifier>{7c9e6b1a-2f4d-4a8e-9c3b-5d1f8e6a4b2c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Particles">
+      <UniqueIdentifier>{3a5d8f2c-6b1e-4c9a-8d4f-2e7b9c1a5d3f}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Shader Files\Debug">
       <UniqueIdentifier>{970590c0-5d92-406f-9a74-5098e975af9e}</UniqueIdentifier>
     </Filter>
@@ -123,6 +138,9 @@
     </Filter>
     <Filter Include="Shader Files\Debug\Meshlet">
       <UniqueIdentifier>{e9a8f2f8-95a5-4d00-ab4e-0c130601576b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader Files\Debug\GBuffer">
+      <UniqueIdentifier>{4a948980-0e82-4de0-b0c7-853f8c2a849e}</UniqueIdentifier>
     </Filter>
     <Filter Include="Shader Files\Effects\Volumetric">
       <UniqueIdentifier>{22b67a4d-9fc9-4654-9f68-91c66774e900}</UniqueIdentifier>
@@ -175,7 +193,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="Libraries\packages.config" />
+    <None Include="Shaders\Effects\Sky\Skybox\Skybox_Common.hlsli" />
     <None Include="Shaders\RayTracing\SWRT\SWRT_Reservoir.hlsli" />
+    <None Include="Shaders\RayTracing\SWRT\SWRT_ReSTIR_LightEval.hlsli" />
     <None Include="Shaders\RayTracing\SWRT\SWRT_ReSTIR_Initial_CS.hlsl" />
     <None Include="Shaders\RayTracing\SWRT\SWRT_ReSTIR_Temporal_CS.hlsl" />
     <None Include="Shaders\RayTracing\SWRT\SWRT_ReSTIR_Spatial_CS.hlsl" />
@@ -225,6 +245,9 @@
     <ClInclude Include="Source\Renderer\Resources\RenderPipelineStateCache.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Renderer\Resources\RenderPipelineStateCacheLog.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Renderer\Resources\ShaderCompilationService.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -252,7 +275,10 @@
     <ClInclude Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDevice.h">
       <Filter>Header Files\Backends\Vulkan</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDevice_Utils.h">
+    <ClInclude Include="Source\Renderer\Backends\DirectX12\Dx12ConversionUtils.h">
+      <Filter>Header Files\Backends\DirectX12</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDeviceUtils.h">
       <Filter>Header Files\Backends\Vulkan</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Scene\CameraState.h">
@@ -270,6 +296,9 @@
     <ClInclude Include="Source\Renderer\Scene\MeshBuffer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\MeshBufferUploadUtility.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Renderer\Scene\SkinnedMeshBuffer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -280,6 +309,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Scene\ShadowMapManager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\SkyCubemapGenerator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Scene\Skybox.h">
@@ -318,10 +350,22 @@
     <ClInclude Include="Source\Renderer\Scene\RenderCameraProxy.h">
       <Filter>Header Files\Struct\Proxy</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Foundation\Tools\DebugLogSystem.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Renderer\Utilities\RendererMathUtility.h">
       <Filter>Header Files\Tool</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Utilities\ResourceUploadUtility.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Utilities\TextureMipChain.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Utilities\AdHocShaderCompileUtility.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Utilities\HashUtility.h">
       <Filter>Header Files\Tool</Filter>
     </ClInclude>
     <ClInclude Include="Source\Foundation\Math\MathUtil.h">
@@ -330,16 +374,31 @@
     <ClInclude Include="Source\Foundation\Profiling\Profiler.h">
       <Filter>Header Files\Tool</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\Geometry\OpaqueRenderPass.h">
+    <ClInclude Include="Source\Foundation\Jobs\JobTypes.h">
+      <Filter>Header Files\Jobs</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Foundation\Jobs\JobCounter.h">
+      <Filter>Header Files\Jobs</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Foundation\Jobs\WorkStealingDeque.h">
+      <Filter>Header Files\Jobs</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Foundation\Jobs\JobWorker.h">
+      <Filter>Header Files\Jobs</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Foundation\Jobs\JobSystem.h">
+      <Filter>Header Files\Jobs</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Foundation\Jobs\ParallelFor.h">
+      <Filter>Header Files\Jobs</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\Geometry\GBufferRenderPass.h">
       <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\Geometry\OpaqueGBufferRenderPass.h">
+    <ClInclude Include="Source\Renderer\Passes\Geometry\SkinnedOpaqueDrawUtility.h">
       <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\Lighting\LightingRenderPass.h">
-      <Filter>Header Files\RenderPass</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Renderer\Passes\Transparency\TransparentRenderPass.h">
+    <ClInclude Include="Source\Renderer\Passes\Lighting\DeferredLightingRenderPass.h">
       <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Passes\Transparency\TransparentLightingRenderPass.h">
@@ -381,7 +440,16 @@
     <ClInclude Include="Source\Renderer\Passes\Reflections\SoftwareReflectionCompositeRenderPass.h">
       <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\Fluid\FluidSurfaceRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\Particles\ParticleRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Renderer\Passes\Debug\DebugProbeGridRenderPass.h">
+      <Filter>Header Files\RenderPass</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\Debug\DebugVisualizationSystem.h">
       <Filter>Header Files\RenderPass</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\RayTracing\RayTracingScene.h">
@@ -390,10 +458,22 @@
     <ClInclude Include="Source\Renderer\GI\IrradianceProbeGrid.h">
       <Filter>Source Files\GI</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Renderer\Fluid\FluidHeightfieldSim.h">
+      <Filter>Source Files\Fluid</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Particles\ParticleSystem.h">
+      <Filter>Source Files\Particles</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Renderer\RayTracing\GpuSoftwareRayTracer.h">
       <Filter>Source Files\RayTrace</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Renderer\RayTracing\GpuSoftwareRayTracerResourceUtility.h">
+      <Filter>Source Files\RayTrace</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Renderer\RayTracing\DxrRayTracer.h">
+      <Filter>Source Files\RayTrace</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\RayTracing\DxrRayTracerUtility.h">
       <Filter>Source Files\RayTrace</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\RayTracing\SWRTExecutor.h">
@@ -406,6 +486,24 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Scene\SceneSubmitter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\DeferredUploadSink.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Foundation\Boot\BootStatus.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Foundation\Boot\InitTaskScheduler.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Foundation\Boot\MainThreadTaskPump.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Runtime\RendererReadyState.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Resources\ShaderBlobCache.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Passes\Sky\VolumetricCloudRenderPass.h">
@@ -473,40 +571,58 @@
     <ClCompile Include="Source\Renderer\Resources\ShaderCompilationService.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Renderer\Resources\ShaderCompilationServiceDxc.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Foundation\Boot\InitTaskScheduler.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Foundation\Boot\MainThreadTaskPump.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Resources\ShaderBlobCache.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Runtime\RendererBootFrame.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Renderer\Backends\DirectX11\Dx11GraphicsDevice.cpp">
       <Filter>Source Files\Backends\DirectX11</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Backends\DirectX11\Dx11GraphicsDevice_Resource.cpp">
+    <ClCompile Include="Source\Renderer\Backends\DirectX11\Dx11GraphicsDeviceResource.cpp">
       <Filter>Source Files\Backends\DirectX11</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Backends\DirectX12\Dx12GraphicsDevice.cpp">
       <Filter>Source Files\Backends\DirectX12</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Backends\DirectX12\Dx12GraphicsDevice_Init.cpp">
+    <ClCompile Include="Source\Renderer\Backends\DirectX12\Dx12GraphicsDeviceInit.cpp">
       <Filter>Source Files\Backends\DirectX12</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Backends\DirectX12\Dx12GraphicsDevice_Resource.cpp">
+    <ClCompile Include="Source\Renderer\Backends\DirectX12\Dx12GraphicsDeviceResource.cpp">
       <Filter>Source Files\Backends\DirectX12</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Backends\OpenGL\OpenGLGraphicsDevice.cpp">
       <Filter>Source Files\Backends\OpenGL</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Backends\OpenGL\OpenGLGraphicsDevice_Resource.cpp">
+    <ClCompile Include="Source\Renderer\Backends\OpenGL\OpenGLGraphicsDeviceResource.cpp">
       <Filter>Source Files\Backends\OpenGL</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDevice.cpp">
       <Filter>Source Files\Backends\Vulkan</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDevice_Backend.cpp">
+    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDeviceCommandEncoder.cpp">
       <Filter>Source Files\Backends\Vulkan</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDevice_Pipeline.cpp">
+    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDevicePipeline.cpp">
       <Filter>Source Files\Backends\Vulkan</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Scene\LightSystem.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Scene\ShadowMapManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Scene\SkyCubemapGenerator.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Scene\Skybox.cpp">
@@ -518,16 +634,13 @@
     <ClCompile Include="Source\Renderer\Passes\Geometry\ShadowRenderPass.cpp">
       <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\Geometry\OpaqueRenderPass.cpp">
+    <ClCompile Include="Source\Renderer\Passes\Geometry\GBufferRenderPass.cpp">
       <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\Geometry\OpaqueGBufferRenderPass.cpp">
+    <ClCompile Include="Source\Renderer\Passes\Geometry\SkinnedOpaqueDrawUtility.cpp">
       <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\Lighting\LightingRenderPass.cpp">
-      <Filter>Source Files\RenderPass</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Renderer\Passes\Transparency\TransparentRenderPass.cpp">
+    <ClCompile Include="Source\Renderer\Passes\Lighting\DeferredLightingRenderPass.cpp">
       <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Passes\Transparency\TransparentLightingRenderPass.cpp">
@@ -545,7 +658,16 @@
     <ClCompile Include="Source\Renderer\Passes\PostProcess\PostProcessRenderPass.cpp">
       <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Foundation\Tools\DebugLogSystem.cpp">
+      <Filter>Source Files\Tools</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Renderer\Utilities\ResourceUploadUtility.cpp">
+      <Filter>Source Files\Tools</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Utilities\TextureMipChain.cpp">
+      <Filter>Source Files\Tools</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Utilities\AdHocShaderCompileUtility.cpp">
       <Filter>Source Files\Tools</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Utilities\RendererMathUtility.cpp">
@@ -554,7 +676,13 @@
     <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwareRayTracer.cpp">
       <Filter>Source Files\RayTrace</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwareRayTracerResourceUtility.cpp">
+      <Filter>Source Files\RayTrace</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Renderer\RayTracing\DxrRayTracer.cpp">
+      <Filter>Source Files\RayTrace</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\RayTracing\DxrRayTracerUtility.cpp">
       <Filter>Source Files\RayTrace</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\RayTracing\SWRTExecutor.cpp">
@@ -581,8 +709,23 @@
     <ClCompile Include="Source\Renderer\Passes\Debug\DebugProbeGridRenderPass.cpp">
       <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\Debug\DebugVisualizationSystem.cpp">
+      <Filter>Source Files\RenderPass</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\Fluid\FluidSurfaceRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\Particles\ParticleRenderPass.cpp">
+      <Filter>Source Files\RenderPass</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Renderer\GI\IrradianceProbeGrid.cpp">
       <Filter>Source Files\GI</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Fluid\FluidHeightfieldSim.cpp">
+      <Filter>Source Files\Fluid</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Particles\ParticleSystem.cpp">
+      <Filter>Source Files\Particles</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Passes\Sky\ProceduralSkyRenderPass.cpp">
       <Filter>Source Files\RenderPass</Filter>
@@ -593,13 +736,19 @@
     <ClCompile Include="Source\Renderer\Passes\Sky\VolumetricCloudRenderPass.cpp">
       <Filter>Source Files\RenderPass</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Resources\RenderPipelineStateCache_Ssr.cpp">
+    <ClCompile Include="Source\Renderer\Resources\RenderPipelineStateCacheSsr.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Foundation\Profiling\Profiler.cpp">
       <Filter>Source Files\Tools</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\RayTracing\DxrRayTracer_Setup.cpp">
+    <ClCompile Include="Source\Foundation\Jobs\JobWorker.cpp">
+      <Filter>Source Files\Jobs</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Foundation\Jobs\JobSystem.cpp">
+      <Filter>Source Files\Jobs</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\RayTracing\DxrRayTracerSetup.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwareBvhBuilder.cpp">
@@ -608,10 +757,10 @@
     <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwarePipelineCache.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwareRayTracer_Legacy.cpp">
+    <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwareRayTracerLegacy.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwareRayTracer_ReSTIR.cpp">
+    <ClCompile Include="Source\Renderer\RayTracing\GpuSoftwareRayTracerReSTIR.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Passes\Geometry\MeshShaderRenderPass.cpp">
@@ -620,19 +769,19 @@
     <ClCompile Include="Source\Renderer\Scene\MeshletBuffer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Scene\LightSystem_Shadow.cpp">
+    <ClCompile Include="Source\Renderer\Scene\LightSystemShadow.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Scene\Skybox_IBL.cpp">
+    <ClCompile Include="Source\Renderer\Scene\SkyboxIBL.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\RenderGraph\RenderGraph_Registry.cpp">
+    <ClCompile Include="Source\Renderer\RenderGraph\RenderGraphRegistry.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Resources\RenderTargetPool_Swrt.cpp">
+    <ClCompile Include="Source\Renderer\Resources\RenderTargetPoolSwrt.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Runtime\Renderer_Render.cpp">
+    <ClCompile Include="Source\Renderer\Runtime\RendererFrameGraph.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Runtime\RendererInitialization.cpp">
@@ -641,13 +790,13 @@
     <ClCompile Include="Source\Renderer\Runtime\RendererGraphicsCommands.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Resources\RenderPipelineStateCache_Effects.cpp">
+    <ClCompile Include="Source\Renderer\Resources\RenderPipelineStateCacheEffects.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Resources\RenderPipelineStateCache_Ssao.cpp">
+    <ClCompile Include="Source\Renderer\Resources\RenderPipelineStateCacheSsao.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Resources\RenderPipelineStateCache_MeshShader.cpp">
+    <ClCompile Include="Source\Renderer\Resources\RenderPipelineStateCacheMeshShader.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -664,6 +813,9 @@
     <CustomBuild Include="Shaders\Raster\Lighting\Deferred\DeferredLighting_PS.hlsl">
       <Filter>Shader Files\Raster\Lighting\Deferred</Filter>
     </CustomBuild>
+    <CustomBuild Include="Shaders\Debug\GBuffer\GBufferDebug_PS.hlsl">
+      <Filter>Shader Files\Debug\GBuffer</Filter>
+    </CustomBuild>
     <CustomBuild Include="Shaders\Raster\Transparency\TransparentBackfaceDistance_PS.hlsl">
       <Filter>Shader Files\Raster\Transparency</Filter>
     </CustomBuild>
@@ -672,12 +824,6 @@
     </CustomBuild>
     <CustomBuild Include="Shaders\Raster\Transparency\TransparentOITComposite_PS.hlsl">
       <Filter>Shader Files\Raster\Transparency</Filter>
-    </CustomBuild>
-    <CustomBuild Include="Shaders\Raster\Geometry\Opaque\Opaque_VS.hlsl">
-      <Filter>Shader Files\Raster\Geometry\Opaque</Filter>
-    </CustomBuild>
-    <CustomBuild Include="Shaders\Raster\Geometry\Opaque\Opaque_PS.hlsl">
-      <Filter>Shader Files\Raster\Geometry\Opaque</Filter>
     </CustomBuild>
     <CustomBuild Include="Shaders\Effects\Sky\Skybox\Skybox_VS.hlsl">
       <Filter>Shader Files\Effects\Sky\Skybox</Filter>
@@ -738,6 +884,24 @@
     </None>
     <None Include="Shaders\Debug\ProbeGrid\DebugProbeGrid_PS.hlsl">
       <Filter>Shader Files\Debug\ProbeGrid</Filter>
+    </None>
+    <None Include="Shaders\Compute\Fluid\FluidHeightfield_CS.hlsl">
+      <Filter>Shader Files\Fluid</Filter>
+    </None>
+    <None Include="Shaders\Fluid\FluidSurface_VS.hlsl">
+      <Filter>Shader Files\Fluid</Filter>
+    </None>
+    <None Include="Shaders\Fluid\FluidSurface_PS.hlsl">
+      <Filter>Shader Files\Fluid</Filter>
+    </None>
+    <None Include="Shaders\Particles\ParticleUpdate_CS.hlsl">
+      <Filter>Shader Files\Particles</Filter>
+    </None>
+    <None Include="Shaders\Particles\ParticleBillboard_VS.hlsl">
+      <Filter>Shader Files\Particles</Filter>
+    </None>
+    <None Include="Shaders\Particles\ParticleBillboard_PS.hlsl">
+      <Filter>Shader Files\Particles</Filter>
     </None>
     <None Include="Shaders\Shared\Basic\BasicShader.hlsl">
       <Filter>Shader Files\Shared\Basic</Filter>

@@ -37,6 +37,11 @@ namespace SasamiRenderer
         SkinnedMeshComponentRef().SetTranslation(x, y, z);
     }
 
+    void SkinnedModel::SetUniformScale(float scale)
+    {
+        SkinnedMeshComponentRef().SetUniformScale(scale);
+    }
+
     void SkinnedModel::ClearModel()
     {
         SkinnedMeshComponentRef().Clear();

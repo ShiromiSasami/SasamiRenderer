@@ -160,6 +160,14 @@ namespace SasamiRenderer
         cmdList->SetGraphicsRootDescriptorTable(7, m_renderTargetPool.GetSWRTReflectionSrv());
         cmdList->SetGraphicsRootDescriptorTable(8, m_renderTargetPool.GetGBufferNormalSrv());
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        // CommandList::DrawInstanced (GraphicsDevice.h) is an uninstrumented pass-through, so
+        // every raw draw has to bump the debug counter itself or RenderGraph's [DrawRange] log
+        // silently reports this pass as having drawn nothing. SSAO, FXAA and the SSR composite
+        // already do this; these two were missed, which made the tone map pass look dead in the
+        // log while it was in fact drawing every frame.
+#if defined(_DEBUG)
+        DebugIncrementDrawCount();
+#endif
         cmdList->DrawInstanced(3u, 1u, 0u, 0u);
 
         return true;
@@ -172,11 +180,25 @@ namespace SasamiRenderer
             return false;
         }
 
-        D3D12_RESOURCE_BARRIER toSrv = CD3DX12_RESOURCE_BARRIER::Transition(
-            m_renderTargetPool.GetSceneColorTexture().Get(),
-            D3D12_RESOURCE_STATE_RENDER_TARGET,
-            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-        cmdList->ResourceBarrier(1, &toSrv);
+        // SceneColor's resource state is owned by the RenderGraph, not by this function.
+        // PostProcessRenderPass::Setup declares Read("SceneColor"), and RenderGraph::Execute
+        // already transitions every declared read to PIXEL_SHADER_RESOURCE before invoking
+        // the pass -- so the texture is ALREADY in that state when we get here.
+        //
+        // This used to emit its own RENDER_TARGET -> PIXEL_SHADER_RESOURCE barrier plus a
+        // matching restore, duplicating the graph's transition with a hardcoded StateBefore.
+        // Because the graph had already moved the resource, that StateBefore was wrong and
+        // D3D12 rejected the barrier ("Before state (RENDER_TARGET) ... does not match ...
+        // PIXEL_SHADER_RESOURCE"); the restore then left the resource in RENDER_TARGET while
+        // the graph's tracker still believed it was PIXEL_SHADER_RESOURCE, so the error also
+        // appeared in the opposite direction on the following frame. A rejected barrier means
+        // SceneColor could be sampled while still bound as a render target, which is what made
+        // the whole frame come out black -- and why enabling any extra pass that writes
+        // SceneColor (particles, the GI probe debug view) changed the result: it changed which
+        // pass touched SceneColor last, so the states sometimes happened to line up.
+        //
+        // Do not reintroduce a manual barrier here. If a different state is needed, express it
+        // through the pass's Setup() declarations so the graph stays the single owner.
 
         cmdList->SetGraphicsRootSignature(m_pipelineStateCache.GetRootSignature());
         cmdList->SetPipelineState(m_pipelineStateCache.GetToneMapPipelineState());
@@ -189,14 +211,38 @@ namespace SasamiRenderer
         DescriptorHeap* heaps[] = { m_srvAllocator.GetHeap() };
         cmdList->SetDescriptorHeaps(1, heaps);
         cmdList->SetGraphicsRootDescriptorTable(0, m_renderTargetPool.GetSceneColorSrv());
+
+        // ToneMapCB (b0, root parameter 2) has to be bound here. Without it the pass inherits
+        // whatever CBV the previous draw left in that slot -- a plain 128-byte camera CB -- and
+        // ToneMap_PS reads u_toneMapParams from offset 128, i.e. past the end of it. The exposure
+        // it got was therefore garbage rather than RenderSettings::exposure, which is why the
+        // slider had no effect and why the tone mapper crushed the image: the debug G-Buffer views
+        // write large enough values to survive it, but the actual lit scene is small HDR values
+        // and collapsed to black.
+        //
+        // The camera CB layout already reserves extra0 at exactly offset 128 (mvp 64B + world 64B),
+        // which is the slot ToneMapCB declares u_toneMapParams in, so no new buffer type is needed.
+        // mvp/world are padding for this pass and the shader never reads them.
+        if (auto* frame = m_frameCoordinator.GetFrameContext(backIndex)) {
+            const float unusedMatrix[16] = {};
+            const float toneMapParams[4] = { m_settings.exposure, 0.0f, 0.0f, 0.0f };
+            const D3D12_GPU_VIRTUAL_ADDRESS toneMapCb =
+                m_frameCoordinator.PushCameraCB(*frame, unusedMatrix, unusedMatrix, toneMapParams,
+                                                nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+            if (toneMapCb != 0) {
+                cmdList->SetGraphicsRootConstantBufferView(2, toneMapCb);
+            }
+        }
+
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+#if defined(_DEBUG)
+        DebugIncrementDrawCount();
+#endif
         cmdList->DrawInstanced(3u, 1u, 0u, 0u);
 
-        D3D12_RESOURCE_BARRIER restoreForRenderGraph = CD3DX12_RESOURCE_BARRIER::Transition(
-            m_renderTargetPool.GetSceneColorTexture().Get(),
-            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-            D3D12_RESOURCE_STATE_RENDER_TARGET);
-        cmdList->ResourceBarrier(1, &restoreForRenderGraph);
+        // No restore barrier: the graph transitions SceneColor back itself when a later pass
+        // declares it as a write/color target, and it records the resource's final state at
+        // frame end. Restoring here would desynchronise the graph's tracker again.
         return true;
     }
 
@@ -284,10 +330,26 @@ namespace SasamiRenderer
 
     void Renderer::SubmitAndPresent(CommandList* cmdList, UINT frameIndex)
     {
+        // Single choke point for every present path (main frame graph, the two graph-failure
+        // fallbacks, and RenderBootFrame), so a queued screenshot is honoured no matter which
+        // path built the frame. The copy has to go in while the command list is still open;
+        // the PNG can only be written after the GPU has run it.
+        RecordPendingScreenshotCopy(cmdList, frameIndex);
+
+        // ResolveQueryData has to be recorded while the command list is still open, and on
+        // the same list that carried the queries. Sharing the present choke point means the
+        // fallback and boot paths -- which open a frame but register no timed passes -- also
+        // close their profiler frame cleanly (scopeCount 0 skips the resolve entirely).
+        if (cmdList) {
+            m_gpuTimestampProfiler.EndFrame(cmdList->Get());
+        }
+
         if (m_device &&
             RenderFrameOrchestrator::SubmitAndPresent(*m_device, m_frameCoordinator, cmdList, frameIndex)) {
             RetireDeferredUploadBatches();
         }
+
+        ResolvePendingScreenshot();
     }
 
 

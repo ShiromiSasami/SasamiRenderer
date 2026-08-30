@@ -23,7 +23,7 @@ PSInput VSMain(VSInput input)
     const float3x3 worldToObject = ComputeWorldToObject3x3();
     float4 worldPos = mul(float4(input.position, 1.0f), u_world);
     output.position = mul(float4(input.position, 1.0f), u_mvp);
-    output.normal = normalize(mul(input.normal, worldToObject));
+    output.normal = normalize(mul(worldToObject, input.normal));
     output.color = input.color;
     output.uv = input.uv;
     output.lightPos = mul(worldPos, u_lightVP[0]);

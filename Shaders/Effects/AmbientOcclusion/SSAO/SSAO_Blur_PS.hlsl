@@ -1,3 +1,5 @@
+#include "SSAO_NormalDecode.hlsli"
+
 cbuffer BlurCB : register(b0)
 {
     row_major float4x4 u_cameraPV;
@@ -20,12 +22,7 @@ struct PSInput
 float3 DecodeNormal(float2 uv)
 {
     float3 encoded = t_normal.SampleLevel(s_point, uv, 0).xyz;
-    float3 normal = encoded * 2.0f - 1.0f;
-    float lenSq = dot(normal, normal);
-    if (lenSq <= 1e-5f) {
-        return float3(0.0f, 1.0f, 0.0f);
-    }
-    return normalize(normal);
+    return DecodeNormalFromEncoded(encoded);
 }
 
 float4 PSMain(PSInput input) : SV_Target

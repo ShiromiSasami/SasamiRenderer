@@ -34,7 +34,7 @@ cbuffer ReSTIRFrameConstants : register(b0)
     float3 g_dirLightDir;
     float  g_dirLightIntensity;
     float3 g_dirLightColor;
-    float  g_shadowBias;
+    float  g_microShadowStrength;
     float3 g_ambientColor;
     float  g_ambientIntensity;
     uint   g_pointLightCount;
@@ -47,11 +47,11 @@ Texture2D<float4>   g_colorIn  : register(t6);   // scratch SRV[0]
 Texture2D<float4>   g_gbuffer  : register(t7);   // scratch SRV[1]
 RWTexture2D<float4> g_colorOut : register(u0);   // scratch UAV[0]
 
+#include "SWRT_Denoise_Common.hlsli"
+
 // 5×5 à-trous kernel weights (B-spline approximation)
 static const float kKernel[3] = { 0.375f, 0.25f, 0.0625f };
 // Offsets: 0, ±1*step, ±2*step
-
-float Luminance(float3 c) { return dot(c, float3(0.2126f, 0.7152f, 0.0722f)); }
 
 [numthreads(16, 16, 1)]
 void CS_Denoise_ATrous(uint3 id : SV_DispatchThreadID)

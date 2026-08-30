@@ -1,22 +1,23 @@
 #include "Renderer/Passes/Core/RenderPassBuilder.h"
 
 #include "Renderer/Passes/Debug/DebugProbeGridRenderPass.h"
-#include "Renderer/Passes/Lighting/LightingRenderPass.h"
-#include "Renderer/Passes/Geometry/OpaqueGBufferRenderPass.h"
-#include "Renderer/Passes/Geometry/OpaqueRenderPass.h"
+#include "Renderer/Passes/Fluid/FluidSurfaceRenderPass.h"
+#include "Renderer/Passes/Lighting/DeferredLightingRenderPass.h"
+#include "Renderer/Passes/Geometry/GBufferRenderPass.h"
+#include "Renderer/Passes/Particles/ParticleRenderPass.h"
 #include "Renderer/Passes/PostProcess/PostProcessRenderPass.h"
 #include "Renderer/Passes/Sky/ProceduralSkyRenderPass.h"
 #include "Renderer/Passes/RayTracing/RayTracingRenderPass.h"
 #include "Renderer/Passes/Geometry/ShadowRenderPass.h"
 #include "Renderer/Passes/Sky/SkyboxRenderPass.h"
 #include "Renderer/Passes/Reflections/ScreenSpaceReflectionRenderPass.h"
+#include "Renderer/Passes/Reflections/ScreenSpaceReflectionCompositeRenderPass.h"
 #include "Renderer/Passes/Reflections/SoftwareReflectionCompositeRenderPass.h"
 #include "Renderer/Passes/Reflections/SoftwareReflectionRenderPass.h"
 #include "Renderer/Passes/Lighting/SSAORenderPass.h"
 #include "Renderer/Passes/Transparency/TransparentBackfaceDistanceRenderPass.h"
 #include "Renderer/Passes/Transparency/TransparentCompositeRenderPass.h"
 #include "Renderer/Passes/Transparency/TransparentLightingRenderPass.h"
-#include "Renderer/Passes/Transparency/TransparentRenderPass.h"
 #include "Renderer/Passes/Transparency/TransparentSceneColorCopyRenderPass.h"
 #include "Renderer/Passes/Sky/VolumetricCloudRenderPass.h"
 
@@ -77,14 +78,10 @@ namespace SasamiRenderer
         RenderPassBuilderCatalog catalog;
         catalog.Register(std::make_unique<StatelessRenderPassBuilder<ShadowRenderPass>>(
             RenderPassBuilderId::Shadow, "Shadow"));
-        catalog.Register(std::make_unique<StatelessRenderPassBuilder<OpaqueRenderPass>>(
-            RenderPassBuilderId::Opaque, "Opaque"));
-        catalog.Register(std::make_unique<StatelessRenderPassBuilder<OpaqueGBufferRenderPass>>(
+        catalog.Register(std::make_unique<StatelessRenderPassBuilder<GBufferRenderPass>>(
             RenderPassBuilderId::OpaqueGBuffer, "Opaque GBuffer"));
-        catalog.Register(std::make_unique<StatelessRenderPassBuilder<LightingRenderPass>>(
+        catalog.Register(std::make_unique<StatelessRenderPassBuilder<DeferredLightingRenderPass>>(
             RenderPassBuilderId::Lighting, "Lighting"));
-        catalog.Register(std::make_unique<StatelessRenderPassBuilder<TransparentRenderPass>>(
-            RenderPassBuilderId::Transparent, "Transparent"));
         catalog.Register(std::make_unique<StatelessRenderPassBuilder<TransparentLightingRenderPass>>(
             RenderPassBuilderId::TransparentLighting, "Transparent Lighting"));
         catalog.Register(std::make_unique<StatelessRenderPassBuilder<SkyboxRenderPass>>(
@@ -105,6 +102,8 @@ namespace SasamiRenderer
             RenderPassBuilderId::TransparentComposite, "Transparent Composite"));
         catalog.Register(std::make_unique<StatelessRenderPassBuilder<ScreenSpaceReflectionRenderPass>>(
             RenderPassBuilderId::ScreenSpaceReflection, "Screen Space Reflection"));
+        catalog.Register(std::make_unique<StatelessRenderPassBuilder<ScreenSpaceReflectionCompositeRenderPass>>(
+            RenderPassBuilderId::ScreenSpaceReflectionComposite, "Screen Space Reflection Composite"));
         catalog.Register(std::make_unique<StatelessRenderPassBuilder<SoftwareReflectionRenderPass>>(
             RenderPassBuilderId::SoftwareReflection, "Software Reflection"));
         catalog.Register(std::make_unique<StatelessRenderPassBuilder<SoftwareReflectionCompositeRenderPass>>(
@@ -114,6 +113,10 @@ namespace SasamiRenderer
             RenderPassBuilderId::VolumetricCloud, "Volumetric Cloud"));
         catalog.Register(std::make_unique<StatelessRenderPassBuilder<DebugProbeGridRenderPass>>(
             RenderPassBuilderId::DebugProbeGrid, "Debug Probe Grid"));
+        catalog.Register(std::make_unique<StatelessRenderPassBuilder<FluidSurfaceRenderPass>>(
+            RenderPassBuilderId::FluidSurface, "Fluid Surface"));
+        catalog.Register(std::make_unique<StatelessRenderPassBuilder<ParticleRenderPass>>(
+            RenderPassBuilderId::Particles, "Particles"));
         return catalog;
     }
 
@@ -147,19 +150,20 @@ namespace SasamiRenderer
         std::array<std::shared_ptr<IRenderPass>, kSequencePassCount> passes{};
         for (size_t i = 0; i < passes.size(); ++i) {
             const auto passType = static_cast<RenderPassType>(i);
-            passes[i] = Build(ToBuilderId(passType), context);
+            if (const auto builderId = ToBuilderId(passType)) {
+                passes[i] = Build(*builderId, context);
+            }
+            // nullopt = retired slot with no builder; leave passes[i] as the value-initialized nullptr.
         }
         return passes;
     }
 
-    RenderPassBuilderId RenderPassBuilderCatalog::ToBuilderId(RenderPassType type)
+    std::optional<RenderPassBuilderId> RenderPassBuilderCatalog::ToBuilderId(RenderPassType type)
     {
         switch (type) {
         case RenderPassType::Shadow: return RenderPassBuilderId::Shadow;
-        case RenderPassType::Opaque: return RenderPassBuilderId::Opaque;
         case RenderPassType::OpaqueGBuffer: return RenderPassBuilderId::OpaqueGBuffer;
         case RenderPassType::Lighting: return RenderPassBuilderId::Lighting;
-        case RenderPassType::Transparent: return RenderPassBuilderId::Transparent;
         case RenderPassType::TransparentLighting: return RenderPassBuilderId::TransparentLighting;
         case RenderPassType::Skybox: return RenderPassBuilderId::Skybox;
         case RenderPassType::PostProcess: return RenderPassBuilderId::PostProcess;
@@ -170,9 +174,10 @@ namespace SasamiRenderer
         case RenderPassType::TransparentSceneColorCopy: return RenderPassBuilderId::TransparentSceneColorCopy;
         case RenderPassType::TransparentComposite: return RenderPassBuilderId::TransparentComposite;
         case RenderPassType::ScreenSpaceReflection: return RenderPassBuilderId::ScreenSpaceReflection;
+        case RenderPassType::ScreenSpaceReflectionComposite: return RenderPassBuilderId::ScreenSpaceReflectionComposite;
         case RenderPassType::SoftwareReflection: return RenderPassBuilderId::SoftwareReflection;
         case RenderPassType::SoftwareReflectionComposite: return RenderPassBuilderId::SoftwareReflectionComposite;
-        default: return RenderPassBuilderId::Opaque;
+        default: return std::nullopt;
         }
     }
 }

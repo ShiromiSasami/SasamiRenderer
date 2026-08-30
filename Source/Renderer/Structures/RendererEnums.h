@@ -4,17 +4,6 @@ namespace SasamiRenderer
 {
     namespace RendererEnums
     {
-        enum class RasterShaderMode
-        {
-            Lighting = 0,
-            Opaque = 1,
-
-            // Backward compatibility aliases.
-            CookTorranceGGX = Lighting,
-            PBR = Lighting,   // deprecated alias
-            Basic = Opaque,
-        };
-
         enum class GBufferDebugView
         {
             FinalLit = 0,
@@ -86,12 +75,14 @@ namespace SasamiRenderer
             CubemapFaces = 3,
         };
 
+        // Opaque geometry is deferred (OpaqueGBuffer -> Lighting) and transparency is
+        // forward (TransparentLighting -> TransparentComposite). The former unlit
+        // Opaque/Transparent passes were removed along with the raster-shader-mode
+        // switch; their values (1 and 3) stay retired so the numbering keeps meaning.
         enum class RenderPassType
         {
             Shadow = 0,
-            Opaque = 1,
             Lighting = 2,
-            Transparent = 3,
             TransparentLighting = 4,
             Skybox = 5,
             PostProcess = 6,
@@ -106,6 +97,7 @@ namespace SasamiRenderer
             SoftwareReflection = 14,
             SoftwareReflectionComposite = 15,
             OpaqueGBuffer = 16,
+            ScreenSpaceReflectionComposite = 17,
         };
     }
 }

@@ -1,6 +1,9 @@
 #ifndef SASAMI_RAYTRACING_SHADING_HLSLI
 #define SASAMI_RAYTRACING_SHADING_HLSLI
 
+#include "Shared/Common/MicroShadowing.hlsli"
+#include "Raster/Lighting/PBR/PBR_BRDF.hlsli"
+
 float Saturate(float value)
 {
     return clamp(value, 0.0, 1.0);
@@ -13,28 +16,6 @@ float3 SafeNormalize(float3 value)
         return float3(0.0, 0.0, 1.0);
     }
     return value * rsqrt(lenSq);
-}
-
-float3 FresnelSchlick(float cosTheta, float3 F0)
-{
-    return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
-}
-
-float DistributionGGX(float NdotH, float a)
-{
-    float a2 = a * a;
-    float d = (NdotH * NdotH) * (a2 - 1.0) + 1.0;
-    return a2 / max(3.14159265 * d * d, 1e-4);
-}
-
-float GeometrySchlickGGX(float NdotV, float k)
-{
-    return NdotV / max(NdotV * (1.0 - k) + k, 1e-4);
-}
-
-float GeometrySmith(float NdotV, float NdotL, float k)
-{
-    return GeometrySchlickGGX(NdotV, k) * GeometrySchlickGGX(NdotL, k);
 }
 
 float2 WrapUv(float2 uv)

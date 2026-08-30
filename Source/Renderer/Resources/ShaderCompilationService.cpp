@@ -17,6 +17,7 @@
 #include <windows.h>
 
 #include "Foundation/Tools/DebugOutput.h"
+#include "Renderer/Resources/RenderPipelineStateCacheLog.h"
 
 #pragma comment(lib, "d3dcompiler.lib")
 
@@ -33,43 +34,35 @@ namespace
         D3D_SHADER_MODEL model = D3D_SHADER_MODEL_6_0;
     };
 
+    // D3D_SHADER_MODEL_6_x are ENUMERATORS (d3d12.h: D3D_SHADER_MODEL_6_9 = 0x69), not
+    // preprocessor macros, so the `#ifdef D3D_SHADER_MODEL_6_9` guards this table used to
+    // carry were ALWAYS false. The table collapsed to the single unguarded 6_0 entry, and
+    // ResolveEffectiveShaderModel could therefore only ever return "6_0" -- on every
+    // machine, no matter the hardware. Every shader in the renderer was being compiled at
+    // vs_6_0/ps_6_0/cs_6_0, and the mesh shader PSO (which needs 6_5) failed to create.
+    //
+    // The values are part of the stable D3D ABI, so spell them out and cast rather than
+    // depending on which Windows SDK this translation unit happens to see. Listing a model
+    // the *runtime* does not know is safe and is exactly what the descending loop in
+    // ResolveEffectiveShaderModel exists for: CheckFeatureSupport returns E_INVALIDARG for
+    // an unrecognised HighestShaderModel, and the loop then tries the next one down.
     static constexpr ShaderModelInfo kKnownShaderModels[] = {
-#ifdef D3D_SHADER_MODEL_6_9
-        { "6_9", 6, 9, D3D_SHADER_MODEL_6_9 },
-#endif
-#ifdef D3D_SHADER_MODEL_6_8
-        { "6_8", 6, 8, D3D_SHADER_MODEL_6_8 },
-#endif
-#ifdef D3D_SHADER_MODEL_6_7
-        { "6_7", 6, 7, D3D_SHADER_MODEL_6_7 },
-#endif
-#ifdef D3D_SHADER_MODEL_6_6
-        { "6_6", 6, 6, D3D_SHADER_MODEL_6_6 },
-#endif
-#ifdef D3D_SHADER_MODEL_6_5
-        { "6_5", 6, 5, D3D_SHADER_MODEL_6_5 },
-#endif
-#ifdef D3D_SHADER_MODEL_6_4
-        { "6_4", 6, 4, D3D_SHADER_MODEL_6_4 },
-#endif
-#ifdef D3D_SHADER_MODEL_6_3
-        { "6_3", 6, 3, D3D_SHADER_MODEL_6_3 },
-#endif
-#ifdef D3D_SHADER_MODEL_6_2
-        { "6_2", 6, 2, D3D_SHADER_MODEL_6_2 },
-#endif
-#ifdef D3D_SHADER_MODEL_6_1
-        { "6_1", 6, 1, D3D_SHADER_MODEL_6_1 },
-#endif
+        { "6_9", 6, 9, static_cast<D3D_SHADER_MODEL>(0x69) },
+        { "6_8", 6, 8, static_cast<D3D_SHADER_MODEL>(0x68) },
+        { "6_7", 6, 7, static_cast<D3D_SHADER_MODEL>(0x67) },
+        { "6_6", 6, 6, static_cast<D3D_SHADER_MODEL>(0x66) },
+        { "6_5", 6, 5, static_cast<D3D_SHADER_MODEL>(0x65) },
+        { "6_4", 6, 4, static_cast<D3D_SHADER_MODEL>(0x64) },
+        { "6_3", 6, 3, static_cast<D3D_SHADER_MODEL>(0x63) },
+        { "6_2", 6, 2, static_cast<D3D_SHADER_MODEL>(0x62) },
+        { "6_1", 6, 1, static_cast<D3D_SHADER_MODEL>(0x61) },
         { "6_0", 6, 0, D3D_SHADER_MODEL_6_0 },
     };
-
-    static std::string FormatHResult(HRESULT hr)
-    {
-        char text[16] = {};
-        std::snprintf(text, sizeof(text), "0x%08X", static_cast<unsigned int>(hr));
-        return text;
-    }
+    static_assert(std::size(kKnownShaderModels) > 1,
+                  "kKnownShaderModels must list more than 6_0; if this fires the entries "
+                  "have been made conditional again and shader model detection is dead.");
+    static_assert(kKnownShaderModels[std::size(kKnownShaderModels) - 1].model == D3D_SHADER_MODEL_6_0,
+                  "The descending search relies on 6_0 being the last entry.");
 
     static std::filesystem::path GetExecutableDir()
     {
@@ -375,6 +368,20 @@ namespace SasamiRenderer::ShaderCompilationService
         if (configuredShaderModel.has_value() && !configuredShaderModel->empty()) {
             return NarrowAscii(*configuredShaderModel);
         }
+        // MUST stay in sync with <RendererShaderModel> in SasamiRenderer.vcxproj. The build
+        // precompiles every shader as <name>.<entry>.<profile>_<model>.cso and the runtime looks
+        // the file up by that exact name, so if the two disagree the precompiled shaders are
+        // never found and each machine recompiles all of them on first launch.
+        //
+        // Deliberately the highest non-beta model (6_9), per the project's target: the app should
+        // use the best shader model the device offers rather than pin itself to a lower one.
+        //
+        // The cost is known and accepted: ResolveEffectiveShaderModel clamps this request down to
+        // whatever the device reports, so on any device below 6_9 the resolved profile (e.g. 6_8)
+        // will not match the *_6_9.cso the build precompiled, and every shader is compiled once at
+        // runtime and cached under the resolved name. Subsequent launches hit that cache. Lowering
+        // this to the minimum supported device model would make precompilation effective, at the
+        // cost of never using newer shader model features.
         return "6_9";
     }
 
@@ -419,11 +426,25 @@ namespace SasamiRenderer::ShaderCompilationService
         message += "Falling back to ";
         message += kKnownShaderModels[std::size(kKnownShaderModels) - 1].text;
         message += ". lastHr=";
-        message += FormatHResult(lastHr);
+        message += FmtHr(lastHr);
         message += "\n";
         DebugLog(message.c_str());
 
         return kKnownShaderModels[std::size(kKnownShaderModels) - 1].text;
+    }
+
+    std::wstring ResolveEffectiveComputeShaderTarget(ID3D12Device* device, const std::string& requestedModel)
+    {
+        const std::string smStr = ResolveEffectiveShaderModel(device, requestedModel);
+        return L"cs_" + std::wstring(smStr.begin(), smStr.end());
+    }
+
+    void ResolveEffectiveVsPsTargets(ID3D12Device* device, const std::string& requestedModel,
+                                     std::string& outVsTarget, std::string& outPsTarget)
+    {
+        const std::string smStr = ResolveEffectiveShaderModel(device, requestedModel);
+        outVsTarget = "vs_" + smStr;
+        outPsTarget = "ps_" + smStr;
     }
 
     std::filesystem::path GetShaderSourceRoot()

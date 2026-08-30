@@ -2,6 +2,9 @@
 #include <cmath>
 #include <utility>
 
+#include "ApplicationCore.h"
+#include "Loader/AsyncAssetLoadService.h"
+
 namespace SasamiRenderer
 {
     namespace
@@ -131,6 +134,22 @@ namespace SasamiRenderer
     bool StaticModel::LoadModel(const std::string& assetPath, ModelFormat format, float uniformScale)
     {
         return MeshComponentRef().LoadModel(assetPath, format, uniformScale);
+    }
+
+    bool StaticModel::LoadModelAsync(ApplicationCore& app, const std::string& assetPath,
+                                     ModelFormat format, float uniformScale)
+    {
+        MeshComponent* component = GetComponent<MeshComponent>();
+        if (component) {
+            app.GetAssetLoadService().RequestModelLoad(component, assetPath, format, uniformScale);
+        }
+        return component != nullptr;
+    }
+
+    MeshComponent::MeshLoadState StaticModel::GetLoadState() const
+    {
+        const MeshComponent* component = GetComponent<MeshComponent>();
+        return component ? component->GetLoadState() : MeshComponent::MeshLoadState::Empty;
     }
 
     std::vector<RenderProxy> StaticModel::BuildRenderProxies() const

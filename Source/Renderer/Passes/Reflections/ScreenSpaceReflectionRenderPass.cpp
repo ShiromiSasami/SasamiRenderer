@@ -4,6 +4,7 @@
 #include "Renderer/Passes/Core/RenderPassSetupContext.h"
 #include "Renderer/RenderGraph/RenderGraph.h"
 #include "Renderer/Resources/RenderPipelineStateCache.h"
+#include "Renderer/Scene/Skybox.h"
 #include "d3dx12.h"
 
 #include <cstdint>
@@ -25,6 +26,7 @@ namespace SasamiRenderer
         builder.RequireCameraPV();
         builder.RequireFrameCoordinator();
         builder.RequireFrame();
+        builder.RequireSkybox();
     }
 
     void ScreenSpaceReflectionRenderPass::Setup(RenderGraphBuilder& builder) const
@@ -33,6 +35,11 @@ namespace SasamiRenderer
         builder.Read("GBufferNormal");
         builder.Read("GBufferMaterial");
         builder.Write("SceneColor");
+        // Execute copies SceneColor into SSRSceneColorCopy and needs it in RENDER_TARGET going
+        // in (matching the CopySceneColor barrier's source state); let the graph drive that
+        // transition. It leaves SceneColor in RENDER_TARGET for
+        // ScreenSpaceReflectionCompositeRenderPass to draw into next.
+        builder.UseColorTarget("SceneColor");
         builder.Write("SSRSceneColorCopy");
         builder.Write("SSRReflection");
         builder.DependsOnPrevious();
@@ -60,6 +67,7 @@ namespace SasamiRenderer
         RendererFrameCoordinator* frameCoordinator = inputs.execution.frameCoordinator;
         RendererFrameCoordinator::FrameContext* frame = inputs.execution.frame;
         if (!cmdList || !pipelineStateCache || !srvHeap || !frameCoordinator || !frame ||
+            !inputs.camera.invPv ||
             !inputs.ssr.sceneColorResource ||
             !inputs.ssr.sceneColorCopyResource ||
             !inputs.ssr.reflectionResource ||
@@ -128,22 +136,28 @@ namespace SasamiRenderer
             1.0f / static_cast<float>(height),
         };
         const float traceParams0[4] = {
-            28.0f,   // max trace distance in world units
-            0.18f,   // depth thickness in view-space units
-            48.0f,   // max ray-march steps
-            0.78f,   // roughness where SSR fully fades out
+            policy.ssrMaxDistance,     // max trace distance in world units
+            policy.ssrThickness,      // depth thickness in view-space units
+            policy.ssrStepCount,      // max ray-march steps
+            policy.ssrRoughnessCutoff, // roughness where SSR fully fades out
         };
         const float traceParams1[4] = {
-            4.0f,    // binary refinement steps
-            0.075f,  // screen edge fade width
-            0.02f,   // normal offset
-            1.0f,    // reflection intensity
+            policy.ssrRefineSteps,   // binary refinement steps
+            policy.ssrEdgeFade,      // screen edge fade width
+            policy.ssrNormalOffset, // normal offset
+            policy.ssrIntensity,    // reflection intensity
         };
         const float* cameraPosPtr = inputs.camera.pos;
         const float cameraPos[4] = {
             cameraPosPtr ? cameraPosPtr[0] : 0.0f,
             cameraPosPtr ? cameraPosPtr[1] : 0.0f,
             cameraPosPtr ? cameraPosPtr[2] : 0.0f,
+            0.0f,
+        };
+        const float iblParams[4] = {
+            inputs.skybox->IsIblEnabled() ? 1.0f : 0.0f,
+            policy.iblIntensity,
+            inputs.skybox->GetIblPrefilterMaxMip(),
             0.0f,
         };
         const RhiGpuAddress ssrCbGpu =
@@ -155,7 +169,7 @@ namespace SasamiRenderer
                                            traceParams1,
                                            cameraPos,
                                            identity,
-                                           nullptr,
+                                           iblParams,
                                            nullptr);
         if (ssrCbGpu == 0) {
             return true;
@@ -171,7 +185,11 @@ namespace SasamiRenderer
         cmdList->SetComputeRootDescriptorTable(3, inputs.ssr.sceneColorCopySrv);
         cmdList->SetComputeRootDescriptorTable(4, inputs.ssr.reflectionUav);
         cmdList->SetComputeRootConstantBufferView(5, ssrCbGpu);
+        cmdList->SetComputeRootDescriptorTable(6, inputs.lighting.iblSrvTable);
 
+#if defined(_DEBUG)
+        DebugIncrementDispatchCount();
+#endif
         cmdList->Dispatch((width + 7u) / 8u, (height + 7u) / 8u, 1u);
 
         D3D12_RESOURCE_BARRIER toComposite[] = {
@@ -193,21 +211,10 @@ namespace SasamiRenderer
         };
         cmdList->ResourceBarrier(_countof(toComposite), toComposite);
 
-        cmdList->SetGraphicsRootSignature(pipelineStateCache->GetRootSignature());
-        cmdList->SetPipelineState(pipelineStateCache->GetSwrtReflectionCompositePipelineState());
-        cmdList->RSSetViewports(1, inputs.execution.viewport);
-        cmdList->RSSetScissorRects(1, inputs.execution.scissorRect);
-
-        CpuDescriptorHandle rtv = inputs.ssr.sceneColorRtv;
-        cmdList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
-        cmdList->SetGraphicsRootDescriptorTable(0, inputs.gbuffer.albedoSrv);
-        cmdList->SetGraphicsRootConstantBufferView(3, inputs.lighting.lightCbGpu);
-        cmdList->SetGraphicsRootDescriptorTable(6, inputs.gbuffer.materialSrv);
-        cmdList->SetGraphicsRootDescriptorTable(7, inputs.ssr.reflectionSrv);
-        cmdList->SetGraphicsRootDescriptorTable(8, inputs.gbuffer.normalSrv);
-        cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        cmdList->DrawInstanced(3u, 1u, 0u, 0u);
-
+        // SceneColor stays RENDER_TARGET here (never transitioned away above), matching the
+        // state ScreenSpaceReflectionCompositeRenderPass::Setup's UseColorTarget("SceneColor")
+        // expects on entry. SSRReflection/GBuffer normal/material are back in
+        // PIXEL_SHADER_RESOURCE, matching what the composite pass's Read() declarations expect.
         return true;
     }
 }

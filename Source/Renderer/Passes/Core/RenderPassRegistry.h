@@ -35,7 +35,7 @@ namespace SasamiRenderer
         };
 
         static constexpr size_t kBuiltinPassCount =
-            static_cast<size_t>(RendererEnums::RenderPassType::OpaqueGBuffer) + 1u;
+            static_cast<size_t>(RendererEnums::RenderPassType::ScreenSpaceReflectionComposite) + 1u;
 
         void SetBuiltinPasses(std::array<std::shared_ptr<IRenderPass>, kBuiltinPassCount> passes);
         void UseDefaultRenderNodePreset();

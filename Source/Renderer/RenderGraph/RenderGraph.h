@@ -11,6 +11,7 @@
 
 namespace SasamiRenderer
 {
+    class GpuTimestampProfiler;
     class IRenderPass;
     struct RenderPassExecutionPolicy;
     struct RenderPassFrameInputs;
@@ -61,10 +62,19 @@ namespace SasamiRenderer
     struct RenderGraphExecuteContext
     {
         const RenderPassExecutionPolicy*     executionPolicy      = nullptr;
-        const RenderPassFrameInputs*         frameInputs          = nullptr;  // graphics CL
-        const RenderPassFrameInputs*         computeFrameInputs   = nullptr;  // compute CL (may be null)
+        // Not const: at a genuine cross-queue join (see submitCurrentGraphicsNode
+        // below), the graphics command list/encoder fields inside *frameInputs are
+        // swapped in place so already-registered passes pick up the new Node's
+        // command list the next time they dereference this pointer.
+        RenderPassFrameInputs*                frameInputs          = nullptr;  // graphics CL
+        RenderPassFrameInputs*                computeFrameInputs   = nullptr;  // compute CL (may be null)
         const RenderPassExecutionServices*   executionServices    = nullptr;
         const ResourceRegistry*              resources            = nullptr;
+
+        // Optional per-pass GPU timing. Null disables timing entirely; the owner
+        // (Renderer) is responsible for BeginFrame/EndFrame/UpdateResults around
+        // the graph, since those straddle the frame boundary the graph cannot see.
+        GpuTimestampProfiler*                gpuTimestampProfiler = nullptr;
 
         // Async compute cross-queue sync. All may be null if no compute queue.
         ID3D12CommandQueue*  graphicsQueueRaw   = nullptr;
@@ -72,12 +82,20 @@ namespace SasamiRenderer
         ID3D12Fence*         crossQueueFence    = nullptr;
         UINT64*              crossQueueFenceVal = nullptr;
 
+        // Closes and submits the graphics command list used by the Node that just
+        // finished (so its Signal below refers to actually-submitted work), then
+        // opens a fresh graphics command list/allocator for the next Node and
+        // updates *frameInputs in place to point at it. Returns false on failure.
+        // Null if the owning Renderer has not wired up per-Node submission.
+        std::function<bool()> submitCurrentGraphicsNode;
+        // Waits for the previous frame's use of the about-to-be-reused Node command
+        // list slot to finish, then Resets its allocator/command list. Called after
+        // the graphics queue Waits on the compute queue's signal, immediately before
+        // resuming graphics recording for the next Node. Null if per-Node submission
+        // is not wired up.
+        std::function<bool()> acquireNextGraphicsNode;
+
         RenderPassContextView CreateContextView(const RenderPassRequirements& requirements) const;
-        RenderPassContextView CreateComputeContextView(const RenderPassRequirements& requirements) const;
-        ResourceHandle FindGraphResource(std::string_view resourceName) const;
-        std::string_view GetResourceName(ResourceHandle handle) const;
-        RhiGpuDescriptorHandle FindResourceRhiSrv(std::string_view resourceName) const;
-        GpuDescriptorHandle FindResourceSrv(std::string_view resourceName) const;
     };
 
     class ResourceRegistry
@@ -162,7 +180,6 @@ namespace SasamiRenderer
                            // Passed to RenderGraphBuilder for nodes that explicitly
                            // request pass-order dependency via DependsOnPrevious().
                            NodeHandle previousNode = {});
-        PhaseHandle AddPhase(std::string_view phaseName);
         bool AddPhaseCompletionNode(std::string_view phaseName,
                                     std::string_view nodeName,
                                     const ExecuteCallback& execute,

@@ -126,7 +126,7 @@ namespace SasamiRenderer
         }
     }
 
-    static ImGuiKey VirtualKeyToImGuiKey(WPARAM vkey)
+    static ImGuiKey VirtualKeyToImGuiKey(WPARAM vkey, bool isE0)
     {
         if (vkey >= 'A' && vkey <= 'Z') return static_cast<ImGuiKey>(ImGuiKey_A + (vkey - 'A'));
         if (vkey >= '0' && vkey <= '9') return static_cast<ImGuiKey>(ImGuiKey_0 + (vkey - '0'));
@@ -153,6 +153,8 @@ namespace SasamiRenderer
         case VK_RCONTROL: return ImGuiKey_RightCtrl;
         case VK_LMENU: return ImGuiKey_LeftAlt;
         case VK_RMENU: return ImGuiKey_RightAlt;
+        case VK_CONTROL: return isE0 ? ImGuiKey_RightCtrl : ImGuiKey_LeftCtrl;
+        case VK_MENU: return isE0 ? ImGuiKey_RightAlt : ImGuiKey_LeftAlt;
         case VK_LWIN: return ImGuiKey_LeftSuper;
         case VK_RWIN: return ImGuiKey_RightSuper;
         case VK_CAPITAL: return ImGuiKey_CapsLock;
@@ -205,7 +207,7 @@ namespace SasamiRenderer
             {
                 const RAWKEYBOARD& kb = raw->data.keyboard;
                 bool down = !(kb.Flags & RI_KEY_BREAK);
-                ImGuiKey key = VirtualKeyToImGuiKey(kb.VKey);
+                ImGuiKey key = VirtualKeyToImGuiKey(kb.VKey, (kb.Flags & RI_KEY_E0) != 0);
                 if (io && key != ImGuiKey_None) {
                     io->AddKeyEvent(key, down);
                 }

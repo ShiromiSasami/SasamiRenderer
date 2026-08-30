@@ -126,6 +126,13 @@ void CS_ReflectionTemporal(uint3 id : SV_DispatchThreadID)
         return;
 
     float4 cur  = g_current.Load(int3(id.xy, 0));
+    if (any(isnan(cur)) || any(isinf(cur)))
+    {
+        // A NaN/Inf value written into g_outHist below would poison this pixel's history
+        // permanently: NaN <= 0.0f is always false, so the hist.a <= 0.0f early-out never
+        // triggers to self-heal it, and lerp(NaN, cur, alpha) stays NaN regardless of alpha.
+        cur = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    }
     const uint2 surfacePx = (g_validationEnabled != 0u)
         ? uint2(
             min(uint(float(id.x) * float(g_gbufferWidth) / float(g_width)), g_gbufferWidth - 1u),
@@ -147,16 +154,42 @@ void CS_ReflectionTemporal(uint3 id : SV_DispatchThreadID)
     float4 histSurface = g_historySurface.Load(int3(prevHistoryPx, 0));
     float4 histMaterial = g_historyMaterial.Load(int3(prevHistoryPx, 0));
 
-    if (cur.a <= 0.0f || hist.a <= 0.0f)
+    if (any(isnan(hist)) || any(isinf(hist)) ||
+        any(isnan(histSurface)) || any(isinf(histSurface)) ||
+        any(isnan(histMaterial)) || any(isinf(histMaterial)))
     {
+        // Freshly-allocated (first frame / resize) ping-pong history textures are
+        // committed with no clear value and never explicitly cleared, so their
+        // initial content is undefined per the D3D12 spec. A NaN/Inf here would
+        // otherwise poison this pixel's history permanently: lerp(hist, cur, alpha)
+        // stays NaN regardless of alpha, and NaN survives the additive, provably
+        // non-negative composite pipeline downstream (0 * NaN = NaN, not 0).
+        // Force hist.a <= 0.0f so the existing self-heal branch below discards it
+        // and writes cur directly instead.
+        hist.a = 0.0f;
+    }
+
+    if (cur.a <= 0.0f || hist.a <= 0.0f || !reprojected)
+    {
+        // ReprojectToPreviousHistory writes its out-param unconditionally at entry
+        // (before its own early-return checks), so on reprojection failure
+        // prevHistoryPx silently collapses to (0,0) instead of a location related
+        // to id.xy: hist/histSurface/histMaterial above were just loaded from an
+        // unrelated pixel. The weight computation below would zero historyWeight
+        // and drive effectiveAlpha to 1.0f expecting lerp(hist,cur,1.0f) to reduce
+        // to cur, but HLSL's lerp is not guaranteed bit-exact at t=1 (it compiles
+        // to hist + t*(cur-hist)): when the unrelated hist sample is far larger in
+        // magnitude than cur, cur-hist rounds to -hist and the result collapses to
+        // exactly 0 (solid black) via catastrophic cancellation. Bypass the blend
+        // entirely and write cur directly, same as the existing self-heal branch.
         g_outHist[id.xy] = cur;
         g_outSurface[id.xy] = curSurface;
         g_outMaterial[id.xy] = curMaterial;
         return;
     }
 
-    const float surfaceWeight = reprojected ? HistoryValidationWeight(curSurface, histSurface, expectedPrevDepth) : 0.0f;
-    const float materialWeight = reprojected ? MaterialValidationWeight(curMaterial, histMaterial) : 0.0f;
+    const float surfaceWeight = HistoryValidationWeight(curSurface, histSurface, expectedPrevDepth);
+    const float materialWeight = MaterialValidationWeight(curMaterial, histMaterial);
     const float historyWeight = surfaceWeight * materialWeight;
 
     // Rougher surfaces tend to be blurrier and tolerate more history, while
@@ -165,7 +198,15 @@ void CS_ReflectionTemporal(uint3 id : SV_DispatchThreadID)
     const float roughnessHistoryScale = lerp(0.85f, 1.25f, roughness);
     const float weightedHistory = saturate(historyWeight * roughnessHistoryScale);
     const float effectiveAlpha = lerp(1.0f, g_alpha, weightedHistory);
-    float4 blended = lerp(hist, cur, effectiveAlpha);
+    // Same non-exact-lerp-at-t=1 hazard as the !reprojected branch above, reached
+    // via a different path: a successfully-reprojected pixel can still have
+    // weightedHistory == 0 (validation rejects hist -- e.g. depth/normal mismatch
+    // from animated geometry such as the fluid surface, not just camera motion),
+    // which makes effectiveAlpha exactly 1.0f. lerp(hist,cur,1.0f) is not
+    // guaranteed to equal cur bit-exactly, and can collapse to 0 (black) via
+    // catastrophic cancellation when hist's magnitude dwarfs cur's. Bypass lerp
+    // and write cur directly whenever history carries zero weight.
+    float4 blended = (weightedHistory <= 0.0f) ? cur : lerp(hist, cur, effectiveAlpha);
 
     g_outHist[id.xy] = blended;
     g_outSurface[id.xy] = curSurface;

@@ -68,7 +68,8 @@ struct FrameConstants
     uint flags;
     uint maxBounceCount;
     float dynamicResolutionScale;
-    float2 padding;
+    float aoMicroShadowStrength;
+    float padding;
     float4 cameraPosition;
     row_major float4x4 inverseViewProjection;
     float4 directionalLightDirection;

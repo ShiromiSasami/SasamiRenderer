@@ -1,5 +1,7 @@
 #include "ImGuiCoordinator.h"
 
+#include "Foundation/Tools/DebugOutput.h"
+
 namespace SasamiRenderer
 {
     namespace
@@ -194,7 +196,7 @@ namespace SasamiRenderer
         if (!m_srvHeap || m_freeSrvDescriptorIndices.empty()) {
             *outCpuHandle = {};
             *outGpuHandle = {};
-            OutputDebugStringA("ImGuiCoordinator: SRV descriptor heap exhausted.\n");
+            DebugLog("ImGuiCoordinator: SRV descriptor heap exhausted.\n");
             return;
         }
 

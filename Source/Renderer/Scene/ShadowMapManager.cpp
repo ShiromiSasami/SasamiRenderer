@@ -18,6 +18,20 @@
 
 namespace SasamiRenderer
 {
+    namespace
+    {
+        // DSV-only descriptor heap desc shared by the three shadow-resource Ensure*
+        // methods below (only NumDescriptors differs between call sites).
+        D3D12_DESCRIPTOR_HEAP_DESC MakeDsvHeapDesc(UINT numDescriptors)
+        {
+            D3D12_DESCRIPTOR_HEAP_DESC desc = {};
+            desc.NumDescriptors = numDescriptors;
+            desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+            desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+            return desc;
+        }
+    }
+
     ShadowMapManager::~ShadowMapManager()
     {
         if (m_device && m_shadowMapHandle.IsValid()) {
@@ -32,10 +46,14 @@ namespace SasamiRenderer
         if (m_device && m_vsmMapTempHandle.IsValid()) {
             m_device->DestroyRhiResource(m_vsmMapTempHandle);
         }
+        if (m_device && m_pointShadowMapHandle.IsValid()) {
+            m_device->DestroyRhiResource(m_pointShadowMapHandle);
+        }
         m_shadowMapHandle = {};
         m_spotShadowMapHandle = {};
         m_vsmMapHandle = {};
         m_vsmMapTempHandle = {};
+        m_pointShadowMapHandle = {};
     }
 
     Resource* ShadowMapManager::GetShadowMapResource() const
@@ -56,6 +74,11 @@ namespace SasamiRenderer
     Resource* ShadowMapManager::GetVsmMapTempResource() const
     {
         return m_vsmMapTempCompat ? m_vsmMapTempCompat : const_cast<Resource*>(&m_vsmMapTemp);
+    }
+
+    Resource* ShadowMapManager::GetPointShadowMapResource() const
+    {
+        return m_pointShadowMapCompat ? m_pointShadowMapCompat : const_cast<Resource*>(&m_pointShadowMap);
     }
 
     // =========================================================================
@@ -102,14 +125,40 @@ namespace SasamiRenderer
         m_spotShadowSrvCpu = spotShadowCpu;
         m_spotShadowSrv = spotShadowGpu;
 
-        // Null SRV で仮登録
+        // Null SRV で仮登録（R16_UNORM Texture2DArray、kMaxSpotShadows スライス分）
+        // 実体のスポットシャドウマップは R16_TYPELESS/D16_UNORM で作られ SRV は R16_UNORM
+        // （下の CreateSpotShadowMap を参照）。ここが R32_FLOAT だと、シャドウマップ未生成時の
+        // プレースホルダと実体とでフォーマットが食い違う。
         D3D12_SHADER_RESOURCE_VIEW_DESC spotNullSrvDesc = {};
         spotNullSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        spotNullSrvDesc.Format = DXGI_FORMAT_R32_FLOAT;
-        spotNullSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-        spotNullSrvDesc.Texture2D.MipLevels = 1;
+        spotNullSrvDesc.Format = DXGI_FORMAT_R16_UNORM;
+        spotNullSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+        spotNullSrvDesc.Texture2DArray.MipLevels = 1;
+        spotNullSrvDesc.Texture2DArray.ArraySize = kMaxSpotShadows;
+        spotNullSrvDesc.Texture2DArray.FirstArraySlice = 0;
         Resource spotNullResource;
         m_device->CreateShaderResourceView(spotNullResource, &spotNullSrvDesc, spotShadowCpu);
+
+        // --- ポイントライトシャドウキューブマップ SRV スロットを予約 ---
+        CpuDescriptorHandle pointShadowCpu{};
+        GpuDescriptorHandle pointShadowGpu{};
+        if (!allocateSrvRange(1, pointShadowCpu, pointShadowGpu)) {
+            DebugLogDialog("ShadowMapManager::Initialize: SRV allocation failed for point shadow map.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            return false;
+        }
+        m_pointShadowSrvCpu = pointShadowCpu;
+        m_pointShadowSrv = pointShadowGpu;
+
+        // Null SRV で仮登録（R16_UNORM Texture2DArray、kMaxPointShadows * 6 面分）
+        D3D12_SHADER_RESOURCE_VIEW_DESC pointNullSrvDesc = {};
+        pointNullSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        pointNullSrvDesc.Format = DXGI_FORMAT_R16_UNORM;
+        pointNullSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+        pointNullSrvDesc.Texture2DArray.MipLevels = 1;
+        pointNullSrvDesc.Texture2DArray.ArraySize = kMaxPointShadows * kPointShadowFaceCount;
+        pointNullSrvDesc.Texture2DArray.FirstArraySlice = 0;
+        Resource pointNullResource;
+        m_device->CreateShaderResourceView(pointNullResource, &pointNullSrvDesc, pointShadowCpu);
 
         // --- VSM シャドウマップ SRV スロットを予約（t13 用）---
         CpuDescriptorHandle vsmSrvCpu{};
@@ -203,7 +252,14 @@ namespace SasamiRenderer
             hr = m_device->CreateCommittedResource(&heap,
                                                        D3D12_HEAP_FLAG_NONE,
                                                        &smDesc,
-                                                       D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, // 初期状態は SRV として読める状態
+                                                       // RHI 経由生成パス(RhiResourceState::ShaderResource)は常に
+                                                       // PIXEL_SHADER_RESOURCE|NON_PIXEL_SHADER_RESOURCE の結合状態を
+                                                       // 生成時状態とするため、フォールバックパスもこれに合わせて
+                                                       // 初期状態を統一する(LightSystemShadow.cpp 側の最初の
+                                                       // バリアの StateBefore 前提と一致させるため)。
+                                                       static_cast<D3D12_RESOURCE_STATES>(
+                                                           D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                                                           D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
                                                        &clear,
                                                        m_shadowMap);
             if (FAILED(hr)) {
@@ -225,10 +281,7 @@ namespace SasamiRenderer
         }
 
         // --- DSV（Depth Stencil View）ヒープを作成 ---
-        D3D12_DESCRIPTOR_HEAP_DESC dsvDesc = {};
-        dsvDesc.NumDescriptors = kDirectionalCascadeCount;
-        dsvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-        dsvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE; // DSV はシェーダーから直接参照しない
+        D3D12_DESCRIPTOR_HEAP_DESC dsvDesc = MakeDsvHeapDesc(kDirectionalCascadeCount); // DSV はシェーダーから直接参照しない
         hr = m_device->CreateDescriptorHeap(dsvDesc, m_dsvHeapShadow);
         if (FAILED(hr)) {
             m_shadowMap.Reset();
@@ -281,7 +334,8 @@ namespace SasamiRenderer
 
     // =========================================================================
     // EnsureSpotShadowResources
-    // スポットライトシャドウマップを初回使用時に遅延生成する。
+    // スポットライトシャドウマップ（Texture2DArray, kMaxSpotShadows スライス）を
+    // 初回使用時に遅延生成する。ライト i のシャドウはスライス i に描画される。
     // =========================================================================
     bool ShadowMapManager::EnsureSpotShadowResources()
     {
@@ -299,7 +353,7 @@ namespace SasamiRenderer
         smDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
         smDesc.Width  = m_spotShadowMapSize;
         smDesc.Height = m_spotShadowMapSize;
-        smDesc.DepthOrArraySize = 1;
+        smDesc.DepthOrArraySize = static_cast<UINT16>(kMaxSpotShadows);
         smDesc.MipLevels = 1;
         smDesc.Format = DXGI_FORMAT_R16_TYPELESS;
         smDesc.SampleDesc.Count = 1;
@@ -319,7 +373,7 @@ namespace SasamiRenderer
             rhiDesc.dimension = RhiResourceDimension::Texture2D;
             rhiDesc.extent = { m_spotShadowMapSize, m_spotShadowMapSize, 1u };
             rhiDesc.mipLevels = 1u;
-            rhiDesc.arrayLayers = 1u;
+            rhiDesc.arrayLayers = kMaxSpotShadows;
             rhiDesc.format = RhiFormat::R16Typeless;
             rhiDesc.usage = RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::DepthStencil;
             rhiDesc.memoryUsage = RhiMemoryUsage::GpuOnly;
@@ -356,10 +410,7 @@ namespace SasamiRenderer
             return false;
         }
 
-        D3D12_DESCRIPTOR_HEAP_DESC dsvDesc = {};
-        dsvDesc.NumDescriptors = 1;
-        dsvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-        dsvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+        D3D12_DESCRIPTOR_HEAP_DESC dsvDesc = MakeDsvHeapDesc(kMaxSpotShadows);
         hr = m_device->CreateDescriptorHeap(dsvDesc, m_spotDsvHeap);
         if (FAILED(hr)) {
             m_spotShadowMap.Reset();
@@ -372,26 +423,185 @@ namespace SasamiRenderer
             return false;
         }
 
+        // スライスごとに DSV を作成（ライト i のシャドウはスライス i に対応）
         D3D12_DEPTH_STENCIL_VIEW_DESC dsv = {};
         dsv.Format = DXGI_FORMAT_D16_UNORM;
-        dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+        dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
         dsv.Flags = D3D12_DSV_FLAG_NONE;
-        m_device->CreateDepthStencilView(*spotShadowMap, &dsv, m_spotDsvHeap->GetCPUDescriptorHandleForHeapStart());
+        dsv.Texture2DArray.ArraySize = 1;
+        const UINT spotDsvInc = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+        auto spotDsvHandle = m_spotDsvHeap->GetCPUDescriptorHandleForHeapStart();
+        for (uint32_t shadowIndex = 0; shadowIndex < kMaxSpotShadows; ++shadowIndex) {
+            dsv.Texture2DArray.FirstArraySlice = shadowIndex;
+            m_device->CreateDepthStencilView(*spotShadowMap, &dsv, spotDsvHandle);
+            spotDsvHandle.ptr += spotDsvInc;
+        }
 
+        // SRV はすべてのスライスをまとめて 1 つの Texture2DArray として公開する
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srvDesc.Format = DXGI_FORMAT_R16_UNORM;
-        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-        srvDesc.Texture2D.MipLevels = 1;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+        srvDesc.Texture2DArray.MipLevels = 1;
+        srvDesc.Texture2DArray.ArraySize = kMaxSpotShadows;
+        srvDesc.Texture2DArray.FirstArraySlice = 0;
         m_device->CreateShaderResourceView(*spotShadowMap, &srvDesc, m_spotShadowSrvCpu);
 
         m_spotShadowResourcesReady = true;
         return true;
     }
 
-    CpuDescriptorHandle ShadowMapManager::GetSpotDsv() const
+    CpuDescriptorHandle ShadowMapManager::GetSpotDsv(uint32_t shadowIndex) const
     {
-        return m_spotDsvHeap->GetCPUDescriptorHandleForHeapStart();
+        if (shadowIndex >= kMaxSpotShadows) {
+            return CpuDescriptorHandle{};
+        }
+        CpuDescriptorHandle handle = m_spotDsvHeap->GetCPUDescriptorHandleForHeapStart();
+        if (!m_device) {
+            return handle;
+        }
+        const UINT inc = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+        handle.ptr += static_cast<SIZE_T>(inc) * static_cast<SIZE_T>(shadowIndex);
+        return handle;
+    }
+
+    // =========================================================================
+    // EnsurePointShadowResources
+    // ポイントライトのキューブシャドウマップ（Texture2DArray、
+    // kMaxPointShadows * kPointShadowFaceCount スライス）を初回使用時に遅延生成する。
+    // ライト単位でスライスをまとめ、ライト i は面インデックス i*6 〜 i*6+5 を占有する。
+    // =========================================================================
+    bool ShadowMapManager::EnsurePointShadowResources()
+    {
+        if (!m_device) {
+            return false;
+        }
+        if (m_pointShadowResourcesReady) {
+            return true;
+        }
+
+        ScopedPerfTimer perfTimer("ShadowMapManager::EnsurePointShadowResources");
+
+        // R16_TYPELESS: DSV は D16_UNORM、SRV は R16_UNORM として使う
+        D3D12_RESOURCE_DESC smDesc = {};
+        smDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        smDesc.Width  = m_pointShadowMapSize;
+        smDesc.Height = m_pointShadowMapSize;
+        smDesc.DepthOrArraySize = static_cast<UINT16>(kMaxPointShadows * kPointShadowFaceCount);
+        smDesc.MipLevels = 1;
+        smDesc.Format = DXGI_FORMAT_R16_TYPELESS;
+        smDesc.SampleDesc.Count = 1;
+        smDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        smDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+        D3D12_CLEAR_VALUE clear = {};
+        clear.Format = DXGI_FORMAT_D16_UNORM;
+        clear.DepthStencil.Depth = 1.0f;
+
+        CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_DEFAULT);
+        HRESULT hr = S_OK;
+        m_pointShadowMapHandle = {};
+        m_pointShadowMapCompat = nullptr;
+        if (m_device->GetCapabilities().supportsRhiResourceCreation) {
+            RhiTextureDesc rhiDesc{};
+            rhiDesc.dimension = RhiResourceDimension::Texture2D;
+            rhiDesc.extent = { m_pointShadowMapSize, m_pointShadowMapSize, 1u };
+            rhiDesc.mipLevels = 1u;
+            rhiDesc.arrayLayers = kMaxPointShadows * kPointShadowFaceCount;
+            rhiDesc.format = RhiFormat::R16Typeless;
+            rhiDesc.usage = RhiTextureUsageFlags::ShaderResource | RhiTextureUsageFlags::DepthStencil;
+            rhiDesc.memoryUsage = RhiMemoryUsage::GpuOnly;
+            rhiDesc.initialState = RhiResourceState::ShaderResource;
+            m_pointShadowMapHandle = m_device->CreateRhiTexture(rhiDesc);
+            m_pointShadowMapCompat = m_device->GetD3D12CompatibilityResource(m_pointShadowMapHandle);
+        }
+        if (!m_pointShadowMapCompat) {
+            if (m_pointShadowMapHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_pointShadowMapHandle);
+                m_pointShadowMapHandle = {};
+            }
+            hr = m_device->CreateCommittedResource(&heap,
+                                                   D3D12_HEAP_FLAG_NONE,
+                                                   &smDesc,
+                                                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                                   &clear,
+                                                   m_pointShadowMap);
+            if (FAILED(hr)) {
+                DebugLogDialog("ShadowMapManager::EnsurePointShadowResources: texture creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+                return false;
+            }
+        }
+
+        Resource* pointShadowMap = GetPointShadowMapResource();
+        if (!pointShadowMap || !pointShadowMap->IsValid()) {
+            DebugLogDialog("ShadowMapManager::EnsurePointShadowResources: texture compatibility resource lookup failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            m_pointShadowMap.Reset();
+            if (m_pointShadowMapHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_pointShadowMapHandle);
+            }
+            m_pointShadowMapHandle = {};
+            m_pointShadowMapCompat = nullptr;
+            return false;
+        }
+
+        D3D12_DESCRIPTOR_HEAP_DESC dsvDesc = MakeDsvHeapDesc(kMaxPointShadows * kPointShadowFaceCount);
+        hr = m_device->CreateDescriptorHeap(dsvDesc, m_pointDsvHeap);
+        if (FAILED(hr)) {
+            m_pointShadowMap.Reset();
+            if (m_pointShadowMapHandle.IsValid()) {
+                m_device->DestroyRhiResource(m_pointShadowMapHandle);
+            }
+            m_pointShadowMapHandle = {};
+            m_pointShadowMapCompat = nullptr;
+            DebugLogDialog("ShadowMapManager::EnsurePointShadowResources: DSV heap creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            return false;
+        }
+
+        // スライスごとに DSV を作成（ライト i の面 face はスライス i*6+face に対応）
+        D3D12_DEPTH_STENCIL_VIEW_DESC dsv = {};
+        dsv.Format = DXGI_FORMAT_D16_UNORM;
+        dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+        dsv.Flags = D3D12_DSV_FLAG_NONE;
+        dsv.Texture2DArray.ArraySize = 1;
+        dsv.Texture2DArray.MipSlice = 0;
+        const UINT dsvInc = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+        auto dsvHandle = m_pointDsvHeap->GetCPUDescriptorHandleForHeapStart();
+        for (uint32_t slice = 0; slice < kMaxPointShadows * kPointShadowFaceCount; ++slice) {
+            dsv.Texture2DArray.FirstArraySlice = slice;
+            m_device->CreateDepthStencilView(*pointShadowMap, &dsv, dsvHandle);
+            dsvHandle.ptr += dsvInc;
+        }
+
+        // SRV はすべてのライト・面のスライスをまとめて 1 つの Texture2DArray として公開する
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = DXGI_FORMAT_R16_UNORM;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+        srvDesc.Texture2DArray.MostDetailedMip = 0;
+        srvDesc.Texture2DArray.MipLevels = 1;
+        srvDesc.Texture2DArray.FirstArraySlice = 0;
+        srvDesc.Texture2DArray.ArraySize = kMaxPointShadows * kPointShadowFaceCount;
+        srvDesc.Texture2DArray.PlaneSlice = 0;
+        srvDesc.Texture2DArray.ResourceMinLODClamp = 0.0f;
+        m_device->CreateShaderResourceView(*pointShadowMap, &srvDesc, m_pointShadowSrvCpu);
+
+        m_pointShadowResourcesReady = true;
+        return true;
+    }
+
+    CpuDescriptorHandle ShadowMapManager::GetPointFaceDsv(uint32_t shadowIndex, uint32_t face) const
+    {
+        if (shadowIndex >= kMaxPointShadows || face >= kPointShadowFaceCount) {
+            return CpuDescriptorHandle{};
+        }
+        CpuDescriptorHandle handle = m_pointDsvHeap->GetCPUDescriptorHandleForHeapStart();
+        if (!m_device) {
+            return handle;
+        }
+        const UINT inc = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+        const uint32_t slice = shadowIndex * kPointShadowFaceCount + face;
+        handle.ptr += static_cast<SIZE_T>(inc) * static_cast<SIZE_T>(slice);
+        return handle;
     }
 
     // =========================================================================

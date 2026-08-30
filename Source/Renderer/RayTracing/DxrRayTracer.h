@@ -107,7 +107,8 @@ namespace SasamiRenderer
             uint32_t flags = 0;
             uint32_t maxBounceCount = kDefaultRayTracingBounceCount;
             float dynamicResolutionScale = 1.0f;
-            float padding[2] = {};
+            float aoMicroShadowStrength = 0.0f;
+            float padding = 0.0f;
             float cameraPosition[4] = {};
             float inverseViewProjection[16] = {};
             float directionalLightDirection[4] = {};

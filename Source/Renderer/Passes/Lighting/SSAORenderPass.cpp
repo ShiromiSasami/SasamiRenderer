@@ -14,11 +14,14 @@ namespace SasamiRenderer
 
     void SSAORenderPass::Setup(RenderGraphBuilder& builder) const
     {
-        // Declare read on SceneDepth so the render graph orders SSAO after the opaque pass.
-        // Resource state transitions for depth and the SSAO render target are handled
-        // manually in Execute() using explicit D3D12 barriers.
+        // Declaring Read("SceneDepth") makes the render graph auto-transition it to
+        // PIXEL_SHADER_RESOURCE before Execute() runs (RenderGraph::PreparePassResources).
         builder.Read("SceneDepth");
         builder.Read("GBufferNormal");
+        // Declares SSAORenderPass as the graph producer for SSAOBlurRenderPass's Read("SSAO").
+        // UseColorTarget makes the graph own SSAO's RTV<->SRV transitions.
+        builder.Write("SSAO");
+        builder.UseColorTarget("SSAO");
         builder.DependsOnPrevious();
     }
 
@@ -31,7 +34,6 @@ namespace SasamiRenderer
         }
 
         const RenderPassFrameInputs& inputs = context.Inputs();
-        const RenderPassExecutionPolicy& policy = context.Policy();
 
         if (!inputs.ao.ssaoResource || inputs.ao.ssaoRtv.ptr == 0 || inputs.ao.ssaoCbGpu == 0)
         {
@@ -46,7 +48,6 @@ namespace SasamiRenderer
                 *inputs.execution.viewport,
                 inputs.gbuffer.depthSrv,
                 inputs.gbuffer.normalSrv,
-                inputs.gbuffer.depthResource,
                 inputs.ao.ssaoRtv,
                 inputs.ao.ssaoResource,
                 inputs.ao.ssaoCbGpu);
@@ -60,7 +61,6 @@ namespace SasamiRenderer
                                   const Viewport&           viewport,
                                   GpuDescriptorHandle       depthSrv,
                                   GpuDescriptorHandle       normalSrv,
-                                  ID3D12Resource*           depthResource,
                                   CpuDescriptorHandle       ssaoRtv,
                                   ID3D12Resource*           ssaoResource,
                                   D3D12_GPU_VIRTUAL_ADDRESS ssaoCbGpu) const
@@ -70,37 +70,15 @@ namespace SasamiRenderer
             return;
         }
 
-        // --- Barriers: transition both SSAO texture (SRV->RTV) and depth (DEPTH_WRITE->SRV) ---
-        D3D12_RESOURCE_BARRIER barriers[2] = {};
-        UINT barrierCount = 0;
-
-        barriers[barrierCount].Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        barriers[barrierCount].Flags                  = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-        barriers[barrierCount].Transition.pResource   = ssaoResource;
-        barriers[barrierCount].Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-        barriers[barrierCount].Transition.StateAfter  = D3D12_RESOURCE_STATE_RENDER_TARGET;
-        barriers[barrierCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        ++barrierCount;
-
-        if (depthResource)
-        {
-            barriers[barrierCount].Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            barriers[barrierCount].Flags                  = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-            barriers[barrierCount].Transition.pResource   = depthResource;
-            barriers[barrierCount].Transition.StateBefore = D3D12_RESOURCE_STATE_DEPTH_WRITE;
-            barriers[barrierCount].Transition.StateAfter  = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-            barriers[barrierCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            ++barrierCount;
-        }
-
-        cmdList->ResourceBarrier(barrierCount, barriers);
+        // SSAO is graph-imported now, so PreparePassResources owns its RTV/SRV transitions;
+        // the manual barrier here would double-transition.
 
         // --- Clear SSAO RTV to white (1.0 = no occlusion) ---
         const FLOAT clearColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
         cmdList->ClearRenderTargetView(ssaoRtv, clearColor, 0, nullptr);
 
-        // --- Bind SSAO render target (no depth) ---
-        cmdList->OMSetRenderTargets(1, &ssaoRtv, FALSE, nullptr);
+        // Render target binding is handled by PreparePassResources for this pass's
+        // UseColorTarget("SSAO") declaration.
 
         // --- Set SSAO root signature and PSO ---
         cmdList->SetGraphicsRootSignature(pipelineStateCache.GetSsaoRootSignature());
@@ -124,32 +102,13 @@ namespace SasamiRenderer
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         cmdList->IASetVertexBuffers(0, 0, nullptr);
         cmdList->IASetIndexBuffer(nullptr);
+#if defined(_DEBUG)
+        DebugIncrementDrawCount();
+#endif
         cmdList->DrawInstanced(3, 1, 0, 0);
 
-        // --- Barriers: SSAO texture (RTV->SRV) and depth (SRV->DEPTH_WRITE) ---
-        D3D12_RESOURCE_BARRIER endBarriers[2] = {};
-        UINT endBarrierCount = 0;
-
-        endBarriers[endBarrierCount].Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        endBarriers[endBarrierCount].Flags                  = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-        endBarriers[endBarrierCount].Transition.pResource   = ssaoResource;
-        endBarriers[endBarrierCount].Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-        endBarriers[endBarrierCount].Transition.StateAfter  = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-        endBarriers[endBarrierCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        ++endBarrierCount;
-
-        if (depthResource)
-        {
-            endBarriers[endBarrierCount].Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            endBarriers[endBarrierCount].Flags                  = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-            endBarriers[endBarrierCount].Transition.pResource   = depthResource;
-            endBarriers[endBarrierCount].Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-            endBarriers[endBarrierCount].Transition.StateAfter  = D3D12_RESOURCE_STATE_DEPTH_WRITE;
-            endBarriers[endBarrierCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            ++endBarrierCount;
-        }
-
-        cmdList->ResourceBarrier(endBarrierCount, endBarriers);
+        // SSAO is graph-imported now, so PreparePassResources owns its RTV/SRV transitions;
+        // the manual barrier here would double-transition.
     }
 
     void SSAOBlurRenderPass::BuildRequirements(RenderPassRequirementBuilder& builder) const
@@ -162,11 +121,16 @@ namespace SasamiRenderer
 
     void SSAOBlurRenderPass::Setup(RenderGraphBuilder& builder) const
     {
-        // The D3D12 resources are still transitioned manually in ExecuteBlur().
-        // The graph declaration keeps this pass ordered after raw SSAO.
+        // Read("SceneDepth") makes the render graph auto-transition it to
+        // PIXEL_SHADER_RESOURCE before ExecuteBlur() runs. Read("SSAO") makes the graph
+        // transition the raw SSAO texture to PIXEL_SHADER_RESOURCE for sampling here.
         builder.Read("SceneDepth");
         builder.Read("SSAO");
+        // SSAO_Blur_PS.hlsl samples the GBuffer normal at register(t2) for depth/normal-aware blur.
+        builder.Read("GBufferNormal");
         builder.Write("SSAOBlur");
+        // UseColorTarget makes the graph own SSAOBlur's RTV<->SRV transitions.
+        builder.UseColorTarget("SSAOBlur");
         builder.DependsOnPrevious();
     }
 
@@ -189,7 +153,6 @@ namespace SasamiRenderer
                     inputs.ao.ssaoRawSrv,
                     inputs.gbuffer.depthSrv,
                     inputs.gbuffer.normalSrv,
-                    inputs.gbuffer.depthResource,
                     inputs.ao.ssaoBlurRtv,
                     inputs.ao.ssaoBlurResource,
                     inputs.ao.ssaoCbGpu);
@@ -203,7 +166,6 @@ namespace SasamiRenderer
                                          GpuDescriptorHandle       ssaoRawSrv,
                                          GpuDescriptorHandle       depthSrv,
                                          GpuDescriptorHandle       normalSrv,
-                                         ID3D12Resource*           depthResource,
                                          CpuDescriptorHandle       ssaoBlurRtv,
                                          ID3D12Resource*           ssaoBlurResource,
                                          D3D12_GPU_VIRTUAL_ADDRESS ssaoCbGpu) const
@@ -213,34 +175,11 @@ namespace SasamiRenderer
             return;
         }
 
-        // After the raw SSAO pass: ssaoBlurTexture is in SRV state, depth is in DEPTH_WRITE.
-        // We need: ssaoBlurTexture ↁERTV, depth ↁESRV (for edge-stopping bilateral).
-        D3D12_RESOURCE_BARRIER beginBarriers[2] = {};
-        UINT beginCount = 0;
+        // SSAOBlur is graph-imported now, so PreparePassResources owns its RTV/SRV
+        // transitions; the manual barrier here would double-transition.
 
-        beginBarriers[beginCount].Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        beginBarriers[beginCount].Flags                  = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-        beginBarriers[beginCount].Transition.pResource   = ssaoBlurResource;
-        beginBarriers[beginCount].Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-        beginBarriers[beginCount].Transition.StateAfter  = D3D12_RESOURCE_STATE_RENDER_TARGET;
-        beginBarriers[beginCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        ++beginCount;
-
-        if (depthResource)
-        {
-            beginBarriers[beginCount].Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            beginBarriers[beginCount].Flags                  = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-            beginBarriers[beginCount].Transition.pResource   = depthResource;
-            beginBarriers[beginCount].Transition.StateBefore = D3D12_RESOURCE_STATE_DEPTH_WRITE;
-            beginBarriers[beginCount].Transition.StateAfter  = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-            beginBarriers[beginCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            ++beginCount;
-        }
-
-        cmdList->ResourceBarrier(beginCount, beginBarriers);
-
-        // Bind blur render target
-        cmdList->OMSetRenderTargets(1, &ssaoBlurRtv, FALSE, nullptr);
+        // Render target binding is handled by PreparePassResources for this pass's
+        // UseColorTarget("SSAOBlur") declaration.
 
         // Set blur root signature and PSO
         cmdList->SetGraphicsRootSignature(pipelineStateCache.GetSsaoBlurRootSignature());
@@ -262,31 +201,12 @@ namespace SasamiRenderer
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         cmdList->IASetVertexBuffers(0, 0, nullptr);
         cmdList->IASetIndexBuffer(nullptr);
+#if defined(_DEBUG)
+        DebugIncrementDrawCount();
+#endif
         cmdList->DrawInstanced(3, 1, 0, 0);
 
-        // Restore states: ssaoBlurTexture ↁESRV, depth ↁEDEPTH_WRITE
-        D3D12_RESOURCE_BARRIER endBarriers[2] = {};
-        UINT endCount = 0;
-
-        endBarriers[endCount].Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        endBarriers[endCount].Flags                  = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-        endBarriers[endCount].Transition.pResource   = ssaoBlurResource;
-        endBarriers[endCount].Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-        endBarriers[endCount].Transition.StateAfter  = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-        endBarriers[endCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        ++endCount;
-
-        if (depthResource)
-        {
-            endBarriers[endCount].Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            endBarriers[endCount].Flags                  = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-            endBarriers[endCount].Transition.pResource   = depthResource;
-            endBarriers[endCount].Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-            endBarriers[endCount].Transition.StateAfter  = D3D12_RESOURCE_STATE_DEPTH_WRITE;
-            endBarriers[endCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            ++endCount;
-        }
-
-        cmdList->ResourceBarrier(endCount, endBarriers);
+        // SSAOBlur is graph-imported now, so PreparePassResources owns its RTV/SRV
+        // transitions; the manual barrier here would double-transition.
     }
 }

@@ -15,6 +15,9 @@ namespace SasamiRenderer
     {
         builder.Read("TransparentOitAccum");
         builder.Read("TransparentOitRevealage");
+        // TransmissionSceneColor is imported into the graph (RendererFrameGraph.cpp), so this
+        // also makes the graph transition it to PIXEL_SHADER_RESOURCE before Execute() runs.
+        builder.Read("TransmissionSceneColor");
         builder.Write("SceneColor");
         builder.UseColorTarget("SceneColor");
         builder.DependsOnPrevious();
@@ -27,13 +30,11 @@ namespace SasamiRenderer
             return false;
         }
 
-        const RenderPassExecutionPolicy& policy = context.Policy();
-        if (!policy.executeLightingFamilyPasses) {
-            return true;
-        }
-
         const RenderPassFrameInputs& inputs = context.Inputs();
         IRhiCommandEncoder* enc = inputs.execution.commandEncoder;
+        if (!enc || !inputs.execution.pipelineStateCache) {
+            return false;
+        }
         RenderPipelineStateCache& pipelineStateCache = *inputs.execution.pipelineStateCache;
 
         enc->SetGraphicsPipelineLayout(RenderPipelineStateCache::MakeLayoutHandle(pipelineStateCache.GetRootSignature()));

@@ -76,7 +76,7 @@ struct GpuMaterial
     float3 specularColor;
     float  workflow;    // 0=metallic-roughness, 1=specular-glossiness
     float3 emissive;
-    float  occlusionStrength;
+    float  occlusion;   // effective per-material AO baked on CPU: lerp(1, avg(occlusionTex.R), occlusionStrength); 1 = unoccluded
 };
 
 #endif // SASAMI_SWRT_TYPES_HLSLI

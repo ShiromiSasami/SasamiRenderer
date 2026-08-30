@@ -2,6 +2,7 @@
 
 #include "Renderer/RHI/GraphicsDevice.h"
 #include "Renderer/RayTracing/GpuSoftwareRayTracer.h"
+#include "Renderer/Scene/RenderLightProxy.h"
 
 #include <cstdint>
 #include <string>
@@ -73,8 +74,14 @@ namespace SasamiRenderer
 
             float    ambientColor[3];
             uint32_t probesThisDispatch;
+
+            // Punctual lights (point + spot) contributing to probe-ray hit shading.
+            uint32_t pointLightCount;
+            uint32_t spotLightCount;
+            uint32_t pad2;
+            uint32_t pad3;
         };
-        static_assert(sizeof(GIUpdateCBData) == 256u); // alignas(256) pads to 256; raw data is 112 bytes
+        static_assert(sizeof(GIUpdateCBData) == 256u); // alignas(256) pads to 256; raw data is 128 bytes
 
         struct UpdateDesc
         {
@@ -86,6 +93,12 @@ namespace SasamiRenderer
             float ambientIntensity = 1.0f;
             float shadowBias       = 0.005f;
             uint32_t frameIndex    = 0;
+
+            // Punctual lights contributing to probe-ray hit shading, reusing the same
+            // scene light descriptors the SWRT reflection/ReSTIR paths consume.
+            // Null/empty = no punctual-light contribution (directional light + sky only).
+            const std::vector<RenderPointLight>* pointLights = nullptr;
+            const std::vector<RenderSpotLight>*  spotLights  = nullptr;
         };
 
         IrradianceProbeGrid();
@@ -106,6 +119,15 @@ namespace SasamiRenderer
         void FitToSceneBounds(float bMinX, float bMinY, float bMinZ,
                                float bMaxX, float bMaxY, float bMaxZ,
                                float margin = 2.0f);
+
+        // Same as FitToSceneBounds(), but first picks a uniform spacing so the resulting
+        // probe count stays within `probeBudget`. Spacing is never made finer than the
+        // current spacing, so this can only coarsen an existing layout, never refine it.
+        // A zero budget behaves exactly like FitToSceneBounds().
+        void FitToSceneBoundsWithBudget(float bMinX, float bMinY, float bMinZ,
+                                        float bMaxX, float bMaxY, float bMaxZ,
+                                        float margin,
+                                        std::uint32_t probeBudget);
 
         float GetGiIntensity()     const { return m_giIntensity; }
         void  SetGiIntensity(float v)   { m_giIntensity = (v >= 0.0f) ? v : 0.0f; }
@@ -129,8 +151,10 @@ namespace SasamiRenderer
 
         bool IsInitialized() const { return m_initialized; }
         bool IsBaked()        const { return m_initialized && m_totalProbesDispatched >= GetTotalProbeCount(); }
+        // Unlike IsBaked(), stays true across ResetBakeState() (continuous-mode passes,
+        // manual rebakes) until the buffer is actually reallocated/cleared.
+        bool HasEverBaked()   const { return m_everBaked; }
         const std::string& GetLastPipelineError() const { return m_lastPipelineError; }
-        float GetBakeProgress() const;
         uint32_t GetBakedProbeCount() const;
         static constexpr uint32_t GetProbesPerBakeStep() { return kProbesPerFrame; }
         void  ResetBakeState();
@@ -150,10 +174,6 @@ namespace SasamiRenderer
         float GetSpacingY() const { return m_spacingY; }
         float GetSpacingZ() const { return m_spacingZ; }
 
-        // Re-allocates the probe buffer after FitToSceneBounds changes count at runtime.
-        // No-op if count and buffer size have not changed.
-        bool ReallocProbeBuffer(IRHIDevice& device) { return AllocateProbeBuffer(device); }
-
         // Writes current grid parameters (origin, spacing, counts) to the persistently-mapped
         // GPU constant buffer immediately.  Call after any parameter change to ensure the
         // debug visualization reflects the new layout without waiting for UpdateProbes().
@@ -168,6 +188,10 @@ namespace SasamiRenderer
         void FillProbeGridCB(GIProbeGridCBData& out) const;
         void FillUpdateCB(const UpdateDesc& desc, uint32_t baseIdx,
                           uint32_t count, GIUpdateCBData& out) const;
+        // Converts desc.pointLights/spotLights into the GPU light-buffer layout and writes
+        // them into m_lightDataMapped, capped to kMaxPointLights/kMaxSpotLights (same cap
+        // FillUpdateCB uses for pointLightCount/spotLightCount).
+        void FillLightDataBuffer(const UpdateDesc& desc) const;
 
         // Grid parameters
         float    m_originX  = 0.0f, m_originY = 0.0f,  m_originZ = 0.0f;
@@ -200,6 +224,14 @@ namespace SasamiRenderer
         mutable uint8_t* m_cbMapped = nullptr;
         IRHIDevice* m_device = nullptr;
 
+        // Punctual light data (persistently-mapped upload buffer, bound as raw root SRVs
+        // t6/t7 — same binding style as the BVH buffers, no descriptor view needed).
+        // Layout: GIPointLightGpu[kMaxPointLights] | GISpotLightGpu[kMaxSpotLights]
+        Resource m_lightDataBuffer;
+        uint8_t* m_lightDataMapped = nullptr;
+        static constexpr uint32_t kMaxPointLights = 256u;
+        static constexpr uint32_t kMaxSpotLights  = 128u;
+
         // Compute pipeline
         Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
         Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
@@ -210,6 +242,10 @@ namespace SasamiRenderer
 
         bool     m_initialized           = false;
         uint32_t m_totalProbesDispatched = 0u;
+        // Sticky across ResetBakeState(): once a full pass over the grid has ever
+        // completed, lighting keeps consuming probe data through subsequent passes
+        // (continuous mode) instead of blacking out while a new pass converges.
+        bool     m_everBaked             = false;
         bool     m_psoMissingLogged      = false;
         std::string m_lastPipelineError;
     };

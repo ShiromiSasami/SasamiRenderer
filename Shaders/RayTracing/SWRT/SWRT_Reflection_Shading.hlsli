@@ -34,40 +34,12 @@ float3 SampleGGX_H(float2 Xi, float roughness)
     return float3(sinT * cos(phi), sinT * sin(phi), cosT);
 }
 
-// Transform tangent-space vector to world space aligned with N
-float3 TangentToWorld(float3 v, float3 N)
-{
-    float3 up = abs(N.z) < 0.999f ? float3(0.0f, 0.0f, 1.0f) : float3(1.0f, 0.0f, 0.0f);
-    float3 T  = normalize(cross(up, N));
-    float3 B  = cross(N, T);
-    return normalize(T * v.x + B * v.y + N * v.z);
-}
-
 // --------------------------------------------------------------------------
 // Schlick fresnel
 float3 FresnelSchlick(float cosTheta, float3 F0)
 {
     float f = pow(saturate(1.0f - cosTheta), 5.0f);
     return F0 + (1.0f - F0) * f;
-}
-
-// GGX NDF
-float GGX_D(float NdotH, float roughness)
-{
-    float a  = roughness * roughness;
-    float a2 = a * a;
-    float d  = (NdotH * NdotH) * (a2 - 1.0f) + 1.0f;
-    return a2 / (3.14159265f * d * d);
-}
-
-// Smith GGX visibility (approximation)
-float GGX_V(float NdotL, float NdotV, float roughness)
-{
-    float r = roughness + 1.0f;
-    float k = (r * r) / 8.0f;
-    float gL = NdotL / (NdotL * (1.0f - k) + k);
-    float gV = NdotV / (NdotV * (1.0f - k) + k);
-    return gL * gV;
 }
 
 // Evaluate PBR (directional light only for reflection shading)

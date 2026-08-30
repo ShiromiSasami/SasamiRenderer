@@ -1,25 +1,52 @@
 #include "ApplicationCore.h"
+#include "AppFramework/Debug/RemoteControl/DebugRemoteControlServer.h"
+#include "AppFramework/Debug/RemoteControl/DebugNamedPipeTransport.h"
+#include "AppFramework/Debug/RemoteControl/DebugSceneCommands.h"
+#include "AppFramework/Debug/RemoteControl/DebugCaptureCommands.h"
+#include "AppFramework/Debug/RemoteControl/DebugRenderCommands.h"
 #include "ApplicationResourcePaths.h"
 #include <windows.h>
 #include <windowsx.h>
+#include <algorithm>
 #include <array>
+#include <climits>
 #include <exception>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
+#include "Boot/StartupCoordinator.h"
+#include "Foundation/Boot/BootStatus.h"
+#include "Foundation/Boot/InitTaskScheduler.h"
 #include "Foundation/Tools/DebugOutput.h"
 #include "Foundation/Tools/ScopedPerfTimer.h"
 #include "Foundation/Profiling/Profiler.h"
+#include "Foundation/Jobs/JobSystem.h"
 #include "Input/InputSystem.h"
 #include "Loader/AssetLoader.h"
+#include "Loader/AsyncAssetLoadService.h"
 #include "Object/Camera.h"
 #include "Renderer/Runtime/Renderer.h"
+#include "UI/BootProgressWindow.h"
 #include "UI/ImGuiCoordinator.h"
 
 namespace SasamiRenderer
 {
+    namespace
+    {
+        // Frame-rate sampling window. File-scope rather than members so this stays a pure
+        // diagnostic and does not widen ApplicationCore's interface.
+        constexpr unsigned long long kFpsReportIntervalMs = 2000ull;
+
+        ULONGLONG s_fpsWindowStartMs = 0ull;
+        ULONGLONG s_fpsFrameCount    = 0ull;
+        ULONGLONG s_fpsWorstFrameMs  = 0ull;
+        ULONGLONG s_fpsBestFrameMs   = ULLONG_MAX;
+    }
+
     namespace
     {
         struct WindowIconHandle
@@ -47,13 +74,57 @@ namespace SasamiRenderer
         : m_width(width), m_height(height), m_title(title), m_running(true), m_game(game)
     {
         Profiler::Initialize();
+        JobSystem::Initialize();
+#if defined(_DEBUG)
+        JobSystem::RunSelfTest();
+#endif
+        m_assetLoadService = std::make_unique<AsyncAssetLoadService>();
+        InitializeDebugRemoteControl();
         ScopedPerfTimer perfTimer("ApplicationCore::ApplicationCore");
+    }
+
+    // Opt-in via SASAMI_DEBUG_REMOTE=1, matching the existing SASAMI_* toggles. Off by
+    // default so a normal run never opens an endpoint, and so shipping builds are unaffected.
+    void ApplicationCore::InitializeDebugRemoteControl()
+    {
+        // GetEnvironmentVariableA rather than std::getenv, matching SASAMI_GPU_VALIDATION
+        // in Dx12GraphicsDeviceInit (getenv is rejected as deprecated by this build).
+        char enabled[8]{};
+        const DWORD length = GetEnvironmentVariableA("SASAMI_DEBUG_REMOTE", enabled, sizeof(enabled));
+        if (length == 0 || enabled[0] != '1') {
+            return;
+        }
+
+        auto server = std::make_unique<Debug::DebugRemoteControlServer>();
+        Debug::RegisterSceneCommands(server->Registry(), *this);
+        Debug::RegisterCaptureCommands(server->Registry(), *this);
+        Debug::RegisterRenderCommands(server->Registry(), *this);
+        if (!server->Start(std::make_unique<Debug::DebugNamedPipeTransport>())) {
+            return;
+        }
+        m_debugRemoteControl = std::move(server);
     }
 
     ApplicationCore::~ApplicationCore()
     {
+        // Stop first: its command handlers capture `this`, so the channel must be closed
+        // and its thread joined before any of the state below is torn down.
+        m_debugRemoteControl.reset();
+        if (m_startup) {
+            m_startup->Shutdown();
+            m_startup.reset();
+        }
         OnDestroy();
+        if (m_assetLoadService) {
+            m_assetLoadService->Shutdown();
+        }
+        JobSystem::Shutdown();
         Profiler::Shutdown();
+    }
+
+    AsyncAssetLoadService& ApplicationCore::GetAssetLoadService()
+    {
+        return *m_assetLoadService;
     }
 
     bool ApplicationCore::IsRendererReady() const
@@ -95,13 +166,26 @@ namespace SasamiRenderer
             return;
         }
 
+        const ULONGLONG t0 = GetTickCount64();
         SyncModelsToRenderer(*m_renderer);
+        const ULONGLONG t1 = GetTickCount64();
         SyncSkinnedModelsToRenderer(*m_renderer);
         SyncLightObjectsToRenderer(*m_renderer);
         m_renderer->UpdateCameraCB(&cameraProxy);
+        const ULONGLONG t2 = GetTickCount64();
         m_renderer->Render([](CommandList& cmdList, CpuDescriptorHandle rtvHandle) {
             ImGuiCoordinator::Instance().Render(cmdList.Get(), rtvHandle);
         });
+        const ULONGLONG t3 = GetTickCount64();
+        if (t3 - t0 > 1000) {
+            char breakdown[160];
+            snprintf(breakdown, sizeof(breakdown),
+                     "[Watchdog] frame breakdown: syncModels=%llums syncOther=%llums render=%llums\n",
+                     static_cast<unsigned long long>(t1 - t0),
+                     static_cast<unsigned long long>(t2 - t1),
+                     static_cast<unsigned long long>(t3 - t2));
+            DebugLog(breakdown);
+        }
     }
 
     bool ApplicationCore::UpdateMainCameraProxy()
@@ -226,6 +310,54 @@ namespace SasamiRenderer
         return true;
     }
 
+    bool ApplicationCore::LoadSkyboxAsync(const std::string& resourcePath, SkyboxLoadFormat format)
+    {
+        if (format == SkyboxLoadFormat::CubemapFaces) {
+            return LoadSkybox(resourcePath, format);
+        }
+
+        std::wstring configuredPath;
+        bool isHdrSource = false;
+        if (!ApplicationResourcePaths::ResolveEquirectSkyboxFile(resourcePath, configuredPath, isHdrSource)) {
+            return LoadSkybox(resourcePath, format);
+        }
+
+        bool isHdrEquirectCase = false;
+        switch (format) {
+        case SkyboxLoadFormat::HdrEquirect:
+            isHdrEquirectCase = true;
+            break;
+        case SkyboxLoadFormat::LdrEquirect:
+            isHdrEquirectCase = false;
+            break;
+        case SkyboxLoadFormat::Auto:
+        default:
+            isHdrEquirectCase = isHdrSource;
+            break;
+        }
+
+        if (!isHdrEquirectCase) {
+            return LoadSkybox(resourcePath, format);
+        }
+
+        if (!m_renderer) {
+            return false;
+        }
+
+        m_assetLoadService->RequestSkyboxLoad(configuredPath,
+            [this, format](AsyncAssetLoadService::SkyboxPayload&& payload) {
+                if (!payload.succeeded || !m_renderer) {
+                    DebugLog("LoadSkyboxAsync: HDR decode/IBL generation failed for skybox.\n");
+                    return;
+                }
+                m_renderer->SetSkyboxHdrEquirectData(std::move(payload.equirectPixels), payload.width, payload.height);
+                m_renderer->SetSkyboxLoadFormat(format);
+                m_renderer->RefreshEnvironmentAssets();
+                m_renderer->AdoptPregeneratedIbl(std::move(payload.ibl));
+            });
+        return true;
+    }
+
     Camera* ApplicationCore::CreateCameraObject()
     {
         Camera* camera = CreateObject<Camera>();
@@ -286,6 +418,130 @@ namespace SasamiRenderer
         }
     }
 
+    bool ApplicationCore::BootCreateRendererCore()
+    {
+        ScopedPerfTimer perfTimer("ApplicationCore::BootCreateRendererCore");
+        try {
+            if (!m_renderer) {
+                m_renderer = std::make_unique<Renderer>();
+                if (!m_renderer) {
+                    return false;
+                }
+            }
+
+            m_renderer->SetGraphicsRuntime(m_graphicsRuntime);
+
+            if (!m_renderer->InitializeCore(m_hwnd, m_width, m_height)) {
+                // Renderer::InitializeCore reports the concrete failure reason.
+                // Avoid stacking another modal dialog here.
+                DebugLog("ApplicationCore::BootCreateRendererCore: Renderer core initialization failed.\n");
+                m_renderer.reset();
+                return false;
+            }
+            return true;
+        } catch (const std::exception& ex) {
+            ReportException(L"ApplicationCore::BootCreateRendererCore", ex, true);
+            m_renderer.reset();
+            return false;
+        } catch (...) {
+            ReportUnknownException(L"ApplicationCore::BootCreateRendererCore", true);
+            m_renderer.reset();
+            return false;
+        }
+    }
+
+    bool ApplicationCore::BootCanRunFrameInfraOnWorker() const
+    {
+        return m_renderer && m_renderer->GetBackendCapabilities().supportsThreadedResourceCreation;
+    }
+
+    bool ApplicationCore::BootInitializeFrameInfrastructure()
+    {
+        return m_renderer && m_renderer->InitializeFrameInfrastructure();
+    }
+
+    bool ApplicationCore::BootFinalizeRendererCore()
+    {
+        ScopedPerfTimer perfTimer("ApplicationCore::BootFinalizeRendererCore");
+        try {
+            if (!m_renderer || !m_renderer->FinalizeCoreInitialization()) {
+                DebugLog("ApplicationCore::BootFinalizeRendererCore: Renderer core finalization failed.\n");
+                m_renderer.reset();
+                return false;
+            }
+
+            const bool dx12Overlay = m_renderer->SupportsD3D12OverlayRendering();
+            const bool imguiInitialized = dx12Overlay
+                ? ImGuiCoordinator::Instance().Initialize(m_hwnd,
+                                                          m_renderer->GetNativeDevice(),
+                                                          m_renderer->GetNativeCommandQueue(),
+                                                          m_renderer->GetBackBufferFormat(),
+                                                          m_renderer->GetDepthFormat(),
+                                                          static_cast<int>(m_renderer->GetBackBufferCount()))
+                : ImGuiCoordinator::Instance().InitializePlatformOnly(m_hwnd);
+            if (!imguiInitialized) {
+                DebugLogDialog("ImGuiCoordinator initialization failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+                m_renderer.reset();
+                return false;
+            }
+            return true;
+        } catch (const std::exception& ex) {
+            ReportException(L"ApplicationCore::BootFinalizeRendererCore", ex, true);
+            m_renderer.reset();
+            return false;
+        } catch (...) {
+            ReportUnknownException(L"ApplicationCore::BootFinalizeRendererCore", true);
+            m_renderer.reset();
+            return false;
+        }
+    }
+
+    void ApplicationCore::BootRegisterDeferredTasks(InitTaskScheduler& scheduler)
+    {
+        if (m_renderer) {
+            m_renderer->RegisterDeferredInitTasks(scheduler);
+        }
+    }
+
+    void ApplicationCore::BootInvokeGameOnInit()
+    {
+        try {
+            InputSystem::Instance().RegisterRawInput(m_hwnd);
+            if (m_game) {
+                m_game->OnInit(*this);
+            }
+        } catch (const std::exception& ex) {
+            ReportException(L"ApplicationCore::BootInvokeGameOnInit", ex, true);
+            RequestQuit();
+        } catch (...) {
+            ReportUnknownException(L"ApplicationCore::BootInvokeGameOnInit", true);
+            RequestQuit();
+        }
+    }
+
+    void ApplicationCore::BootRenderLoadingFrame(const BootStatus& status)
+    {
+        if (!m_renderer) {
+            return;
+        }
+
+        if (m_renderer->SupportsD3D12OverlayRendering()) {
+            ImGuiCoordinator::Instance().NewFrame();
+            BootProgressWindow::Draw(status, true);
+            m_renderer->RenderBootFrame([](CommandList& cmdList, CpuDescriptorHandle rtvHandle) {
+                ImGuiCoordinator::Instance().Render(cmdList.Get(), rtvHandle);
+            });
+        }
+        // No overlay support: nothing to render here, the title-bar text covers progress.
+    }
+
+    void ApplicationCore::SetWindowStatusText(const wchar_t* text)
+    {
+        if (m_hwnd && text) {
+            SetWindowTextW(m_hwnd, text);
+        }
+    }
+
     void ApplicationCore::ShutdownRenderer()
     {
         if (m_renderer) {
@@ -293,6 +549,43 @@ namespace SasamiRenderer
         }
         ImGuiCoordinator::Instance().Shutdown();
         m_renderer.reset();
+    }
+
+    bool ApplicationCore::RequestScreenshot(const std::string& path, std::string& outResolvedPath)
+    {
+        if (!m_renderer || path.empty()) {
+            return false;
+        }
+        // Refuse to queue a second capture while one is in flight so the poll protocol
+        // stays unambiguous -- there is only ever one outstanding request/result pair.
+        if (m_renderer->HasPendingScreenshotRequest()) {
+            return false;
+        }
+
+        std::error_code ec;
+        std::filesystem::path fsPath = std::filesystem::absolute(std::filesystem::path(path), ec);
+        if (ec) {
+            fsPath = std::filesystem::path(path);
+        }
+        // The encoder always writes PNG, so a missing extension would produce a file no
+        // viewer opens by default.
+        if (!fsPath.has_extension()) {
+            fsPath += ".png";
+        }
+
+        outResolvedPath = fsPath.string();
+        m_renderer->RequestScreenshot(fsPath.wstring());
+        return true;
+    }
+
+    bool ApplicationCore::PollScreenshotResult(std::string& outMessage)
+    {
+        if (!m_renderer) {
+            // Return true so a poller is not left spinning forever against a dead renderer.
+            outMessage = "ERR no renderer";
+            return true;
+        }
+        return m_renderer->ConsumeScreenshotResult(outMessage);
     }
 
     int ApplicationCore::Run() {
@@ -328,8 +621,16 @@ namespace SasamiRenderer
                 SendMessageW(m_hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(windowIcon.icon));
             }
 
-            ShowWindow(m_hwnd, SW_SHOW);
-            OnInit();
+            // SASAMI_HEADLESS=1 renders without ever showing the window, so a capture taken over
+            // the debug pipe is unaffected by window arrangement, focus, or occlusion. SW_HIDE
+            // rather than SW_MINIMIZE: a minimized window can have its Present suppressed, while a
+            // hidden one still executes the frame and fills the back buffer, which is what the
+            // capture copies.
+            char headless[8]{};
+            const DWORD headlessLength = GetEnvironmentVariableA("SASAMI_HEADLESS", headless, sizeof(headless));
+            const bool headlessMode = (headlessLength > 0 && headless[0] == '1');
+            ShowWindow(m_hwnd, headlessMode ? SW_HIDE : SW_SHOW);
+            m_startup = std::make_unique<StartupCoordinator>(*this);
         } catch (const std::exception& ex) {
             ReportException(L"ApplicationCore::Run initialization", ex, true);
             if (windowIcon.shouldDestroy && windowIcon.icon) {
@@ -345,19 +646,89 @@ namespace SasamiRenderer
         }
 
         ULONGLONG lastTime = GetTickCount64();
+        BootPhase previousBootPhase = BootPhase::CreatingRendererCore;
         while (m_running) {
             try {
                 while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
                     TranslateMessage(&msg);
                     DispatchMessage(&msg);
+                    if (msg.message == WM_QUIT) {
+                        m_running = false;
+                    }
+                }
+                if (!m_running) {
+                    break;
                 }
 
-                ULONGLONG currentTime = GetTickCount64();
-                float deltaTime = static_cast<float>(currentTime - lastTime) * 0.001f;
-                lastTime = currentTime;
+                m_startup->Pump();
+                if (m_startup->HasFailed()) {
+                    RequestQuit();
+                    break;
+                }
 
-                OnUpdate(deltaTime);
-                OnRender();
+                const BootPhase bootPhase = m_startup->Phase();
+                if (bootPhase == BootPhase::SceneReady || bootPhase == BootPhase::Running) {
+                    if (bootPhase == BootPhase::SceneReady && previousBootPhase != BootPhase::SceneReady) {
+                        // First frame after boot hands off to the scene: don't let the
+                        // accumulated boot time show up as a huge delta.
+                        lastTime = GetTickCount64();
+                    }
+
+                    ULONGLONG currentTime = GetTickCount64();
+                    float deltaTime = static_cast<float>(currentTime - lastTime) * 0.001f;
+                    lastTime = currentTime;
+
+                    OnUpdate(deltaTime);
+                    const ULONGLONG afterUpdate = GetTickCount64();
+                    OnRender();
+                    const ULONGLONG afterRender = GetTickCount64();
+                    if (afterRender - currentTime > 1000) {
+                        char watchdog[160];
+                        snprintf(watchdog, sizeof(watchdog),
+                                 "[Watchdog] long frame at t=%llums: update=%llums render=%llums\n",
+                                 static_cast<unsigned long long>(afterRender),
+                                 static_cast<unsigned long long>(afterUpdate - currentTime),
+                                 static_cast<unsigned long long>(afterRender - afterUpdate));
+                        DebugLog(watchdog);
+                    }
+
+                    // Steady-state frame rate, reported once per window rather than per frame.
+                    //
+                    // Deliberately NOT inside #if defined(_DEBUG): the [DrawRange] instrumentation
+                    // in RenderGraph is Debug-only, so before this there was no way at all to read
+                    // a frame rate out of a Release run -- which is the configuration any
+                    // optimisation work has to be judged in. The window is wall-clock rather than
+                    // a fixed frame count so a stall cannot stretch the sample silently, and
+                    // min/max are reported alongside the mean because an average alone hides the
+                    // hitches that are usually what makes a build feel slow.
+                    ++s_fpsFrameCount;
+                    const ULONGLONG frameMs = afterRender - currentTime;
+                    s_fpsWorstFrameMs = (std::max)(s_fpsWorstFrameMs, frameMs);
+                    s_fpsBestFrameMs  = (std::min)(s_fpsBestFrameMs, frameMs);
+                    if (s_fpsWindowStartMs == 0ull) {
+                        s_fpsWindowStartMs = currentTime;
+                    } else if (afterRender - s_fpsWindowStartMs >= kFpsReportIntervalMs) {
+                        const ULONGLONG elapsed = afterRender - s_fpsWindowStartMs;
+                        char fpsLine[192];
+                        snprintf(fpsLine, sizeof(fpsLine),
+                                 "[Perf] fps=%.1f frames=%llu avgMs=%.1f bestMs=%llu worstMs=%llu\n",
+                                 (1000.0 * static_cast<double>(s_fpsFrameCount)) / static_cast<double>(elapsed),
+                                 static_cast<unsigned long long>(s_fpsFrameCount),
+                                 static_cast<double>(elapsed) / static_cast<double>(s_fpsFrameCount),
+                                 static_cast<unsigned long long>(s_fpsBestFrameMs),
+                                 static_cast<unsigned long long>(s_fpsWorstFrameMs));
+                        DebugLog(fpsLine);
+                        s_fpsWindowStartMs = afterRender;
+                        s_fpsFrameCount    = 0ull;
+                        s_fpsWorstFrameMs  = 0ull;
+                        s_fpsBestFrameMs   = ULLONG_MAX;
+                    }
+                } else {
+                    // Boot phases render their own frame inside Pump(); keep the loop
+                    // light instead of busy-spinning while init drains in the background.
+                    Sleep(1);
+                }
+                previousBootPhase = bootPhase;
             } catch (const std::exception& ex) {
                 // Main loop exceptions are log-only to avoid modal interruptions during runtime.
                 ReportException(L"ApplicationCore::Run main loop", ex, false);
@@ -372,40 +743,55 @@ namespace SasamiRenderer
             DestroyIcon(windowIcon.icon);
         }
 
-        return static_cast<int>(msg.wParam);
+        // Only a WM_QUIT carries a meaningful exit code; any other loop exit leaves msg
+        // holding whatever message was processed last, which used to surface as a
+        // nonsense process exit code.
+        return (msg.message == WM_QUIT) ? static_cast<int>(msg.wParam) : 0;
     }
 
     void ApplicationCore::OnInit() {
+        // Legacy synchronous entry point: Run() no longer calls this directly (see
+        // StartupCoordinator), but it is kept for any caller that still wants the
+        // old blocking-init behavior.
         try {
-            InputSystem::Instance().RegisterRawInput(m_hwnd);
             if (!InitializeRenderer()) {
                 RequestQuit();
                 return;
             }
-            if (m_game) {
-                m_game->OnInit(*this);
-            }
         } catch (const std::exception& ex) {
             ReportException(L"ApplicationCore::OnInit", ex, true);
             RequestQuit();
+            return;
         } catch (...) {
             ReportUnknownException(L"ApplicationCore::OnInit", true);
             RequestQuit();
+            return;
         }
+        BootInvokeGameOnInit();
     }
 
     void ApplicationCore::OnUpdate(float deltaTime)
     {
         m_deltaTime = deltaTime;
         InputSystem::Instance().Update();
+        if (m_assetLoadService && m_assetLoadService->PumpCompletions()) {
+            InvalidateRenderObjects();
+        }
         if (!m_renderer || m_renderer->SupportsD3D12OverlayRendering()) {
             ImGuiCoordinator::Instance().NewFrame();
+            if (m_startup && m_startup->Phase() == BootPhase::SceneReady) {
+                BootProgressWindow::Draw(m_startup->GetBootStatusSnapshot(), false);
+            }
         }
         if (m_renderer) {
             m_renderer->SetDeltaTime(deltaTime);
         }
         if (m_game) {
             m_game->OnUpdate(*this, deltaTime);
+        }
+        if (m_debugRemoteControl) {
+            // Main thread only: the handlers touch the scene and camera.
+            m_debugRemoteControl->DrainPendingCommands();
         }
         UpdateMainCameraProxy();
     }
@@ -457,7 +843,11 @@ namespace SasamiRenderer
             case WM_SIZE:
                 m_width = LOWORD(lParam);
                 m_height = HIWORD(lParam);
-                ResizeRenderer(m_width, m_height);
+                if (m_startup && m_startup->Phase() < BootPhase::SceneReady) {
+                    m_startup->NotifyResize(m_width, m_height);
+                } else {
+                    ResizeRenderer(m_width, m_height);
+                }
                 if (m_game) {
                     m_game->OnResize(*this, m_width, m_height);
                 }

@@ -21,6 +21,7 @@ namespace SasamiRenderer
         bool HasAnimation() const;
         int CurrentAnimation() const;
         void SetTranslation(float x, float y, float z);
+        void SetUniformScale(float scale);
         void ClearModel();
 
         SkinnedMeshComponent& SkinnedMeshComponentRef()

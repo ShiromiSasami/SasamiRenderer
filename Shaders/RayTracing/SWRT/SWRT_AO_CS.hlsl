@@ -32,14 +32,6 @@ float2 Hammersley(uint i, uint N)
     return float2(float(i) / float(N), float(bits) * 2.3283064365386963e-10f);
 }
 
-float3 TangentToWorld(float3 v, float3 N)
-{
-    float3 up = abs(N.z) < 0.999f ? float3(0.0f, 0.0f, 1.0f) : float3(1.0f, 0.0f, 0.0f);
-    float3 T  = normalize(cross(up, N));
-    float3 B  = cross(N, T);
-    return normalize(T * v.x + B * v.y + N * v.z);
-}
-
 float3 CosineSampleHemisphere(float2 Xi)
 {
     float r = sqrt(Xi.x);

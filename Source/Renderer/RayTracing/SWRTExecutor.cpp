@@ -14,6 +14,7 @@
 #include "Renderer/RayTracing/DxrRayTracer.h"
 #include "Renderer/Scene/Skybox.h"
 #include "Renderer/GI/IrradianceProbeGrid.h"
+#include "Renderer/Utilities/HashUtility.h"
 #include "d3dx12.h"
 
 #ifdef min
@@ -35,20 +36,6 @@ namespace SasamiRenderer
                    view == RendererEnums::GBufferDebugView::ReflectionAlpha ||
                    view == RendererEnums::GBufferDebugView::SwrtReflectionHitDistance ||
                    view == RendererEnums::GBufferDebugView::SwrtReflectionComposite;
-        }
-
-        void HashBytes(uint64_t& hash, const void* data, size_t size)
-        {
-            static constexpr uint64_t kFnvOffsetBasis = 14695981039346656037ull;
-            static constexpr uint64_t kFnvPrime       = 1099511628211ull;
-            if (hash == 0ull) {
-                hash = kFnvOffsetBasis;
-            }
-            const auto* bytes = static_cast<const uint8_t*>(data);
-            for (size_t i = 0; i < size; ++i) {
-                hash ^= static_cast<uint64_t>(bytes[i]);
-                hash *= kFnvPrime;
-            }
         }
 
         float ClampRayTracingResolutionScale(RayTracingPerformancePreset preset, float scale)
@@ -262,6 +249,7 @@ namespace SasamiRenderer
         frameDesc.debugView                    = static_cast<uint32_t>(settings.gBufferDebugView);
         frameDesc.iblEnabled                   = m_skybox->IsIblEnabled();
         frameDesc.iblIntensity                 = settings.iblIntensity;
+        frameDesc.aoDirectLightingStrength     = settings.aoDirectLightingStrength;
         frameDesc.iblPrefilterMaxMip           = m_skybox->GetIblPrefilterMaxMip();
         frameDesc.directionalLightMarkerEnabled         = m_skybox->IsDirectionalLightMarkerEnabled();
         frameDesc.directionalLightMarkerAngularRadius   = m_skybox->GetDirectionalLightMarkerAngularRadius();
@@ -447,6 +435,12 @@ namespace SasamiRenderer
         }
 
         m_gpuSoftwareRayTracer->UpdateScene(*m_rayTracingScene, *m_device, *cmdList);
+        if (!m_gpuSoftwareRayTracer->GetBvhGpuAddresses().valid) {
+            // Async BVH build still in flight (or no scene yet): dispatching against
+            // missing BVH buffers is invalid. Skip like the not-yet-ready path; the
+            // caller falls back and we retry once the build publishes.
+            return false;
+        }
 
         const auto shadowToUav = CD3DX12_RESOURCE_BARRIER::Transition(
             m_renderTargetPool->GetSWRTShadowTexture().Get(),
@@ -629,6 +623,7 @@ namespace SasamiRenderer
         reflectionDesc.frameDesc.directionalLight = m_lightSystem->GetDirectionalLightSettings();
         reflectionDesc.frameDesc.pointLights      = &m_lightSystem->GetPointLights();
         reflectionDesc.frameDesc.spotLights       = &m_lightSystem->GetSpotLights();
+        reflectionDesc.frameDesc.aoDirectLightingStrength = settings.aoDirectLightingStrength;
         std::memcpy(reflectionDesc.frameDesc.inverseViewProjection, ctx.cameraInvPV, sizeof(ctx.cameraInvPV));
         std::memcpy(reflectionDesc.frameDesc.cameraPosition, ctx.cameraPos, sizeof(ctx.cameraPos));
 
@@ -640,6 +635,11 @@ namespace SasamiRenderer
         reflectionDesc.gbufferHeight      = static_cast<uint32_t>(ctx.viewportHeight);
 
         m_gpuSoftwareRayTracer->UpdateScene(*m_rayTracingScene, *m_device, *cmdList);
+        if (!m_gpuSoftwareRayTracer->GetBvhGpuAddresses().valid) {
+            // Async BVH build still in flight: skip reflections this frame (fallback
+            // path renders instead) and retry after the build publishes.
+            return false;
+        }
 
         // GI probe update (reuses the freshly-built BVH)
         {
@@ -846,6 +846,11 @@ namespace SasamiRenderer
         aoDesc.frameIndex = m_giFrameIndex;
 
         m_gpuSoftwareRayTracer->UpdateScene(*m_rayTracingScene, *m_device, *cmdList);
+        if (!m_gpuSoftwareRayTracer->GetBvhGpuAddresses().valid) {
+            // Async BVH build still in flight: skip SWRT AO this frame (default AO
+            // fallback binds instead) and retry after the build publishes.
+            return false;
+        }
 
         if (m_renderTargetPool->GetGBufferNormal().IsValid() &&
             m_renderTargetPool->GetGBufferMaterial().IsValid() &&

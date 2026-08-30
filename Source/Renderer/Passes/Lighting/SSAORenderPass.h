@@ -22,7 +22,6 @@ namespace SasamiRenderer
                      const Viewport& viewport,
                      GpuDescriptorHandle depthSrv,
                      GpuDescriptorHandle normalSrv,
-                     ID3D12Resource* depthResource,
                      CpuDescriptorHandle ssaoRtv,
                      ID3D12Resource* ssaoResource,
                      D3D12_GPU_VIRTUAL_ADDRESS ssaoCbGpu) const;
@@ -44,7 +43,6 @@ namespace SasamiRenderer
                          GpuDescriptorHandle ssaoRawSrv,
                          GpuDescriptorHandle depthSrv,
                          GpuDescriptorHandle normalSrv,
-                         ID3D12Resource* depthResource,
                          CpuDescriptorHandle ssaoBlurRtv,
                          ID3D12Resource* ssaoBlurResource,
                          D3D12_GPU_VIRTUAL_ADDRESS ssaoCbGpu) const;

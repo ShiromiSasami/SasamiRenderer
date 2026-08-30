@@ -19,6 +19,8 @@ namespace SasamiRenderer
         void SetSkyboxLdrEquirectData(std::vector<uint8_t> pixels, UINT width, UINT height);
         void SetSkyboxLdrCubemapFacesData(std::vector<std::vector<uint8_t>> facePixels, UINT width, UINT height);
         void SetSkyboxLoadFormat(SkyboxLoadFormat format);
+        // Worker-pregenerated IBL data (see IblSystem::AdoptPregeneratedIblData).
+        void AdoptPregeneratedIblData(IblSystem::GeneratedIblData&& data);
         void RefreshEnvironmentAssets();
         void EnsureTexturesUploaded(CommandList* cmdList);
 

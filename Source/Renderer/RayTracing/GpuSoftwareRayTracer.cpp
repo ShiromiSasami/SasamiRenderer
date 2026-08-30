@@ -1,11 +1,14 @@
 #define NOMINMAX
 #include "Renderer/RayTracing/GpuSoftwareRayTracer.h"
 
+#include "Renderer/RayTracing/GpuSoftwareRayTracerResourceUtility.h"
 #include "Renderer/Scene/RenderLightProxy.h"
 #include "Renderer/Scene/LightSystem.h"
 #include "Renderer/Utilities/ResourceUploadUtility.h"
 
+#include "Foundation/Jobs/JobSystem.h"
 #include "Foundation/Math/MathUtil.h"
+#include "Foundation/Tools/DebugOutput.h"
 
 #include <algorithm>
 #include <array>
@@ -78,7 +81,7 @@ namespace SasamiRenderer
                 return false;
             }
             void* mapped = nullptr;
-            if (FAILED(staging.Map(0, nullptr, &mapped))) return false;
+            if (FAILED(staging.Map(0, nullptr, &mapped)) || !mapped) return false;
             memcpy(mapped, data, byteSize);
             staging.Unmap(0, nullptr);
 
@@ -97,108 +100,27 @@ namespace SasamiRenderer
             return true;
         }
 
-        // ---- Create a StructuredBuffer SRV ----
-        void CreateStructuredSrv(ID3D12Device* dev, Resource& buf,
-                                 UINT elemCount, UINT stride,
-                                 D3D12_CPU_DESCRIPTOR_HANDLE dest)
-        {
-            D3D12_SHADER_RESOURCE_VIEW_DESC d{};
-            d.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-            d.Format                  = DXGI_FORMAT_UNKNOWN;
-            d.ViewDimension           = D3D12_SRV_DIMENSION_BUFFER;
-            d.Buffer.FirstElement     = 0;
-            d.Buffer.NumElements      = elemCount;
-            d.Buffer.StructureByteStride = stride;
-            d.Buffer.Flags            = D3D12_BUFFER_SRV_FLAG_NONE;
-            dev->CreateShaderResourceView(buf.Get(), &d, dest);
-        }
+        using namespace GpuSoftwareRayTracerResourceUtility;
 
-        // ---- Create a null SRV (for empty buffers) ----
-        void CreateNullStructuredSrv(ID3D12Device* dev, D3D12_CPU_DESCRIPTOR_HANDLE dest)
+        // Bakes a per-material scalar AO: SWRT samples no textures at hit points,
+        // so approximate the occlusion texture by its average red channel.
+        float ComputeEffectiveOcclusion(const RayTracingMaterial& mat)
         {
-            D3D12_SHADER_RESOURCE_VIEW_DESC d{};
-            d.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-            d.Format                  = DXGI_FORMAT_UNKNOWN;
-            d.ViewDimension           = D3D12_SRV_DIMENSION_BUFFER;
-            d.Buffer.NumElements      = 0;
-            d.Buffer.StructureByteStride = 4u;
-            dev->CreateShaderResourceView(nullptr, &d, dest);
-        }
+            const auto& tex = mat.occlusionTexture;
+            if (!tex || tex->pixels.empty()) return 1.0f;
 
-        // ---- Create a UAV-capable default-heap buffer (no initial data) ----
-        bool CreateUavBuffer(IRHIDevice& device, UINT64 byteSize,
-                             D3D12_RESOURCE_STATES initialState, Resource& out)
-        {
-            if (byteSize == 0) { out.Reset(); return false; }
-            D3D12_HEAP_PROPERTIES heap{}; heap.Type = D3D12_HEAP_TYPE_DEFAULT;
-            D3D12_RESOURCE_DESC desc{};
-            desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-            desc.Width     = byteSize;
-            desc.Height = desc.DepthOrArraySize = desc.MipLevels = 1;
-            desc.SampleDesc.Count = 1;
-            desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-            desc.Flags  = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-            return SUCCEEDED(device.CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE,
-                &desc, initialState, nullptr, out));
-        }
+            uint64_t sum = 0;
+            const size_t pixelCount = std::min<size_t>(
+                static_cast<size_t>(tex->width) * tex->height, tex->pixels.size() / 4u);
+            for (size_t i = 0; i < pixelCount; ++i) {
+                sum += tex->pixels[i * 4];  // R channel, RGBA8 interleaved
+            }
+            const float avg = pixelCount > 0
+                ? static_cast<float>(sum) / (static_cast<float>(pixelCount) * 255.0f)
+                : 1.0f;
 
-        // ---- Create a Texture2D with UAV support ----
-        bool CreateUavTexture2D(IRHIDevice& device, UINT w, UINT h, DXGI_FORMAT fmt,
-                                D3D12_RESOURCE_STATES initialState, Resource& out)
-        {
-            D3D12_HEAP_PROPERTIES heap{}; heap.Type = D3D12_HEAP_TYPE_DEFAULT;
-            D3D12_RESOURCE_DESC desc{};
-            desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-            desc.Width     = w; desc.Height = h;
-            desc.DepthOrArraySize = 1; desc.MipLevels = 1;
-            desc.Format    = fmt;
-            desc.SampleDesc.Count = 1;
-            desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-            desc.Flags  = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-            return SUCCEEDED(device.CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE,
-                &desc, initialState, nullptr, out));
-        }
-
-        // ---- Transition barrier shorthand ----
-        D3D12_RESOURCE_BARRIER MakeTransition(ID3D12Resource* res,
-                                               D3D12_RESOURCE_STATES from,
-                                               D3D12_RESOURCE_STATES to)
-        {
-            return CD3DX12_RESOURCE_BARRIER::Transition(res, from, to);
-        }
-
-        // ---- Create a Texture2D SRV into a given CPU handle ----
-        void CreateTex2DSrv(ID3D12Device* dev, ID3D12Resource* tex,
-                            DXGI_FORMAT fmt, D3D12_CPU_DESCRIPTOR_HANDLE dest)
-        {
-            D3D12_SHADER_RESOURCE_VIEW_DESC d{};
-            d.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-            d.Format      = fmt;
-            d.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-            d.Texture2D.MipLevels = 1;
-            dev->CreateShaderResourceView(tex, &d, dest);
-        }
-
-        void CreateNullTex2DSrv(ID3D12Device* dev, DXGI_FORMAT fmt,
-                                D3D12_CPU_DESCRIPTOR_HANDLE dest)
-        {
-            CreateTex2DSrv(dev, nullptr, fmt, dest);
-        }
-
-        // ---- Create a Texture2D UAV into a given CPU handle ----
-        void CreateTex2DUav(ID3D12Device* dev, ID3D12Resource* tex,
-                            DXGI_FORMAT fmt, D3D12_CPU_DESCRIPTOR_HANDLE dest)
-        {
-            D3D12_UNORDERED_ACCESS_VIEW_DESC d{};
-            d.Format        = fmt;
-            d.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-            dev->CreateUnorderedAccessView(tex, nullptr, &d, dest);
-        }
-
-        void CreateNullTex2DUav(ID3D12Device* dev, DXGI_FORMAT fmt,
-                                D3D12_CPU_DESCRIPTOR_HANDLE dest)
-        {
-            CreateTex2DUav(dev, nullptr, fmt, dest);
+            const float s = std::clamp(mat.material.occlusionStrength, 0.0f, 1.0f);
+            return 1.0f + (avg - 1.0f) * s;  // lerp(1, avg, s)
         }
 
     } // anonymous namespace
@@ -210,6 +132,10 @@ namespace SasamiRenderer
     GpuSoftwareRayTracer::GpuSoftwareRayTracer() = default;
     GpuSoftwareRayTracer::~GpuSoftwareRayTracer()
     {
+        // The async BVH build worker touches m_scene / m_meshAccelerations / m_topLevelNodes;
+        // make sure it has finished before those (and this object) are torn down.
+        WaitForAsyncBvhBuild();
+
         if (m_frameConstantsMapped && m_frameConstantsBuffer.IsValid()) {
             m_frameConstantsBuffer.Unmap(0, nullptr);
         }
@@ -268,6 +194,8 @@ namespace SasamiRenderer
         if (out.tlasNodes == 0u) out.missingMask |= BvhGpuAddresses::MISSING_TLAS_NODES;
         if (out.materials == 0u) out.missingMask |= BvhGpuAddresses::MISSING_MATERIALS;
         out.valid = (out.missingMask == 0u);
+        out.generation = m_bvhGeneration;
+        out.instancesHandleId = m_instanceHandle.id;
         return out;
     }
 
@@ -510,7 +438,7 @@ namespace SasamiRenderer
         out.maxSurfaceRoughness   = desc.maxSurfaceRoughness;
         out.maxPrimaryHitDistance = desc.maxReflectionTraceDistance;
         out.minReflectionEnergy   = desc.minReflectionEnergy;
-        out.shadowBias            = 0.002f;
+        out.microShadowStrength   = std::clamp(desc.frameDesc.aoDirectLightingStrength, 0.0f, 1.0f);
         out.ambientColor[0] = out.ambientColor[1] = out.ambientColor[2] = 0.1f;
         out.ambientIntensity = 1.0f;
         out.cbPad0 = desc.gbufferWidth ? desc.gbufferWidth : desc.width;
@@ -568,7 +496,9 @@ namespace SasamiRenderer
     {
         if (!m_initialized) return;
 
-        m_scene = scene;
+        // Bookkeeping only — reads the caller-owned `scene` argument (never m_scene /
+        // m_meshAccelerations), so it is safe to refresh every frame regardless of
+        // whether an async build is currently in flight.
         m_bvhDiagnostics.sceneMeshes = static_cast<uint32_t>(scene.meshes.size());
         m_bvhDiagnostics.sceneInstances = static_cast<uint32_t>(scene.instances.size());
         m_bvhDiagnostics.sceneMaterials = static_cast<uint32_t>(scene.materials.size());
@@ -576,7 +506,32 @@ namespace SasamiRenderer
         m_bvhDiagnostics.geometryVersion = scene.geometryVersion;
         m_bvhDiagnostics.materialVersion = scene.materialVersion;
         m_bvhDiagnostics.instanceVersion = scene.instanceVersion;
-        std::snprintf(m_bvhDiagnostics.lastPhase, sizeof(m_bvhDiagnostics.lastPhase), "UpdateScene");
+
+        // ---- Publish step: an async build finished since the last call; upload now. ----
+        // m_bvhDiagnostics.lastPhase is written from whichever thread currently owns the
+        // build (the worker while Building, the main thread otherwise) so this branch is
+        // the only place the main thread may resume writing it after a build completes.
+        if (m_asyncBvhState.load(std::memory_order_acquire) == AsyncBvhState::ReadyToPublish) {
+            if (m_asyncBvhSucceeded) {
+                m_bvhDiagnostics.meshBvhCount = static_cast<uint32_t>(m_meshAccelerations.size());
+                m_bvhDiagnostics.tlasNodeCount = static_cast<uint32_t>(m_topLevelNodes.size());
+                std::snprintf(m_bvhDiagnostics.lastPhase, sizeof(m_bvhDiagnostics.lastPhase), "UploadBvhBuffers");
+                if (!UploadBvhBuffers(device)) {
+                    OutputDebugStringA("GpuSoftwareRayTracer::UpdateScene: BVH GPU buffer upload failed.\n");
+                }
+                m_bvhGeometryVersion = m_buildingGeometryVersion;
+                m_bvhInstanceVersion = m_buildingInstanceVersion;
+            } else {
+                std::snprintf(m_bvhDiagnostics.lastPhase, sizeof(m_bvhDiagnostics.lastPhase), "AsyncBuildFailed");
+                OutputDebugStringA("GpuSoftwareRayTracer::UpdateScene: async BVH build failed.\n");
+            }
+            m_asyncBvhState.store(AsyncBvhState::Idle, std::memory_order_release);
+        }
+
+        // A build is still running on a worker: keep serving the old BVH buffers (or the
+        // existing invalid-address fallback if none exist yet). Do not touch m_scene /
+        // m_meshAccelerations / m_topLevelNodes / diagnostics — the worker owns them.
+        if (m_asyncBvhState.load(std::memory_order_acquire) == AsyncBvhState::Building) return;
 
         const bool geoDirty  = (scene.geometryVersion != m_bvhGeometryVersion);
         const bool matDirty  = (scene.materialVersion != m_bvhMaterialVersion);
@@ -593,16 +548,56 @@ namespace SasamiRenderer
             !isBufferValid(m_materialHandle,  m_materialCompat,  m_materialBuffer);
         if (!geoDirty && !matDirty && !instDirty && !bvhBuffersMissing) return;
 
-        if (geoDirty || instDirty || m_meshAccelerations.size() != m_scene.meshes.size()) {
-            std::snprintf(m_bvhDiagnostics.lastPhase, sizeof(m_bvhDiagnostics.lastPhase), "RebuildAccelerationStructures");
-            RebuildAccelerationStructures();
-            m_bvhDiagnostics.meshBvhCount = static_cast<uint32_t>(m_meshAccelerations.size());
-            m_bvhDiagnostics.tlasNodeCount = static_cast<uint32_t>(m_topLevelNodes.size());
+        const bool needsFullRebuild =
+            geoDirty || instDirty || bvhBuffersMissing || (m_meshAccelerations.size() != scene.meshes.size());
+        if (needsFullRebuild) {
+            // The copy is the thread-safety boundary: the caller's `scene` may mutate on
+            // later frames, so the worker only ever touches this snapshot (m_scene).
+            m_scene = scene;
+            m_buildingGeometryVersion = scene.geometryVersion;
+            m_buildingMaterialVersion = scene.materialVersion;
+            m_buildingInstanceVersion = scene.instanceVersion;
+            std::snprintf(m_bvhDiagnostics.lastPhase, sizeof(m_bvhDiagnostics.lastPhase), "BuildQueued");
+            m_asyncBvhState.store(AsyncBvhState::Building, std::memory_order_release);
+            m_asyncBvhCounter.Reset(1);
+            JobSystem::Kick(&GpuSoftwareRayTracer::RunAsyncBvhBuildJob, this, &m_asyncBvhCounter);
+            return;
         }
+
+        // Only materials changed: geometry/instances/buffers are all unchanged, so keep
+        // the CPU BVH as-is and re-upload synchronously (matches the original sync path,
+        // which never triggered RebuildAccelerationStructures for a material-only dirty).
+        m_scene = scene;
         std::snprintf(m_bvhDiagnostics.lastPhase, sizeof(m_bvhDiagnostics.lastPhase), "UploadBvhBuffers");
         if (!UploadBvhBuffers(device)) {
             OutputDebugStringA("GpuSoftwareRayTracer::UpdateScene: BVH GPU buffer upload failed.\n");
         }
+    }
+
+    // =========================================================================
+    // WaitForAsyncBvhBuild
+    // =========================================================================
+
+    void GpuSoftwareRayTracer::WaitForAsyncBvhBuild()
+    {
+        if (m_asyncBvhState.load(std::memory_order_acquire) != AsyncBvhState::Idle) {
+            JobSystem::Wait(m_asyncBvhCounter);
+        }
+    }
+
+    // =========================================================================
+    // RunAsyncBvhBuildJob — runs RebuildAccelerationStructures() on a JobSystem worker
+    // =========================================================================
+
+    void GpuSoftwareRayTracer::RunAsyncBvhBuildJob(void* userdata)
+    {
+        GpuSoftwareRayTracer* self = static_cast<GpuSoftwareRayTracer*>(userdata);
+        std::snprintf(self->m_bvhDiagnostics.lastPhase, sizeof(self->m_bvhDiagnostics.lastPhase),
+                      "RebuildAccelerationStructures");
+        self->RebuildAccelerationStructures();
+        // RebuildAccelerationStructures() has no failure signal today; treat completion as success.
+        self->m_asyncBvhSucceeded = true;
+        self->m_asyncBvhState.store(AsyncBvhState::ReadyToPublish, std::memory_order_release);
     }
 
 
@@ -682,7 +677,7 @@ namespace SasamiRenderer
             gm.emissive[0] = mat.material.emissive[0];
             gm.emissive[1] = mat.material.emissive[1];
             gm.emissive[2] = mat.material.emissive[2];
-            gm.occlusionStrength = mat.material.occlusionStrength;
+            gm.occlusion = ComputeEffectiveOcclusion(mat);
             matBuf.push_back(gm);
         }
 
@@ -739,6 +734,24 @@ namespace SasamiRenderer
             }
             return true;
         };
+
+        // 既存バッファはコマンドリスト内でルートディスクリプタ(COM 参照を持たない生の GPU VA)
+        // として参照されている可能性がある(例: IrradianceProbeGrid::UpdateProbes)。
+        // GPU は CPU より 1〜3 フレーム遅れて実行されるため、破棄前にここで一度だけ
+        // 同期しないと、実行中のディスパッチが解放済みリソースを参照し
+        // GPU-Based Validation の "Resource: <deleted>" → TDR デバイスロストに至る。
+        if (supportsRhi && (m_bvhNodesHandle.IsValid() || m_triangleHandle.IsValid() ||
+                             m_meshInfoHandle.IsValid() || m_instanceHandle.IsValid() ||
+                             m_tlasHandle.IsValid() || m_materialHandle.IsValid())) {
+#if defined(_DEBUG)
+            { char buf[128]; snprintf(buf, sizeof(buf),
+                "[DispatchDiag] BVH_DESTROY gen=%llu -> %llu\n",
+                (unsigned long long)m_bvhGeneration, (unsigned long long)(m_bvhGeneration + 1u));
+              DebugLog(buf); }
+#endif
+            device.WaitForGPU();
+        }
+        ++m_bvhGeneration;
 
         if (!uploadBuffer("BVH nodes",  allNodes.data(),          allNodes.size()          * sizeof(BvhNode),        sizeof(BvhNode),        m_bvhNodesBuffer, m_bvhNodesHandle, m_bvhNodesCompat)) return false;
         if (!uploadBuffer("triangles",  allTris.data(),            allTris.size()           * sizeof(GpuTriangle),    sizeof(GpuTriangle),    m_triangleBuffer, m_triangleHandle, m_triangleCompat)) return false;

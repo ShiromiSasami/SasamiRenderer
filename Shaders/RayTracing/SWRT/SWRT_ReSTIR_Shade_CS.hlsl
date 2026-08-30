@@ -20,6 +20,7 @@
 #include "RayTracing/SWRT/SWRT_LightTypes.hlsli"
 #include "RayTracing/SWRT/SWRT_Reservoir.hlsli"
 #include "Effects/Sky/ProceduralSky/ProceduralSky.hlsli"
+#include "Shared/Common/MicroShadowing.hlsli"
 
 cbuffer ReSTIRFrameConstants : register(b0)
 {
@@ -42,7 +43,7 @@ cbuffer ReSTIRFrameConstants : register(b0)
     float3 g_dirLightDir;
     float  g_dirLightIntensity;
     float3 g_dirLightColor;
-    float  g_shadowBias;
+    float  g_microShadowStrength;
     float3 g_ambientColor;
     float  g_ambientIntensity;
     uint   g_pointLightCount;
@@ -102,7 +103,9 @@ void CS_ReSTIR_Shade(uint3 id : SV_DispatchThreadID)
     float4 hitMat = g_hitMaterial.Load(int3(id.xy, 0));
     float3 albedo    = saturate(hitMat.rgb);
     float  roughness = saturate(hitMat.a);
-    float  metallic  = saturate(hitPosSample.w - 1.0f);
+    uint packedMatAo = (uint)round(saturate(hitPosSample.w - 1.0f) * 1024.0f);
+    float metallic = saturate(float(packedMatAo >> 5u) / 31.0f);
+    float hitAo    = saturate(float(packedMatAo & 31u) / 31.0f);
 
     float3 color = float3(0, 0, 0);
 
@@ -152,9 +155,13 @@ void CS_ReSTIR_Shade(uint3 id : SV_DispatchThreadID)
                     // Distance attenuation
                     float t     = dist / max(lightRange, 1e-4f);
                     float atten = saturate(1.0f - t * t) * (1.0f - t * t);
+                    // Micro-shadowing (Chan 2018) using the reflected surface's own baked AO.
+                    // This is the AO of the secondary hit, not the primary-surface SSAO that
+                    // SWRT_ReflectionComposite_PS.hlsl intentionally omits — no double counting.
                     // ReSTIR contribution: PBR * W (the reservoir weight)
                     color += EvalPBR(N, L, V, albedo, roughness, metallic,
-                                     lightRad * atten) * r.W;
+                                     lightRad * atten) * r.W
+                                     * ComputeMicroShadowing(NdotL, hitAo, g_microShadowStrength);
                 }
             }
         }
@@ -169,12 +176,13 @@ void CS_ReSTIR_Shade(uint3 id : SV_DispatchThreadID)
             bool inShadow = TraceAnyHit(OffsetRay(worldPos, N), L, 0.0f, 200.0f);
             if (!inShadow)
                 color += EvalPBR(N, L, V, albedo, roughness, metallic,
-                                 g_dirLightColor * g_dirLightIntensity);
+                                 g_dirLightColor * g_dirLightIntensity)
+                                 * ComputeMicroShadowing(NdotL, hitAo, g_microShadowStrength);
         }
     }
 
     // Ambient
-    color += albedo * g_ambientColor * g_ambientIntensity;
+    color += albedo * g_ambientColor * g_ambientIntensity * hitAo;
 
     // Roughness attenuation only — Fresnel is applied per-channel in PBR_PS.hlsl.
     // (Same convention as SWRT_Reflection_CS.hlsl: alpha = roughnessAtten, not fresnelWeight.)

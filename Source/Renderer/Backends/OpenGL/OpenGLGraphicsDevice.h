@@ -137,6 +137,8 @@ namespace SasamiRenderer
         void Cleanup();
         bool EnsureMeshFrameResources();
         bool RenderMeshFrame(const RhiBackendMeshFrameDesc& desc);
+        bool EnsureSkinnedMeshFrameResources();
+        bool RenderSkinnedMeshFrame(const RhiBackendMeshFrameDesc& desc);
         bool EnsureRayMarchFrameResources();
         bool RenderRayMarchFrame(const RhiBackendRayMarchFrameDesc& desc);
 
@@ -171,6 +173,16 @@ namespace SasamiRenderer
         int m_meshEmissiveRoughnessLocation = -1;
         int m_meshAlbedoTextureLocation = -1;
         int m_meshHasAlbedoTextureLocation = -1;
+
+        unsigned int m_skinnedMeshProgram = 0;
+        int m_skinnedMeshMvpLocation = -1;
+        int m_skinnedMeshBaseColorLocation = -1;
+        int m_skinnedMeshLightDirIntensityLocation = -1;
+        int m_skinnedMeshLightColorLocation = -1;
+        int m_skinnedMeshEmissiveRoughnessLocation = -1;
+        int m_skinnedMeshAlbedoTextureLocation = -1;
+        int m_skinnedMeshHasAlbedoTextureLocation = -1;
+        int m_skinnedMeshBoneMatricesLocation = -1;
 
         unsigned int m_rayMarchProgram   = 0;
         int m_rmLocInvVP                 = -1;

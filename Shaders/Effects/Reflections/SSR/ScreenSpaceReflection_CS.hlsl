@@ -6,24 +6,19 @@ cbuffer SSRConstants : register(b0)
     float4 u_traceParams0;  // x: max distance, y: thickness, z: max steps, w: max roughness
     float4 u_traceParams1;  // x: refinement steps, y: edge fade width, z: normal offset, w: intensity
     float4 u_cameraPos;     // xyz: world-space camera position
+    float4 u_reserved4;     // unused (PushCameraCB extra4 slot)
+    float4 u_iblParams;     // x: ibl enabled, y: ibl intensity, z: ibl prefilter max mip, w: unused
 }
 
 Texture2D<float>  DepthTex      : register(t0);
 Texture2D<float4> NormalTex     : register(t1);
 Texture2D<float4> MaterialTex   : register(t2);
 Texture2D<float4> SceneColorTex : register(t3);
+TextureCube<float4> IblPrefilterTex : register(t5);
 RWTexture2D<float4> ReflectionOut : register(u0);
 SamplerState LinearClamp : register(s0);
 
-float3 ReconstructWorldPos(float2 uv, float depth)
-{
-    float4 ndc = float4(uv.x * 2.0f - 1.0f,
-                        (1.0f - uv.y) * 2.0f - 1.0f,
-                        depth,
-                        1.0f);
-    float4 worldH = mul(ndc, u_cameraInvPV);
-    return worldH.xyz / max(worldH.w, 1e-6f);
-}
+#include "Shared/Common/WorldPosReconstruction.hlsli"
 
 float2 ProjectToUv(float3 worldPos, out float ndcDepth, out bool valid)
 {
@@ -162,7 +157,18 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     if (!hit || hitConfidence <= 0.0f) {
-        ReflectionOut[pixel] = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        // Ray left the screen (or found no valid hit within the step budget) before
+        // resolving against depth: fall back to the prefiltered IBL cubemap sampled
+        // along the reflection ray, same roughness-to-mip mapping as SWRT reflections
+        // (SampleReflectionEnvironment in SWRT_Reflection_Shading.hlsli).
+        if (u_iblParams.x > 0.5f) {
+            float mip = saturate(roughness) * u_iblParams.z;
+            float3 iblColor = IblPrefilterTex.SampleLevel(LinearClamp, rayDir, mip).rgb * u_iblParams.y;
+            float iblConfidence = saturate(reflectionMask * u_traceParams1.w);
+            ReflectionOut[pixel] = float4(iblColor, iblConfidence);
+        } else {
+            ReflectionOut[pixel] = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        }
         return;
     }
 

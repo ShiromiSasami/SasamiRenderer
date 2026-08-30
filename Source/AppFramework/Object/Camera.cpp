@@ -13,14 +13,27 @@ namespace SasamiRenderer
     namespace {
         static Vector3 ComputeForward(float yaw, float pitch)
         {
-            // Spherical-angle style forward vector.
-            // x = sin(yaw) * cos(pitch)
-            // y = -sin(pitch)
-            // z = cos(yaw) * cos(pitch)
-            // (Sign convention is engine-specific: +pitch looks downward here.)
-            float cy = std::cos(yaw), sy = std::sin(yaw);
-            float cp = std::cos(pitch), sp = std::sin(pitch);
-            return Vector3(sy * cp, -sp, cy * cp);
+            // Delegates to Math::DirectionFromYawPitch so the camera and every
+            // light (directional/spot) share a single yaw/pitch -> direction
+            // convention. (Sign convention is engine-specific: +pitch looks
+            // downward here.)
+            float dir[3] = {};
+            Math::DirectionFromYawPitch(yaw, pitch, dir);
+            return Vector3(dir[0], dir[1], dir[2]);
+        }
+
+        static void BuildPerspectiveProjection(float aspect, float fovRadians, float zn, float zf, float outProj[16])
+        {
+            // Perspective projection (row-major, LH).
+            // yScale = 1 / tan(fov/2)
+            // xScale = yScale / aspect
+            // z mapping: z' = zf/(zf-zn) * z + (-zn*zf)/(zf-zn)
+            const float yScale = 1.0f / std::tan(fovRadians * 0.5f);
+            const float xScale = yScale / aspect;
+            outProj[0] = xScale; outProj[1] = 0;      outProj[2] = 0;                      outProj[3] = 0;
+            outProj[4] = 0;      outProj[5] = yScale; outProj[6] = 0;                      outProj[7] = 0;
+            outProj[8] = 0;      outProj[9] = 0;      outProj[10] = zf / (zf - zn);        outProj[11] = 1;
+            outProj[12] = 0;     outProj[13] = 0;     outProj[14] = (-zn * zf) / (zf - zn); outProj[15] = 0;
         }
     }
 
@@ -56,23 +69,13 @@ namespace SasamiRenderer
             1.0f,
         };
 
-        // Perspective projection (row-major, LH).
-        // yScale = 1 / tan(fov/2)
-        // xScale = yScale / aspect
-        // z mapping: z' = zf/(zf-zn) * z + (-zn*zf)/(zf-zn)
         const float safeHeight = (viewportHeight > 0.0f) ? viewportHeight : 1.0f;
-        float aspect = viewportWidth / safeHeight;
-        float fov = Deg(60.0f);
-        float zn = m_nearClip;
-        float zf = m_farClip;
-        float yScale = 1.0f / std::tan(fov * 0.5f);
-        float xScale = yScale / aspect;
-        float proj[16] = {
-            xScale, 0,      0,                          0,
-            0,      yScale, 0,                          0,
-            0,      0,      zf / (zf - zn),             1,
-            0,      0,      (-zn * zf) / (zf - zn),     0,
-        };
+        const float aspect = viewportWidth / safeHeight;
+        const float fov = Deg(60.0f);
+        const float zn = m_nearClip;
+        const float zf = m_farClip;
+        float proj[16];
+        BuildPerspectiveProjection(aspect, fov, zn, zf, proj);
 
         // MVP = View * Projection (world is identity for camera-space computation here).
         float mvp[16]; Mul4x4(view, proj, mvp);
@@ -116,14 +119,8 @@ namespace SasamiRenderer
         const float fov = Deg(60.0f);
         const float zn = m_nearClip;
         const float zf = m_farClip;
-        const float yScale = 1.0f / std::tan(fov * 0.5f);
-        const float xScale = yScale / aspect;
-        const float proj[16] = {
-            xScale, 0,      0,                      0,
-            0,      yScale, 0,                      0,
-            0,      0,      zf / (zf - zn),         1,
-            0,      0,      (-zn * zf) / (zf - zn), 0,
-        };
+        float proj[16];
+        BuildPerspectiveProjection(aspect, fov, zn, zf, proj);
         for (int i = 0; i < 16; ++i) {
             proxy.projection[i] = proj[i];
         }

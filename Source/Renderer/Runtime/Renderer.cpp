@@ -1,4 +1,5 @@
 #include "Renderer/Runtime/Renderer.h"
+#include "Renderer/Passes/Debug/DebugProbeGridRenderPass.h"
 #include "Renderer/Scene/SceneSynchronizer.h"
 #include "Renderer/Scene/EnvironmentManager.h"
 
@@ -11,10 +12,12 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <memory>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -159,6 +162,9 @@ namespace SasamiRenderer
 
             void Draw(const RhiDrawDesc& desc) override
             {
+#if defined(_DEBUG)
+                DebugIncrementDrawCount();
+#endif
                 m_commandList.DrawInstanced(desc.vertexCount,
                                             desc.instanceCount,
                                             desc.startVertex,
@@ -167,6 +173,9 @@ namespace SasamiRenderer
 
             void DrawIndexed(const RhiDrawIndexedDesc& desc) override
             {
+#if defined(_DEBUG)
+                DebugIncrementDrawCount();
+#endif
                 m_commandList.DrawIndexedInstanced(desc.indexCount,
                                                    desc.instanceCount,
                                                    desc.startIndex,
@@ -362,7 +371,7 @@ namespace SasamiRenderer
         }
 
         constexpr uint32_t kGIProbeCacheMagic = 0x43504753u; // "SGPC", little endian
-        constexpr uint32_t kGIProbeCacheVersion = 1u;
+        constexpr uint32_t kGIProbeCacheVersion = 3u; // v3: probe bake writes at full weight (see IrradianceProbeGrid::FillUpdateCB)
         constexpr uint32_t kGIProbeCacheCoeffCount = 9u;
 
         struct GIProbeCacheFileHeader
@@ -404,15 +413,11 @@ namespace SasamiRenderer
     // EnsureEnvironmentTexturesUploaded and BuildSwrtFrameContext
     // are now implemented in EnvironmentManager and SceneSynchronizer respectively.
 
-    RenderPassExecutionPolicy Renderer::BuildRenderPassExecutionPolicy(bool executeOpaqueFamilyPasses,
-                                                                       bool executeLightingFamilyPasses,
-                                                                       bool useShadowTessPath)
+    RenderPassExecutionPolicy Renderer::BuildRenderPassExecutionPolicy(bool useShadowTessPath)
     {
         const SWRTExecutor::PartialBehavior partialBehavior =
             m_swrtExecutor.ResolveBehavior(m_settings.rayTracingPerformancePreset);
         RenderPassExecutionPolicy policy{};
-        policy.executeOpaqueFamilyPasses = executeOpaqueFamilyPasses;
-        policy.executeLightingFamilyPasses = executeLightingFamilyPasses;
         policy.useTessellation = m_settings.useTessellation;
         policy.useTessellationWireframe = m_settings.tessWireframeEnabled;
         policy.useTessellationDebugColors = m_settings.tessDebugColorsEnabled;
@@ -422,19 +427,33 @@ namespace SasamiRenderer
             (m_settings.renderPathMode == RenderPathMode::Raster) &&
             m_settings.rasterSoftwareRayTracedDirectionalShadowEnabled &&
             m_renderTargetPool.GetSWRTShadowTexture().IsValid();
+        // Tells LightSystem::UpdateFrameLighting (via dirColor.w) whether the SWRT directional
+        // shadow texture is trustworthy this frame, so the pixel shader can fall back to fully
+        // lit instead of sampling a never-rendered raster cascade (see BuildRenderPassFrameInputs,
+        // which uses the identical condition to pick the SRV bound at ShadowMapTex).
+        m_lightSystem.SetDirectionalShadowSourceState(
+            policy.useSoftwareRayTracedDirectionalShadow,
+            policy.useSoftwareRayTracedDirectionalShadow && m_swrtExecutor.IsShadowCacheValid());
         policy.useSoftwareRayTracedReflections =
             (m_settings.renderPathMode == RenderPathMode::Raster) &&
             m_settings.rasterSoftwareRayTracedReflectionEnabled &&
             m_renderTargetPool.GetSWRTReflectionTexture().IsValid();
         const bool useScreenSpaceReflections =
             (m_settings.renderPathMode == RenderPathMode::Raster) &&
-            executeLightingFamilyPasses &&
             !policy.useSoftwareRayTracedReflections &&
             m_settings.rasterScreenSpaceReflectionEnabled &&
             m_renderTargetPool.GetSSRSceneColorCopyTexture().IsValid() &&
             m_renderTargetPool.GetSSRReflectionTexture().IsValid();
         policy.useScreenSpaceReflections = useScreenSpaceReflections;
         policy.reflectionMode = policy.useSoftwareRayTracedReflections ? 1.0f : 0.0f;
+        policy.ssrMaxDistance = m_settings.ssrMaxDistance;
+        policy.ssrThickness = m_settings.ssrThickness;
+        policy.ssrStepCount = m_settings.ssrStepCount;
+        policy.ssrRoughnessCutoff = m_settings.ssrRoughnessCutoff;
+        policy.ssrRefineSteps = m_settings.ssrRefineSteps;
+        policy.ssrEdgeFade = m_settings.ssrEdgeFade;
+        policy.ssrNormalOffset = m_settings.ssrNormalOffset;
+        policy.ssrIntensity = m_settings.ssrIntensity;
         policy.softwareRayTracedShadowMapSize =
             policy.useSoftwareRayTracedDirectionalShadow
                 ? partialBehavior.shadowMapSize
@@ -446,6 +465,7 @@ namespace SasamiRenderer
         policy.renderPathMode = m_settings.renderPathMode;
         policy.vsmBlurEnabled = m_settings.vsmBlurEnabled;
         m_lightSystem.SetAoMinOcclusion(m_settings.aoMinOcclusion);
+        m_lightSystem.SetAoDirectLightingStrength(m_settings.aoDirectLightingStrength);
         return policy;
     }
 
@@ -477,17 +497,32 @@ namespace SasamiRenderer
         inputs.camera.tanHalfFovY = m_cameraState.GetTanHalfFovY();
         inputs.camera.aspectRatio = m_cameraState.GetAspectRatio();
         inputs.camera.mode = m_cameraState.GetCameraMode();
-        inputs.shadow.shadowSrv =
-            ((m_settings.renderPathMode == RenderPathMode::Raster) &&
-             m_settings.rasterSoftwareRayTracedDirectionalShadowEnabled &&
-             m_renderTargetPool.GetSWRTShadowTexture().IsValid() &&
-             m_swrtExecutor.IsShadowCacheValid())
-                ? m_renderTargetPool.GetSWRTShadowSrv()
-                : m_lightSystem.GetShadowSrv();
+        // Same condition as the dirColor.w write in BuildRenderPassExecutionPolicy: whenever SWRT
+        // directional shadow is enabled but not trustworthy this frame, the raster cascade texture
+        // may never have been rendered (ShadowRenderPass replaces raster cascade rendering entirely
+        // while SWRT is active, see ShadowRenderPass::Execute), so binding it here would just make
+        // shadow sampling read undefined/stale data instead of failing safely. We still need a
+        // validly-allocated, dimension-matching descriptor at the ShadowMapTex slot (the root
+        // signature requires one even though the shader will not sample it), so lazily ensure the
+        // raster shadow resources exist (without rendering into them) and bind that; the pixel
+        // shader's dirColor.w == 2 branch skips sampling it entirely (see PBR_Shadow.hlsli).
+        const bool swrtDirectionalShadowTrustworthy =
+            (m_settings.renderPathMode == RenderPathMode::Raster) &&
+            m_settings.rasterSoftwareRayTracedDirectionalShadowEnabled &&
+            m_renderTargetPool.GetSWRTShadowTexture().IsValid() &&
+            m_swrtExecutor.IsShadowCacheValid();
+        if (swrtDirectionalShadowTrustworthy) {
+            inputs.shadow.shadowSrv = m_renderTargetPool.GetSWRTShadowSrv();
+        } else {
+            m_lightSystem.EnsureDirectionalShadowResources();
+            inputs.shadow.shadowSrv = m_lightSystem.GetShadowSrv();
+        }
         inputs.shadow.spotShadowSrv = m_lightSystem.GetSpotShadowSrv();
+        inputs.shadow.pointShadowSrv = m_lightSystem.GetPointShadowSrv();
         inputs.shadow.vsmSrv = m_lightSystem.GetVsmSrv();
         inputs.lighting.lightSrvTable = frame ? frame->light.lightSrvTable : GpuDescriptorHandle{};
         inputs.lighting.iblSrvTable = m_skybox.GetIblSrvTable();
+        inputs.lighting.iblSpecularSrvTable = m_skybox.GetIblSpecularSrvTable();
         if (m_probeGrid.IsInitialized()) {
             inputs.lighting.giProbeGridCbGpu = m_probeGrid.GetProbeGridCbGpuAddress();
             inputs.lighting.giProbeDataGpu = m_probeGrid.GetProbeDataGpuVA();
@@ -653,14 +688,10 @@ namespace SasamiRenderer
         auto builtins = m_renderPassBuilderCatalog.BuildBuiltinSequencePasses(buildContext);
         m_shadowRenderPass = std::dynamic_pointer_cast<ShadowRenderPass>(
             builtins[static_cast<size_t>(RenderPassType::Shadow)]);
-        m_opaqueRenderPass = std::dynamic_pointer_cast<OpaqueRenderPass>(
-            builtins[static_cast<size_t>(RenderPassType::Opaque)]);
-        m_opaqueGBufferRenderPass = std::dynamic_pointer_cast<OpaqueGBufferRenderPass>(
+        m_opaqueGBufferRenderPass = std::dynamic_pointer_cast<GBufferRenderPass>(
             builtins[static_cast<size_t>(RenderPassType::OpaqueGBuffer)]);
-        m_lightingRenderPass = std::dynamic_pointer_cast<LightingRenderPass>(
+        m_lightingRenderPass = std::dynamic_pointer_cast<DeferredLightingRenderPass>(
             builtins[static_cast<size_t>(RenderPassType::Lighting)]);
-        m_transparentRenderPass = std::dynamic_pointer_cast<TransparentRenderPass>(
-            builtins[static_cast<size_t>(RenderPassType::Transparent)]);
         m_transparentLightingRenderPass = std::dynamic_pointer_cast<TransparentLightingRenderPass>(
             builtins[static_cast<size_t>(RenderPassType::TransparentLighting)]);
         m_transparentBackfaceDistanceRenderPass = std::dynamic_pointer_cast<TransparentBackfaceDistanceRenderPass>(
@@ -679,6 +710,8 @@ namespace SasamiRenderer
             builtins[static_cast<size_t>(RenderPassType::RuntimeAOBlur)]);
         m_screenSpaceReflectionRenderPass = std::dynamic_pointer_cast<ScreenSpaceReflectionRenderPass>(
             builtins[static_cast<size_t>(RenderPassType::ScreenSpaceReflection)]);
+        m_screenSpaceReflectionCompositeRenderPass = std::dynamic_pointer_cast<ScreenSpaceReflectionCompositeRenderPass>(
+            builtins[static_cast<size_t>(RenderPassType::ScreenSpaceReflectionComposite)]);
         m_softwareReflectionRenderPass = std::dynamic_pointer_cast<SoftwareReflectionRenderPass>(
             builtins[static_cast<size_t>(RenderPassType::SoftwareReflection)]);
         m_softwareReflectionCompositeRenderPass = std::dynamic_pointer_cast<SoftwareReflectionCompositeRenderPass>(
@@ -689,8 +722,14 @@ namespace SasamiRenderer
             m_renderPassBuilderCatalog.Build(RenderPassBuilderId::RayTracing, buildContext));
         m_volumetricCloudRenderPass = std::dynamic_pointer_cast<VolumetricCloudRenderPass>(
             m_renderPassBuilderCatalog.Build(RenderPassBuilderId::VolumetricCloud, buildContext));
-        m_debugProbeGridRenderPass = std::dynamic_pointer_cast<DebugProbeGridRenderPass>(
-            m_renderPassBuilderCatalog.Build(RenderPassBuilderId::DebugProbeGrid, buildContext));
+        m_debugVisualization.Bind(
+            std::dynamic_pointer_cast<DebugProbeGridRenderPass>(
+                m_renderPassBuilderCatalog.Build(RenderPassBuilderId::DebugProbeGrid, buildContext)),
+            [this] { EnsureDebugProbeGridPassInserted(); });
+        m_fluidSurfaceRenderPass = std::dynamic_pointer_cast<FluidSurfaceRenderPass>(
+            m_renderPassBuilderCatalog.Build(RenderPassBuilderId::FluidSurface, buildContext));
+        m_particleRenderPass = std::dynamic_pointer_cast<ParticleRenderPass>(
+            m_renderPassBuilderCatalog.Build(RenderPassBuilderId::Particles, buildContext));
 
         m_passRegistry.SetBuiltinPasses(builtins);
 
@@ -700,6 +739,11 @@ namespace SasamiRenderer
     Renderer::~Renderer()
     {
         WaitForGPU();
+
+        if (m_computeFrameFenceEvent) {
+            CloseHandle(m_computeFrameFenceEvent);
+            m_computeFrameFenceEvent = nullptr;
+        }
 
         m_frameCoordinator.Shutdown(m_lightSystem);
 
@@ -836,6 +880,12 @@ namespace SasamiRenderer
         m_environmentManager.SetSkyboxHdrEquirectData(std::move(pixels), width, height);
     }
 
+    void Renderer::AdoptPregeneratedIbl(IblSystem::GeneratedIblData&& data)
+    {
+        m_environmentManager.AdoptPregeneratedIblData(std::move(data));
+        m_readyState.skyboxIblReady.store(true, std::memory_order_release);
+    }
+
     void Renderer::SetSkyboxLdrEquirectData(std::vector<uint8_t> pixels, UINT width, UINT height)
     {
         m_environmentManager.SetSkyboxLdrEquirectData(std::move(pixels), width, height);
@@ -865,6 +915,8 @@ namespace SasamiRenderer
     {
         m_passRegistry.UseDefaultRenderNodePreset();
         EnsureDebugProbeGridPassInserted();
+        EnsureFluidSurfacePassInserted();
+        EnsureParticlePassInserted();
         EnsureVolumetricCloudPassInserted();
     }
 
@@ -1076,14 +1128,14 @@ namespace SasamiRenderer
         AddGIBakeLog("Cancel", "Bake canceled at %u/%u probes.",
                      m_probeGrid.GetBakedProbeCount(),
                      m_probeGrid.GetTotalProbeCount());
-        RefreshGIBakeStatus(m_probeGrid.IsBaked()
+        RefreshGIBakeStatus(m_probeGrid.HasEverBaked()
             ? GIBakeState::Completed
             : GIBakeState::Idle);
     }
 
     bool Renderer::SaveGIProbeCache(const std::string& path, uint64_t stateHash)
     {
-        if (!m_device || path.empty() || !m_probeGrid.IsInitialized() || !m_probeGrid.IsBaked()) {
+        if (!m_device || path.empty() || !m_probeGrid.IsInitialized() || !m_probeGrid.HasEverBaked()) {
             return false;
         }
 
@@ -1106,15 +1158,51 @@ namespace SasamiRenderer
         header.stateHash = stateHash;
         header.dataSizeBytes = static_cast<uint64_t>(probeData.size());
 
-        std::ofstream out(path, std::ios::binary | std::ios::trunc);
-        if (!out.is_open()) {
-            return false;
+        // Write to a temporary and rename, matching StaticMeshCache::Save: an interrupted
+        // save must never destroy the previously baked cache or leave a half-written file
+        // in its place.
+        const std::filesystem::path finalPath(path);
+        std::error_code ec;
+        if (finalPath.has_parent_path()) {
+            std::filesystem::create_directories(finalPath.parent_path(), ec);
+            if (ec) {
+                return false;
+            }
         }
 
-        out.write(reinterpret_cast<const char*>(&header), sizeof(header));
-        out.write(reinterpret_cast<const char*>(probeData.data()),
-                  static_cast<std::streamsize>(probeData.size()));
-        return out.good();
+        std::filesystem::path tempPath = finalPath;
+        tempPath += ".tmp";
+
+        {
+            std::ofstream out(tempPath, std::ios::binary | std::ios::trunc);
+            if (!out.is_open()) {
+                return false;
+            }
+
+            out.write(reinterpret_cast<const char*>(&header), sizeof(header));
+            out.write(reinterpret_cast<const char*>(probeData.data()),
+                      static_cast<std::streamsize>(probeData.size()));
+            // Flush explicitly: a failure inside the destructor's flush would otherwise go
+            // unnoticed and rename a short cache into place.
+            out.flush();
+            if (!out.good()) {
+                out.close();
+                std::error_code cleanupEc;
+                std::filesystem::remove(tempPath, cleanupEc);
+                return false;
+            }
+        }
+
+        ec.clear();
+        std::filesystem::remove(finalPath, ec);
+        ec.clear();
+        std::filesystem::rename(tempPath, finalPath, ec);
+        if (ec) {
+            std::error_code cleanupEc;
+            std::filesystem::remove(tempPath, cleanupEc);
+            return false;
+        }
+        return true;
     }
 
     bool Renderer::LoadGIProbeCache(const std::string& path, uint64_t stateHash)
@@ -1185,33 +1273,136 @@ namespace SasamiRenderer
             : GIBakeState::Idle);
     }
 
+    bool Renderer::GetSceneWorldBounds(float outMin[3], float outMax[3]) const
+    {
+        if (m_rayTracingScene.instances.empty()) {
+            return false;
+        }
+
+        float minB[3] = { std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max() };
+        float maxB[3] = { -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max() };
+        for (const auto& instance : m_rayTracingScene.instances) {
+            for (int axis = 0; axis < 3; ++axis) {
+                minB[axis] = std::min(minB[axis], instance.worldBoundsMin[axis]);
+                maxB[axis] = std::max(maxB[axis], instance.worldBoundsMax[axis]);
+            }
+        }
+
+        if (minB[0] > maxB[0] || minB[1] > maxB[1] || minB[2] > maxB[2]) {
+            return false;
+        }
+
+        outMin[0] = minB[0]; outMin[1] = minB[1]; outMin[2] = minB[2];
+        outMax[0] = maxB[0]; outMax[1] = maxB[1]; outMax[2] = maxB[2];
+        return true;
+    }
+
+    bool Renderer::FitProbeGridToSceneAuto(float margin, std::uint32_t probeBudget)
+    {
+        float sceneMin[3];
+        float sceneMax[3];
+        if (!GetSceneWorldBounds(sceneMin, sceneMax)) {
+            return false;
+        }
+
+        m_probeGrid.FitToSceneBoundsWithBudget(sceneMin[0], sceneMin[1], sceneMin[2],
+                                                sceneMax[0], sceneMax[1], sceneMax[2],
+                                                margin, probeBudget);
+        if (m_probeGrid.IsInitialized() && m_device) {
+            m_probeGrid.ReallocAndClearProbeBuffer(*m_device);
+        } else {
+            m_probeGrid.ResetBakeState();
+        }
+        RefreshGIBakeStatus(m_giBakeRequested
+            ? GIBakeState::Baking
+            : GIBakeState::Idle);
+        return true;
+    }
+
     void Renderer::SetRenderPassSequence(const std::vector<RenderPassType>& sequence)
     {
-        m_passRegistry.SetRenderPassSequence(sequence);
+        // Deferred lighting has a hard dependency on OpaqueGBuffer: Lighting samples the
+        // GBuffer targets unconditionally, so a sequence without it renders from targets
+        // nothing wrote. A caller-supplied sequence (the pass-builder UI) can legitimately
+        // omit passes it does not expose, so restore this one rather than trusting the
+        // list verbatim.
+        std::vector<RenderPassType> effectiveSequence = sequence;
+        const bool hasGBuffer = std::find(effectiveSequence.begin(), effectiveSequence.end(),
+                                          RenderPassType::OpaqueGBuffer) != effectiveSequence.end();
+        if (!hasGBuffer) {
+            // Restore it at its default slot: before the passes that read it.
+            const auto lightingIt = std::find(effectiveSequence.begin(), effectiveSequence.end(),
+                                              RenderPassType::Lighting);
+            const auto insertAt = (lightingIt != effectiveSequence.end()) ? lightingIt : effectiveSequence.begin();
+            effectiveSequence.insert(insertAt, RenderPassType::OpaqueGBuffer);
+            DebugLog("Renderer::SetRenderPassSequence: OpaqueGBuffer was missing from the "
+                     "requested sequence and has been restored (deferred lighting requires it).\n");
+        }
+
+        m_passRegistry.SetRenderPassSequence(effectiveSequence);
 
         // Re-insert non-builtin nodes that were previously added via AddPassBefore/AddPassAfter.
         // SetRenderPassSequence calls ClearPasses() internally, which removes them.
         // Keep the probe grid after Lighting/Skybox so deferred PBR has already produced SceneColor.
         EnsureDebugProbeGridPassInserted();
+        EnsureFluidSurfacePassInserted();
+        EnsureParticlePassInserted();
         EnsureVolumetricCloudPassInserted();
     }
 
     void Renderer::EnsureDebugProbeGridPassInserted()
     {
-        if (!m_debugProbeGridRenderPass ||
-            !m_debugProbeGridRenderPass->IsInitialized() ||
+        auto pass = m_debugVisualization.GetPass();
+        if (!pass ||
+            !pass->IsInitialized() ||
             HasRenderPass("DebugProbeGrid")) {
             return;
         }
         // After Lighting/Skybox so deferred PBR has already produced SceneColor.
-        if (AddPassAfter("Skybox", m_debugProbeGridRenderPass).IsValid()) return;
-        if (AddPassAfter("Lighting", m_debugProbeGridRenderPass).IsValid()) return;
-        AddPass(m_debugProbeGridRenderPass);
+        if (AddPassAfter("Skybox", pass).IsValid()) return;
+        if (AddPassAfter("Lighting", pass).IsValid()) return;
+        AddPass(pass);
     }
 
     void Renderer::ReinsertDebugProbeGrid()
     {
         EnsureDebugProbeGridPassInserted();
+    }
+
+    void Renderer::EnsureFluidSurfacePassInserted()
+    {
+        if (!m_fluidSurfaceRenderPass ||
+            !m_fluidSurfaceRenderPass->IsInitialized() ||
+            HasRenderPass("FluidSurface")) {
+            return;
+        }
+        // After Lighting/Skybox so deferred PBR has already produced SceneColor.
+        if (AddPassAfter("Skybox", m_fluidSurfaceRenderPass).IsValid()) return;
+        if (AddPassAfter("Lighting", m_fluidSurfaceRenderPass).IsValid()) return;
+        AddPass(m_fluidSurfaceRenderPass);
+    }
+
+    void Renderer::ReinsertFluidSurface()
+    {
+        EnsureFluidSurfacePassInserted();
+    }
+
+    void Renderer::EnsureParticlePassInserted()
+    {
+        if (!m_particleRenderPass ||
+            !m_particleRenderPass->IsInitialized() ||
+            HasRenderPass("Particles")) {
+            return;
+        }
+        if (AddPassAfter("FluidSurface", m_particleRenderPass).IsValid()) return;
+        if (AddPassAfter("Skybox", m_particleRenderPass).IsValid()) return;
+        if (AddPassAfter("Lighting", m_particleRenderPass).IsValid()) return;
+        AddPass(m_particleRenderPass);
+    }
+
+    void Renderer::ReinsertParticles()
+    {
+        EnsureParticlePassInserted();
     }
 
     void Renderer::UpdateCameraCB(const RenderCameraProxy* camera)
@@ -1226,13 +1417,17 @@ namespace SasamiRenderer
 
     void Renderer::SubmitSkinnedRenderProxies(std::vector<SkinnedRenderProxy>&& proxies)
     {
-        if (!m_device || UsesNativeBackendFrame(*m_device)) {
+        if (!m_device) {
+            return;
+        }
+        if (UsesNativeBackendFrame(*m_device)) {
+            m_sceneSubmitter.SubmitSkinnedRenderProxies(std::move(proxies));
             return;
         }
         const UINT backIndex = m_device->GetSwapChain()->GetCurrentBackBufferIndex();
         auto* frame = m_frameCoordinator.GetFrameContext(backIndex);
         if (!frame) return;
-        m_sceneSubmitter.SubmitSkinnedRenderProxies(std::move(proxies), m_frameCoordinator, *frame);
+        m_sceneSubmitter.SubmitSkinnedRenderProxies(std::move(proxies), &m_frameCoordinator, frame);
     }
 
     void Renderer::ClearSubmittedRenderProxies()

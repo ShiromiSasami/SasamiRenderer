@@ -237,6 +237,7 @@ namespace SasamiRenderer
             }
             else if (currentSection == "camera") {
                 Camera* cam = CreateCameraObject();
+                if (!cam) return;
                 cam->SetTarget(
                     ParseFloat(kv, "position_x", ParseFloat(kv, "target_x")),
                     ParseFloat(kv, "position_y", ParseFloat(kv, "target_y")),
@@ -260,6 +261,7 @@ namespace SasamiRenderer
                         ? StaticModel::ModelFormat::Obj
                         : StaticModel::ModelFormat::Gltf;
                     StaticModel* model = CreateStaticModel();
+                    if (!model) return;
                     if (model->LoadModel(meshPath, format, scale)) {
                         model->SetTranslation(
                             ParseFloat(kv, "x"),
@@ -272,6 +274,7 @@ namespace SasamiRenderer
             }
             else if (currentSection == "point_light") {
                 PointLight* pl = CreatePointLightObject();
+                if (!pl) return;
                 pl->Transform().position.x = ParseFloat(kv, "x");
                 pl->Transform().position.y = ParseFloat(kv, "y");
                 pl->Transform().position.z = ParseFloat(kv, "z");
@@ -283,6 +286,7 @@ namespace SasamiRenderer
             }
             else if (currentSection == "spot_light") {
                 SpotLight* sl = CreateSpotLightObject();
+                if (!sl) return;
                 sl->Transform().position.x      = ParseFloat(kv, "x");
                 sl->Transform().position.y      = ParseFloat(kv, "y");
                 sl->Transform().position.z      = ParseFloat(kv, "z");
@@ -357,6 +361,7 @@ namespace SasamiRenderer
             }
             else if (currentSection == "point_light") {
                 PointLight* pl = CreatePointLightObject();
+                if (!pl) return;
                 pl->Transform().position.x = ParseFloat(kv, "x");
                 pl->Transform().position.y = ParseFloat(kv, "y");
                 pl->Transform().position.z = ParseFloat(kv, "z");
@@ -368,6 +373,7 @@ namespace SasamiRenderer
             }
             else if (currentSection == "spot_light") {
                 SpotLight* sl = CreateSpotLightObject();
+                if (!sl) return;
                 sl->Transform().position.x      = ParseFloat(kv, "x");
                 sl->Transform().position.y      = ParseFloat(kv, "y");
                 sl->Transform().position.z      = ParseFloat(kv, "z");

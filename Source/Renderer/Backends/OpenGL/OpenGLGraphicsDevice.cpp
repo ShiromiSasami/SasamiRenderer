@@ -4,6 +4,7 @@
 
 #include "Foundation/Tools/DebugOutput.h"
 #include "Foundation/Math/MathUtil.h"
+#include "Renderer/Structures/Skeleton.h"
 
 #include <array>
 #include <cstddef>
@@ -348,6 +349,53 @@ void main()
     lit = lit / (lit + vec3(1.0));
     lit = pow(clamp(lit, 0.0, 1.0), vec3(1.0 / 2.2));
     gl_FragColor = vec4(lit, surface.a);
+}
+)GLSL";
+
+        // Ports Shaders/Raster/Geometry/SkinnedMesh/SkinnedMesh_VS.hlsl's up-to-4-influence bone
+        // blending. Bone matrices are uploaded row-major, un-transposed (same convention as
+        // u_modelViewProjection below and the ray-march u_invVP: GLSL reads it column-major, which
+        // is the transpose, so `M * v` here reproduces HLSL's `mul(v, M_rowmajor)`). Skinning
+        // blends into object/model space (mirrors the HLSL "bone-space -> model-space" comment);
+        // u_modelViewProjection already folds in the per-draw model matrix, so no separate world
+        // matrix is needed here. Like the static mesh shader above, this native fallback skips the
+        // inverse-transpose world-normal fixup (normals are left in model space), matching that
+        // shader's existing simplification rather than introducing an asymmetric special case.
+        const char* kOpenGLNativeSkinnedMeshVS = R"GLSL(
+#version 120
+attribute vec3 a_position;
+attribute vec3 a_normal;
+attribute vec4 a_color;
+attribute vec2 a_uv;
+attribute vec4 a_boneIndices;
+attribute vec4 a_boneWeights;
+uniform mat4 u_modelViewProjection;
+uniform vec4 u_baseColor;
+uniform mat4 u_boneMatrices[128];
+varying vec3 v_normal;
+varying vec4 v_color;
+varying vec2 v_uv;
+void main()
+{
+    vec4 pos4 = vec4(a_position, 1.0);
+    mat4 boneX = u_boneMatrices[int(a_boneIndices.x + 0.5)];
+    mat4 boneY = u_boneMatrices[int(a_boneIndices.y + 0.5)];
+    mat4 boneZ = u_boneMatrices[int(a_boneIndices.z + 0.5)];
+    mat4 boneW = u_boneMatrices[int(a_boneIndices.w + 0.5)];
+    vec4 skinnedPos =
+        a_boneWeights.x * (boneX * pos4) +
+        a_boneWeights.y * (boneY * pos4) +
+        a_boneWeights.z * (boneZ * pos4) +
+        a_boneWeights.w * (boneW * pos4);
+    vec3 skinnedNormal =
+        a_boneWeights.x * (mat3(boneX) * a_normal) +
+        a_boneWeights.y * (mat3(boneY) * a_normal) +
+        a_boneWeights.z * (mat3(boneZ) * a_normal) +
+        a_boneWeights.w * (mat3(boneW) * a_normal);
+    gl_Position = u_modelViewProjection * skinnedPos;
+    v_normal = normalize(skinnedNormal);
+    v_color = a_color * u_baseColor;
+    v_uv = a_uv;
 }
 )GLSL";
 
@@ -1309,6 +1357,9 @@ void main()
         m_capabilities.supportsRhiDescriptorCreation = true;
         m_capabilities.supportsRhiPipelineCreation = true;
         m_capabilities.supportsRhiCommandEncoding = true;
+        // Single GL context bound to one thread; no threaded resource/pipeline creation.
+        m_capabilities.supportsThreadedResourceCreation = false;
+        m_capabilities.supportsThreadedPipelineCreation = false;
         return true;
     }
 
@@ -1467,6 +1518,105 @@ void main()
         m_meshEmissiveRoughnessLocation = getUniformLocation(program, "u_emissiveRoughness");
         m_meshAlbedoTextureLocation = getUniformLocation(program, "u_albedoTexture");
         m_meshHasAlbedoTextureLocation = getUniformLocation(program, "u_hasAlbedoTexture");
+        return true;
+    }
+
+    bool OpenGLGraphicsDevice::EnsureSkinnedMeshFrameResources()
+    {
+        if (m_skinnedMeshProgram != 0) {
+            return true;
+        }
+        if (!m_hdc || !m_context || !wglMakeCurrent(m_hdc, m_context)) {
+            return false;
+        }
+
+        auto createShader = LoadGlProc<GlCreateShaderFn>("glCreateShader");
+        auto shaderSource = LoadGlProc<GlShaderSourceFn>("glShaderSource");
+        auto compileShader = LoadGlProc<GlCompileShaderFn>("glCompileShader");
+        auto getShaderiv = LoadGlProc<GlGetShaderivFn>("glGetShaderiv");
+        auto getShaderInfoLog = LoadGlProc<GlGetShaderInfoLogFn>("glGetShaderInfoLog");
+        auto deleteShader = LoadGlProc<GlDeleteShaderFn>("glDeleteShader");
+        auto createProgram = LoadGlProc<GlCreateProgramFn>("glCreateProgram");
+        auto attachShader = LoadGlProc<GlAttachShaderFn>("glAttachShader");
+        auto bindAttribLocation = LoadGlProc<GlBindAttribLocationFn>("glBindAttribLocation");
+        auto linkProgram = LoadGlProc<GlLinkProgramFn>("glLinkProgram");
+        auto getProgramiv = LoadGlProc<GlGetProgramivFn>("glGetProgramiv");
+        auto getProgramInfoLog = LoadGlProc<GlGetProgramInfoLogFn>("glGetProgramInfoLog");
+        auto getUniformLocation = LoadGlProc<GlGetUniformLocationFn>("glGetUniformLocation");
+        if (!createShader || !shaderSource || !compileShader || !getShaderiv || !deleteShader ||
+            !createProgram || !attachShader || !bindAttribLocation || !linkProgram ||
+            !getProgramiv || !getUniformLocation) {
+            DebugLog("OpenGLGraphicsDevice::EnsureSkinnedMeshFrameResources: required GL shader functions are unavailable.\n");
+            return false;
+        }
+
+        auto compile = [&](GLenum stage, const char* source) -> GLuint {
+            GLuint shader = createShader(stage);
+            shaderSource(shader, 1, &source, nullptr);
+            compileShader(shader);
+            GLint ok = GL_FALSE;
+            getShaderiv(shader, GL_COMPILE_STATUS, &ok);
+            if (ok == GL_FALSE) {
+                if (getShaderInfoLog) {
+                    char log[1024] = {};
+                    GLsizei len = 0;
+                    getShaderInfoLog(shader, static_cast<GLsizei>(sizeof(log)), &len, log);
+                    DebugLog(log);
+                    DebugLog("\n");
+                }
+                deleteShader(shader);
+                return 0;
+            }
+            return shader;
+        };
+
+        const GLuint vs = compile(GL_VERTEX_SHADER, kOpenGLNativeSkinnedMeshVS);
+        const GLuint ps = compile(GL_FRAGMENT_SHADER, kOpenGLNativeMeshPS);
+        if (vs == 0 || ps == 0) {
+            if (vs != 0) deleteShader(vs);
+            if (ps != 0) deleteShader(ps);
+            return false;
+        }
+
+        const GLuint program = createProgram();
+        attachShader(program, vs);
+        attachShader(program, ps);
+        bindAttribLocation(program, 0, "a_position");
+        bindAttribLocation(program, 1, "a_normal");
+        bindAttribLocation(program, 2, "a_color");
+        bindAttribLocation(program, 3, "a_uv");
+        bindAttribLocation(program, 4, "a_boneIndices");
+        bindAttribLocation(program, 5, "a_boneWeights");
+        linkProgram(program);
+        deleteShader(ps);
+        deleteShader(vs);
+
+        GLint linked = GL_FALSE;
+        getProgramiv(program, GL_LINK_STATUS, &linked);
+        if (linked == GL_FALSE) {
+            if (getProgramInfoLog) {
+                char log[1024] = {};
+                GLsizei len = 0;
+                getProgramInfoLog(program, static_cast<GLsizei>(sizeof(log)), &len, log);
+                DebugLog(log);
+                DebugLog("\n");
+            }
+            auto deleteProgram = LoadGlProc<GlDeleteProgramFn>("glDeleteProgram");
+            if (deleteProgram) {
+                deleteProgram(program);
+            }
+            return false;
+        }
+
+        m_skinnedMeshProgram = program;
+        m_skinnedMeshMvpLocation = getUniformLocation(program, "u_modelViewProjection");
+        m_skinnedMeshBaseColorLocation = getUniformLocation(program, "u_baseColor");
+        m_skinnedMeshLightDirIntensityLocation = getUniformLocation(program, "u_lightDirIntensity");
+        m_skinnedMeshLightColorLocation = getUniformLocation(program, "u_lightColor");
+        m_skinnedMeshEmissiveRoughnessLocation = getUniformLocation(program, "u_emissiveRoughness");
+        m_skinnedMeshAlbedoTextureLocation = getUniformLocation(program, "u_albedoTexture");
+        m_skinnedMeshHasAlbedoTextureLocation = getUniformLocation(program, "u_hasAlbedoTexture");
+        m_skinnedMeshBoneMatricesLocation = getUniformLocation(program, "u_boneMatrices[0]");
         return true;
     }
 
@@ -1721,6 +1871,116 @@ void main()
         return true;
     }
 
+    bool OpenGLGraphicsDevice::RenderSkinnedMeshFrame(const RhiBackendMeshFrameDesc& desc)
+    {
+        if (!desc.skinnedDraws || desc.skinnedDrawCount == 0 || !EnsureSkinnedMeshFrameResources()) {
+            return false;
+        }
+
+        auto useProgram = LoadGlProc<GlUseProgramFn>("glUseProgram");
+        auto bindBuffer = LoadGlProc<GlBindBufferFn>("glBindBuffer");
+        auto enableVertexAttribArray = LoadGlProc<GlEnableVertexAttribArrayFn>("glEnableVertexAttribArray");
+        auto disableVertexAttribArray = LoadGlProc<GlDisableVertexAttribArrayFn>("glDisableVertexAttribArray");
+        auto vertexAttribPointer = LoadGlProc<GlVertexAttribPointerFn>("glVertexAttribPointer");
+        auto uniformMatrix4fv = LoadGlProc<GlUniformMatrix4fvFn>("glUniformMatrix4fv");
+        auto uniform4fv = LoadGlProc<GlUniform4fvFn>("glUniform4fv");
+        auto uniform1i = LoadGlProc<GlUniform1iFn>("glUniform1i");
+        auto activeTexture = LoadGlProc<GlActiveTextureFn>("glActiveTexture");
+        if (!useProgram || !bindBuffer || !enableVertexAttribArray || !disableVertexAttribArray ||
+            !vertexAttribPointer || !uniformMatrix4fv || !uniform4fv || !uniform1i) {
+            return false;
+        }
+
+        glViewport(0, 0, static_cast<GLsizei>(desc.renderWidth), static_cast<GLsizei>(desc.renderHeight));
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LEQUAL);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        useProgram(m_skinnedMeshProgram);
+        if (activeTexture) {
+            activeTexture(GL_TEXTURE0);
+        }
+        uniform1i(m_skinnedMeshAlbedoTextureLocation, 0);
+
+        for (uint32_t i = 0; i < desc.skinnedDrawCount; ++i) {
+            const RhiBackendSkinnedMeshDrawDesc& draw = desc.skinnedDraws[i];
+            if (!draw.boneMatrices) {
+                continue;
+            }
+            const auto vbIt = m_rhiBuffers.find(draw.vertexBufferHandle);
+            if (vbIt == m_rhiBuffers.end()) {
+                continue;
+            }
+
+            float mvp[16] = {};
+            Math::Mul4x4(draw.model, desc.viewProjection, mvp);
+            uniformMatrix4fv(m_skinnedMeshMvpLocation, 1, GL_FALSE, mvp);
+            uniform4fv(m_skinnedMeshBaseColorLocation, 1, draw.baseColor);
+            uniformMatrix4fv(m_skinnedMeshBoneMatricesLocation, static_cast<GLsizei>(Skeleton::kMaxBones), GL_FALSE, draw.boneMatrices);
+
+            const float lightDirIntensity[4] = {
+                desc.sunDir[0], desc.sunDir[1], desc.sunDir[2], desc.sunIntensity
+            };
+            const float lightColor[4] = {
+                desc.sunColor[0], desc.sunColor[1], desc.sunColor[2], 1.0f
+            };
+            const float emissiveRoughness[4] = {
+                draw.emissive[0], draw.emissive[1], draw.emissive[2], draw.roughness
+            };
+            uniform4fv(m_skinnedMeshLightDirIntensityLocation, 1, lightDirIntensity);
+            uniform4fv(m_skinnedMeshLightColorLocation, 1, lightColor);
+            uniform4fv(m_skinnedMeshEmissiveRoughnessLocation, 1, emissiveRoughness);
+
+            GLuint albedoTexture = 0;
+            const auto textureIt = m_rhiTextureViews.find(draw.albedoSrv);
+            if (textureIt != m_rhiTextureViews.end()) {
+                albedoTexture = textureIt->second;
+            }
+            glBindTexture(GL_TEXTURE_2D, albedoTexture);
+            uniform1i(m_skinnedMeshHasAlbedoTextureLocation, albedoTexture != 0 ? 1 : 0);
+
+            bindBuffer(GL_ARRAY_BUFFER, vbIt->second);
+            enableVertexAttribArray(0);
+            enableVertexAttribArray(1);
+            enableVertexAttribArray(2);
+            enableVertexAttribArray(3);
+            enableVertexAttribArray(4);
+            enableVertexAttribArray(5);
+            vertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(draw.vertexStride), reinterpret_cast<const void*>(0));
+            vertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(draw.vertexStride), reinterpret_cast<const void*>(12));
+            vertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(draw.vertexStride), reinterpret_cast<const void*>(24));
+            vertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(draw.vertexStride), reinterpret_cast<const void*>(40));
+            // Bone indices are unsigned bytes; unnormalized upload converts them to plain
+            // integer-valued floats (0..255) for the shader to round back to int and index with.
+            vertexAttribPointer(4, 4, GL_UNSIGNED_BYTE, GL_FALSE, static_cast<GLsizei>(draw.vertexStride), reinterpret_cast<const void*>(48));
+            vertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(draw.vertexStride), reinterpret_cast<const void*>(52));
+
+            const auto ibIt = m_rhiBuffers.find(draw.indexBufferHandle);
+            if (draw.indexCount > 0 && ibIt != m_rhiBuffers.end()) {
+                bindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibIt->second);
+                glDrawElements(GL_TRIANGLES,
+                               static_cast<GLsizei>(draw.indexCount),
+                               draw.index32Bit ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT,
+                               nullptr);
+            } else if (draw.vertexCount > 0) {
+                bindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+                glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(draw.vertexCount));
+            }
+        }
+
+        disableVertexAttribArray(5);
+        disableVertexAttribArray(4);
+        disableVertexAttribArray(3);
+        disableVertexAttribArray(2);
+        disableVertexAttribArray(1);
+        disableVertexAttribArray(0);
+        bindBuffer(GL_ARRAY_BUFFER, 0);
+        bindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        useProgram(0);
+        return true;
+    }
+
     bool OpenGLGraphicsDevice::ExecuteBackendFrame(const RhiBackendFrameDesc& frameDesc)
     {
         if (!m_hdc || !m_context || !frameDesc.present) {
@@ -1738,6 +1998,7 @@ void main()
             (void)RenderRayMarchFrame(frameDesc.rayMarch);
         } else if (frameDesc.mesh.enabled) {
             (void)RenderMeshFrame(frameDesc.mesh);
+            (void)RenderSkinnedMeshFrame(frameDesc.mesh);
         }
         glFlush();
         return SwapBuffers(m_hdc) != FALSE;
@@ -2349,6 +2610,18 @@ void main()
                     m_meshEmissiveRoughnessLocation = -1;
                     m_meshAlbedoTextureLocation = -1;
                     m_meshHasAlbedoTextureLocation = -1;
+                }
+                if (m_skinnedMeshProgram != 0) {
+                    glDeleteProgramPtr(m_skinnedMeshProgram);
+                    m_skinnedMeshProgram = 0;
+                    m_skinnedMeshMvpLocation = -1;
+                    m_skinnedMeshBaseColorLocation = -1;
+                    m_skinnedMeshLightDirIntensityLocation = -1;
+                    m_skinnedMeshLightColorLocation = -1;
+                    m_skinnedMeshEmissiveRoughnessLocation = -1;
+                    m_skinnedMeshAlbedoTextureLocation = -1;
+                    m_skinnedMeshHasAlbedoTextureLocation = -1;
+                    m_skinnedMeshBoneMatricesLocation = -1;
                 }
                 if (m_rayMarchProgram != 0) {
                     glDeleteProgramPtr(m_rayMarchProgram);

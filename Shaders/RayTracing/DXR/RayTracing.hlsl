@@ -163,7 +163,11 @@ void ClosestHitShader(inout RadiancePayload payload, in Attributes attributes)
     }
     const float3 directionalColor = gFrame.directionalLightColorIntensity.rgb * gFrame.directionalLightColorIntensity.a;
     if (directionalFacingDot > 0.0) {
-        result += EvaluateBrdf(normal, view, directionalLight, directionalColor, albedo, roughness, metallic) * directionalVisibility;
+        // Micro-shadowing (Chan 2018) — matches the raster deferred/forward paths.
+        const float directionalMicroShadow =
+            ComputeMicroShadowing(Saturate(directionalFacingDot), ao, gFrame.aoMicroShadowStrength);
+        result += EvaluateBrdf(normal, view, directionalLight, directionalColor, albedo, roughness, metallic)
+            * directionalVisibility * directionalMicroShadow;
     } else {
         directionalVisibility = 0.0;
     }
@@ -204,7 +208,9 @@ void ClosestHitShader(inout RadiancePayload payload, in Attributes attributes)
 
         const float attenuation = pow(Saturate(1.0 - distance / max(light.posRange.w, 1e-3)), 2.0);
         const float3 lightColor = light.colorIntensity.rgb * light.colorIntensity.a * attenuation;
-        result += EvaluateBrdf(normal, view, lightDir, lightColor, albedo, roughness, metallic);
+        const float pointNdotL = Saturate(dot(normal, lightDir));
+        const float pointMicroShadow = ComputeMicroShadowing(pointNdotL, ao, gFrame.aoMicroShadowStrength);
+        result += EvaluateBrdf(normal, view, lightDir, lightColor, albedo, roughness, metallic) * pointMicroShadow;
     }
 
     [loop]
@@ -246,7 +252,9 @@ void ClosestHitShader(inout RadiancePayload payload, in Attributes attributes)
 
         const float attenuation = pow(Saturate(1.0 - distance / max(light.posRange.w, 1e-3)), 2.0) * spotFactor;
         const float3 lightColor = light.colorIntensity.rgb * light.colorIntensity.a * attenuation;
-        result += EvaluateBrdf(normal, view, lightDir, lightColor, albedo, roughness, metallic);
+        const float spotNdotL = Saturate(dot(normal, lightDir));
+        const float spotMicroShadow = ComputeMicroShadowing(spotNdotL, ao, gFrame.aoMicroShadowStrength);
+        result += EvaluateBrdf(normal, view, lightDir, lightColor, albedo, roughness, metallic) * spotMicroShadow;
     }
 
     const uint maxBounceCount = (gFrame.maxBounceCount > 0u) ? gFrame.maxBounceCount : 1u;

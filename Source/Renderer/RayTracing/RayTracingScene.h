@@ -124,6 +124,8 @@ namespace SasamiRenderer
         bool iblEnabled = false;
         float iblIntensity = 0.0f;
         float iblPrefilterMaxMip = 0.0f;
+        // Direct-light micro-shadowing strength [0,1] (Chan 2018); shared with the raster paths.
+        float aoDirectLightingStrength = 0.5f;
         bool directionalLightMarkerEnabled = false;
         float directionalLightMarkerAngularRadius = 0.02f;
         float directionalLightMarkerHaloAngularRadius = 0.08f;

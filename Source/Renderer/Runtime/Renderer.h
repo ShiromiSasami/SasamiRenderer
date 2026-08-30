@@ -22,10 +22,8 @@
 #include "Renderer/Scene/SkinnedMeshBuffer.h"
 #include "Renderer/Scene/DrawCommandBuilder.h"
 #include "Renderer/Passes/Geometry/ShadowRenderPass.h"
-#include "Renderer/Passes/Geometry/OpaqueRenderPass.h"
-#include "Renderer/Passes/Geometry/OpaqueGBufferRenderPass.h"
-#include "Renderer/Passes/Lighting/LightingRenderPass.h"
-#include "Renderer/Passes/Transparency/TransparentRenderPass.h"
+#include "Renderer/Passes/Geometry/GBufferRenderPass.h"
+#include "Renderer/Passes/Lighting/DeferredLightingRenderPass.h"
 #include "Renderer/Passes/Transparency/TransparentLightingRenderPass.h"
 #include "Renderer/Passes/Transparency/TransparentBackfaceDistanceRenderPass.h"
 #include "Renderer/Passes/Transparency/TransparentCompositeRenderPass.h"
@@ -35,11 +33,16 @@
 #include "Renderer/Passes/RayTracing/RayTracingRenderPass.h"
 #include "Renderer/Passes/Lighting/SSAORenderPass.h"
 #include "Renderer/Passes/Reflections/ScreenSpaceReflectionRenderPass.h"
+#include "Renderer/Passes/Reflections/ScreenSpaceReflectionCompositeRenderPass.h"
 #include "Renderer/Passes/Reflections/SoftwareReflectionCompositeRenderPass.h"
 #include "Renderer/Passes/Reflections/SoftwareReflectionRenderPass.h"
 #include "Renderer/Passes/Sky/ProceduralSkyRenderPass.h"
 #include "Renderer/Passes/Sky/VolumetricCloudRenderPass.h"
-#include "Renderer/Passes/Debug/DebugProbeGridRenderPass.h"
+#include "Renderer/Passes/Debug/DebugVisualizationSystem.h"
+#include "Renderer/Passes/Fluid/FluidSurfaceRenderPass.h"
+#include "Renderer/Fluid/FluidHeightfieldSim.h"
+#include "Renderer/Passes/Particles/ParticleRenderPass.h"
+#include "Renderer/Particles/ParticleSystem.h"
 #include "Renderer/Passes/Core/RenderPassSetupContext.h"
 #include "Renderer/RayTracing/DxrRayTracer.h"
 #include "Renderer/RayTracing/GpuSoftwareRayTracer.h"
@@ -48,6 +51,9 @@
 #include "Renderer/Scene/Skybox.h"
 #include "Renderer/Scene/LightSystem.h"
 #include "Renderer/Structures/RendererEnums.h"
+#include "Renderer/Runtime/RendererReadyState.h"
+#include "Renderer/Capture/BackBufferCapture.h"
+#include "Renderer/Profiling/GpuTimestampProfiler.h"
 #include <array>
 #include <functional>
 #include <cstdint>
@@ -59,13 +65,14 @@
 
 namespace SasamiRenderer
 {
+    class InitTaskScheduler;
+
     class Renderer
     {
     public:
 
 #pragma region using define
 
-        using RasterShaderMode = RendererEnums::RasterShaderMode;
         using GBufferDebugView = RendererEnums::GBufferDebugView;
         using RenderPathMode = RendererEnums::RenderPathMode;
         using RayTracingPerformancePreset = RendererEnums::RayTracingPerformancePreset;
@@ -95,6 +102,7 @@ namespace SasamiRenderer
             Idle,
             Baking,
             Completed,
+            Continuous,
             WaitingForProbeGrid,
             WaitingForBvh,
             Failed
@@ -146,8 +154,66 @@ namespace SasamiRenderer
         ~Renderer();
 
         bool Initialize(HWND hWnd, UINT width, UINT height);
+
+        // ---- Progressive boot (StartupCoordinator-driven) ----
+        // Initialize() above remains the synchronous composite (core + frame infra +
+        // finalize + all deferred tasks inline) for runtime backend switching and tools.
+        //
+        // Device, backbuffers, SRV heap, light system, scene submitter, the full raster
+        // shader/PSO cache and builtin pass registration. Main thread (~1s warm). No
+        // frame infrastructure yet -- rendering is not possible until the two calls below.
+        bool InitializeCore(HWND hWnd, UINT width, UINT height);
+        // RendererFrameCoordinator init (allocators/fences/command lists). Safe to call
+        // from a JobSystem worker when GetBackendCapabilities().supportsThreadedResourceCreation;
+        // this keeps the D3D12 debug-layer/GBV first-command-list stall off the message pump.
+        bool InitializeFrameInfrastructure();
+        // Main thread, after InitializeFrameInfrastructure: render target pool, default
+        // material textures (deferred upload batch), compute command resources. Sets
+        // coreReady/rasterReady on success.
+        bool FinalizeCoreInitialization();
+        // Registers every remaining init step (SWRT, GI probe grid, debug visualization,
+        // fluid sim+pass, particles+pass, DXR) as scheduler tasks; each task publishes its
+        // RendererReadyState flag and inserts its render pass on completion.
+        void RegisterDeferredInitTasks(InitTaskScheduler& scheduler);
+        // Minimal presentable frame during boot: acquire, clear, optional overlay
+        // (loading UI), present. Requires FinalizeCoreInitialization.
+        void RenderBootFrame(const OverlayRenderCallback& overlay = {});
+        const RendererReadyState& GetReadyState() const { return m_readyState; }
+        RendererReadyState& GetReadyStateMutable() { return m_readyState; }
+
         void Render(const OverlayRenderCallback& overlay = {});
         void WaitForGPU();
+
+        // --- Debug screenshot -------------------------------------------------------
+        // Queues a capture of the next presented frame. The copy is recorded inside the
+        // frame that is already being built, so the result only becomes available after
+        // that frame has been submitted -- poll ConsumeScreenshotResult for it.
+        void RequestScreenshot(const std::wstring& path);
+        bool HasPendingScreenshotRequest() const { return m_screenshotRequested; }
+        // Returns true and fills `outMessage` once a queued capture has finished (either
+        // way), clearing the result. Returns false while a capture is still in flight or
+        // when nothing was ever requested.
+        bool ConsumeScreenshotResult(std::string& outMessage);
+
+        // --- GPU timing -------------------------------------------------------------
+        // Per-pass GPU milliseconds for the most recent frame whose results have been read
+        // back (kFrameLatency frames behind the frame currently being recorded). Empty
+        // until enough frames have been presented, or if the profiler failed to initialize.
+        const std::vector<GpuTimestampProfiler::ScopeResult>& GetGpuPassTimings() const
+        {
+            return m_gpuTimestampProfiler.GetResults();
+        }
+        // False means the profiler never initialized, so timings will never arrive; an empty
+        // timing list while this is true just means the latency window has not filled yet.
+        bool IsGpuTimingReady() const { return m_gpuTimestampProfiler.IsReady(); }
+        // Diagnostic counters; see GpuTimestampProfiler for what each distinguishes.
+        uint32_t GetGpuTimingScopesThisFrame() const { return m_gpuTimestampProfiler.GetScopesThisFrame(); }
+        uint32_t GetGpuTimingLastResolvedScopeCount() const { return m_gpuTimestampProfiler.GetLastResolvedScopeCount(); }
+        uint64_t GetGpuTimingLastUpdateRequestedFrame() const { return m_gpuTimestampProfiler.GetLastUpdateRequestedFrame(); }
+        uint64_t GetGpuTimingLastUpdateSlotFrame() const { return m_gpuTimestampProfiler.GetLastUpdateSlotFrame(); }
+        bool     GetGpuTimingLastUpdateSlotValid() const { return m_gpuTimestampProfiler.GetLastUpdateSlotValid(); }
+        uint64_t GetGpuTimingFrameCounter() const { return m_gpuProfilerFrameCounter; }
+
         void UpdateCameraCB(const RenderCameraProxy* camera);
         void SubmitRenderProxies(std::vector<RenderProxy>&& proxies);
         void SubmitSkinnedRenderProxies(std::vector<SkinnedRenderProxy>&& proxies);
@@ -155,6 +221,9 @@ namespace SasamiRenderer
         void ClearRenderObjects();
         void SetDeltaTime(float dt) { m_deltaTime = dt; }
         void SetSkyboxHdrEquirectData(std::vector<float> pixels, UINT width, UINT height);
+        // Adopts worker-pregenerated IBL data (equirect pixels are set separately via
+        // SetSkyboxHdrEquirectData). Sets skyboxIblReady. Main thread.
+        void AdoptPregeneratedIbl(IblSystem::GeneratedIblData&& data);
         void SetSkyboxLdrEquirectData(std::vector<uint8_t> pixels, UINT width, UINT height);
         void SetSkyboxLdrCubemapFacesData(std::vector<std::vector<uint8_t>> facePixels, UINT width, UINT height);
         void SetSkyboxLoadFormat(SkyboxLoadFormat format);
@@ -205,8 +274,6 @@ namespace SasamiRenderer
         void SetMeshletDebugViewEnabled(bool enable) { m_settings.meshletDebugViewEnabled = enable; }
         bool GetUseMeshShader()   const { return m_settings.useMeshShader; }
         void SetUseMeshShader(bool enable) { m_settings.useMeshShader = enable; }
-        RasterShaderMode GetRasterShaderMode() const { return m_settings.rasterShaderMode; }
-        void SetRasterShaderMode(RasterShaderMode mode) { m_settings.rasterShaderMode = mode; }
         RenderPathMode GetRenderPathMode() const { return m_settings.renderPathMode; }
         void SetRenderPathMode(RenderPathMode mode);
         RayTracingPerformancePreset GetRayTracingPerformancePreset() const { return m_settings.rayTracingPerformancePreset; }
@@ -257,6 +324,24 @@ namespace SasamiRenderer
                 m_sceneColorHistoryValid = false;
             }
         }
+        float GetSSRMaxDistance() const { return m_settings.ssrMaxDistance; }
+        void SetSSRMaxDistance(float v) { m_settings.ssrMaxDistance = v; }
+        float GetSSRThickness() const { return m_settings.ssrThickness; }
+        void SetSSRThickness(float v) { m_settings.ssrThickness = v; }
+        float GetSSRStepCount() const { return m_settings.ssrStepCount; }
+        void SetSSRStepCount(float v) { m_settings.ssrStepCount = v; }
+        float GetSSRRoughnessCutoff() const { return m_settings.ssrRoughnessCutoff; }
+        void SetSSRRoughnessCutoff(float v) { m_settings.ssrRoughnessCutoff = v; }
+        float GetSSRRefineSteps() const { return m_settings.ssrRefineSteps; }
+        void SetSSRRefineSteps(float v) { m_settings.ssrRefineSteps = v; }
+        float GetSSREdgeFade() const { return m_settings.ssrEdgeFade; }
+        void SetSSREdgeFade(float v) { m_settings.ssrEdgeFade = v; }
+        float GetSSRNormalOffset() const { return m_settings.ssrNormalOffset; }
+        void SetSSRNormalOffset(float v) { m_settings.ssrNormalOffset = v; }
+        float GetSSRIntensity() const { return m_settings.ssrIntensity; }
+        void SetSSRIntensity(float v) { m_settings.ssrIntensity = v; }
+        float GetExposure() const { return m_settings.exposure; }
+        void SetExposure(float v) { m_settings.exposure = v; }
         bool GetRasterSoftwareRayTracedAmbientOcclusionEnabled() const
         {
             return m_settings.IsRasterSoftwareRayTracedAmbientOcclusionEnabled();
@@ -308,8 +393,13 @@ namespace SasamiRenderer
         void  CancelGIBake();
         bool  IsGIBaking()        const { return m_giBakeRequested; }
         bool  IsGIBaked()         const { return m_probeGrid.IsBaked(); }
+        bool  HasGIProbeData()    const { return m_probeGrid.HasEverBaked(); }
         float GetGIBakeProgress() const { return GetGIBakeStatus().progress; }
         GIBakeStatus GetGIBakeStatus() const;
+        // Continuous mode: once a full pass over the probe grid completes, immediately
+        // restart it instead of stopping, so probes keep tracking scene changes (DDGI-style).
+        void  SetGIContinuousMode(bool enabled) { m_giContinuousMode = enabled; }
+        bool  GetGIContinuousMode() const { return m_giContinuousMode; }
         bool  SaveGIProbeCache(const std::string& path, uint64_t stateHash);
         bool  LoadGIProbeCache(const std::string& path, uint64_t stateHash);
 
@@ -318,6 +408,15 @@ namespace SasamiRenderer
         void FitProbeGridToScene(float bMinX, float bMinY, float bMinZ,
                                   float bMaxX, float bMaxY, float bMaxZ,
                                   float margin = 1.0f);
+
+        // World AABB over every ray-tracing scene instance. Returns false (outputs
+        // untouched) while the scene has no instances yet.
+        bool GetSceneWorldBounds(float outMin[3], float outMax[3]) const;
+
+        // Fits the probe grid to the whole loaded scene, coarsening the probe spacing as
+        // needed to stay within probeBudget. Returns false and leaves the grid unchanged
+        // when the scene bounds are not available yet.
+        bool FitProbeGridToSceneAuto(float margin = 2.0f, std::uint32_t probeBudget = 16384u);
         // Volumetric cloud
         bool  GetVolumetricCloudEnabled()  const { return m_settings.volumetricCloudEnabled; }
         void  SetVolumetricCloudEnabled(bool e);
@@ -332,13 +431,50 @@ namespace SasamiRenderer
         float GetCloudTopAlt()  const { return m_settings.cloudTopAlt; }
         void  SetCloudTopAlt(float v) { m_settings.cloudTopAlt = v; if (m_volumetricCloudRenderPass) m_volumetricCloudRenderPass->SetCloudTopAlt(v); }
 
-        bool GetDebugProbeGridEnabled()      const { return m_debugProbeGridRenderPass ? m_debugProbeGridRenderPass->IsEnabled() : false; }
-        void SetDebugProbeGridEnabled(bool e)      { if (m_debugProbeGridRenderPass) { m_debugProbeGridRenderPass->SetEnabled(e); if (e) EnsureDebugProbeGridPassInserted(); } }
-        float GetDebugProbeRadius()          const { return m_debugProbeGridRenderPass ? m_debugProbeGridRenderPass->GetProbeRadius() : 0.2f; }
-        void SetDebugProbeRadius(float r)          { if (m_debugProbeGridRenderPass) m_debugProbeGridRenderPass->SetProbeRadius(r); }
+        DebugVisualizationSystem& GetDebugVisualization() { return m_debugVisualization; }
+        const DebugVisualizationSystem& GetDebugVisualization() const { return m_debugVisualization; }
         // Re-inserts the debug probe grid node into the current pass list.
         // Call after ClearRenderPasses()+AddRenderPass() sequences (e.g. RayMarchApp).
         void ReinsertDebugProbeGrid();
+
+        // Fluid surface (GPU heightfield water simulation).
+        bool  GetFluidSurfaceEnabled()   const { return m_fluidSurfaceRenderPass ? m_fluidSurfaceRenderPass->IsEnabled() : false; }
+        void  SetFluidSurfaceEnabled(bool e)   { if (m_fluidSurfaceRenderPass) { m_fluidSurfaceRenderPass->SetEnabled(e); if (e) EnsureFluidSurfacePassInserted(); } }
+        void  SetFluidGridOrigin(float x, float z)                 { m_fluidSim.SetGridOrigin(x, z); }
+        void  SetFluidCellSize(float cellSize)                     { m_fluidSim.SetCellSize(cellSize); }
+        void  SetFluidGridCount(uint32_t countX, uint32_t countZ)  { m_fluidSim.SetGridCount(countX, countZ); }
+        void  FitFluidToSceneBounds(float minX, float minZ, float maxX, float maxZ, float margin = 1.0f)
+        {
+            m_fluidSim.FitToSceneBounds(minX, minZ, maxX, maxZ, margin);
+        }
+        float GetFluidSurfaceHeight() const { return m_fluidSim.GetSurfaceHeight(); }
+        void  SetFluidSurfaceHeight(float y) { m_fluidSim.SetSurfaceHeight(y); }
+        float GetFluidWaveSpeed()     const { return m_fluidSim.GetWaveSpeed(); }
+        void  SetFluidWaveSpeed(float v)     { m_fluidSim.SetWaveSpeed(v); }
+        float GetFluidDamping()       const { return m_fluidSim.GetDamping(); }
+        void  SetFluidDamping(float d)       { m_fluidSim.SetDamping(d); }
+        bool  GetFluidSimEnabled()    const { return m_fluidSim.GetEnabled(); }
+        void  SetFluidSimEnabled(bool e)     { m_fluidSim.SetEnabled(e); }
+        void  InjectFluidSplash(float worldX, float worldZ, float radius = 0.5f, float strength = 1.0f)
+        {
+            m_fluidSim.InjectSplash({ worldX, worldZ, radius, strength });
+        }
+        // Re-inserts the fluid surface node into the current pass list.
+        // Call after ClearRenderPasses()+AddRenderPass() sequences (e.g. RayMarchApp).
+        void ReinsertFluidSurface();
+
+        bool  GetParticlesEnabled()      const { return m_particleRenderPass ? m_particleRenderPass->IsEnabled() : false; }
+        void  SetParticlesEnabled(bool e)      { if (m_particleRenderPass) { m_particleRenderPass->SetEnabled(e); if (e) EnsureParticlePassInserted(); } }
+        float GetParticleEmissionRate()  const { return m_particleSystem.GetEmissionRate(); }
+        void  SetParticleEmissionRate(float v) { m_particleSystem.SetEmissionRate(v); }
+        float GetParticleGravity()       const { return m_particleSystem.GetGravity(); }
+        void  SetParticleGravity(float g)      { m_particleSystem.SetGravity(g); }
+        float GetParticleDrag()          const { return m_particleSystem.GetDrag(); }
+        void  SetParticleDrag(float d)         { m_particleSystem.SetDrag(d); }
+        void  SetParticleEmitOrigin(float x, float y, float z) { m_particleSystem.SetEmitOrigin(x, y, z); }
+        // Re-inserts the particle node into the current pass list.
+        // Call after ClearRenderPasses()+AddRenderPass() sequences (e.g. RayMarchApp).
+        void ReinsertParticles();
         GBufferDebugView GetGBufferDebugView() const { return m_settings.gBufferDebugView; }
         void SetGBufferDebugView(GBufferDebugView view)
         {
@@ -385,6 +521,11 @@ namespace SasamiRenderer
         {
             m_settings.SetAoMinOcclusion(v);
         }
+        float GetAoDirectLightingStrength() const { return m_settings.aoDirectLightingStrength; }
+        void  SetAoDirectLightingStrength(float v)
+        {
+            m_settings.SetAoDirectLightingStrength(v);
+        }
         DirectionalLightSettings GetDirectionalLightSettings() const;
         void SetDirectionalLightSettings(const DirectionalLightSettings& settings);
         std::vector<PointLight>& GetPointLights() { return m_lightSystem.GetPointLights(); }
@@ -417,14 +558,18 @@ namespace SasamiRenderer
         };
 
         void RetireDeferredUploadBatches();
+        // Waits (if needed) for the GPU to finish the previous frame's compute work
+        // that used the given frame-buffer slot's compute allocator/command list,
+        // so it is safe to Reset(). Safe to call on frames that submitted no compute
+        // work (the fence value for an unused slot never advances past what the wait
+        // already satisfied). Returns false only on a wait failure.
+        bool WaitForComputeFrameFence(UINT frameIndex);
         void ApplySwrtModeSetting()
         {
             using SwrtMode = GpuSoftwareRayTracer::SwrtMode;
             m_gpuSoftwareRayTracer.SetMode(m_settings.swrtUseReSTIR ? SwrtMode::ReSTIR : SwrtMode::Legacy);
         }
-        RenderPassExecutionPolicy BuildRenderPassExecutionPolicy(bool executeOpaqueFamilyPasses,
-                                                                 bool executeLightingFamilyPasses,
-                                                                 bool useShadowTessPath);
+        RenderPassExecutionPolicy BuildRenderPassExecutionPolicy(bool useShadowTessPath);
         RenderPassFrameInputs BuildRenderPassFrameInputs(CommandList* cmdList,
                                                          IRhiCommandEncoder* commandEncoder,
                                                          RendererFrameCoordinator::FrameContext* frame,
@@ -437,6 +582,10 @@ namespace SasamiRenderer
         // Inserts the debug probe-grid pass into the graph after Skybox/Lighting if it is
         // initialized and not already present. Idempotent; safe to call before init (no-op).
         void EnsureDebugProbeGridPassInserted();
+        // Inserts the fluid surface pass into the graph after Skybox/Lighting if it is
+        // initialized and not already present. Idempotent; safe to call before init (no-op).
+        void EnsureFluidSurfacePassInserted();
+        void EnsureParticlePassInserted();
 
         void TransitionBackBufferToRenderTarget(CommandList* cmdList, UINT backIndex);
         void ClearAndBindMainTargets(CommandList* cmdList, UINT backIndex);
@@ -448,6 +597,11 @@ namespace SasamiRenderer
         bool CopySceneColorForTransmission(CommandList* cmdList);
         bool ToneMapSceneColor(CommandList* cmdList, UINT backIndex);
         void CaptureSceneColorHistory(CommandList* cmdList, UINT backIndex);
+        // Bracketed around the frame submission by SubmitAndPresent: the first records the
+        // back-buffer copy while the command list is still open, the second waits for the
+        // GPU and encodes the PNG once that command list has actually run.
+        void RecordPendingScreenshotCopy(CommandList* cmdList, UINT backIndex);
+        void ResolvePendingScreenshot();
         void SubmitAndPresent(CommandList* cmdList, UINT frameIndex);
         Texture* CreateTextureFromRgba8Data(const CpuTextureRgba8& src, CommandList* cmdList,
                                             std::vector<Resource>& uploads);
@@ -455,6 +609,7 @@ namespace SasamiRenderer
         void SetGIBakePhase(const char* phase);
         void AddGIBakeLog(const char* phase, const char* format, ...);
         std::unique_ptr<IRHIDevice> m_device;
+        RendererReadyState m_readyState;
         RenderPipelineStateCache m_pipelineStateCache;
         RendererFrameCoordinator m_frameCoordinator;
         MeshBuffer m_meshBuffer;
@@ -465,10 +620,8 @@ namespace SasamiRenderer
         RenderGraph m_renderGraph;
         RenderPassBuilderCatalog m_renderPassBuilderCatalog;
         std::shared_ptr<ShadowRenderPass> m_shadowRenderPass;
-        std::shared_ptr<OpaqueRenderPass> m_opaqueRenderPass;
-        std::shared_ptr<OpaqueGBufferRenderPass> m_opaqueGBufferRenderPass;
-        std::shared_ptr<LightingRenderPass> m_lightingRenderPass;
-        std::shared_ptr<TransparentRenderPass> m_transparentRenderPass;
+        std::shared_ptr<GBufferRenderPass> m_opaqueGBufferRenderPass;
+        std::shared_ptr<DeferredLightingRenderPass> m_lightingRenderPass;
         std::shared_ptr<TransparentLightingRenderPass> m_transparentLightingRenderPass;
         std::shared_ptr<TransparentBackfaceDistanceRenderPass> m_transparentBackfaceDistanceRenderPass;
         std::shared_ptr<TransparentCompositeRenderPass> m_transparentCompositeRenderPass;
@@ -479,16 +632,22 @@ namespace SasamiRenderer
         std::shared_ptr<SSAORenderPass> m_ssaoRenderPass;
         std::shared_ptr<SSAOBlurRenderPass> m_ssaoBlurRenderPass;
         std::shared_ptr<ScreenSpaceReflectionRenderPass> m_screenSpaceReflectionRenderPass;
+        std::shared_ptr<ScreenSpaceReflectionCompositeRenderPass> m_screenSpaceReflectionCompositeRenderPass;
         std::shared_ptr<SoftwareReflectionRenderPass> m_softwareReflectionRenderPass;
         std::shared_ptr<SoftwareReflectionCompositeRenderPass> m_softwareReflectionCompositeRenderPass;
         std::shared_ptr<ProceduralSkyRenderPass> m_proceduralSkyRenderPass;
         std::shared_ptr<VolumetricCloudRenderPass> m_volumetricCloudRenderPass;
-        std::shared_ptr<DebugProbeGridRenderPass> m_debugProbeGridRenderPass;
+        DebugVisualizationSystem m_debugVisualization;
+        std::shared_ptr<FluidSurfaceRenderPass> m_fluidSurfaceRenderPass;
+        FluidHeightfieldSim m_fluidSim;
+        std::shared_ptr<ParticleRenderPass> m_particleRenderPass;
+        ParticleSystem m_particleSystem;
 
         SrvDescriptorAllocator m_srvAllocator;
         GpuDescriptorHandle m_nullTextureSrv{};
         Texture* m_defaultAlbedoTexture     = nullptr;
         Texture* m_defaultOcclusionTexture  = nullptr;
+        Texture* m_defaultNormalTexture     = nullptr;
         std::vector<std::unique_ptr<Texture>> m_defaultTextures; // owns default albedo/AO fallbacks
         Viewport m_viewport{};
         Rect m_scissorRect{};
@@ -497,12 +656,29 @@ namespace SasamiRenderer
         CameraState m_cameraState;
 
         RenderTargetPool m_renderTargetPool;
+        
+        // Debug screenshot state. m_screenshotRequested means "record a copy this frame";
+        // m_screenshotCopyRecorded means "a copy is in the submitted command list and the
+        // PNG still has to be written". Both are main-thread only.
+        BackBufferCapture m_backBufferCapture;
+        std::wstring      m_screenshotPath;
+        std::string       m_screenshotResult;
+        bool              m_screenshotRequested    = false;
+        bool              m_screenshotCopyRecorded = false;
+        bool              m_screenshotResultReady  = false;
+
+        // Per-pass GPU timing. The counter is monotonic (the swap-chain back-buffer index
+        // is not: it wraps every GetBackBufferCount() frames, which would alias distinct
+        // frames onto the same profiler ring slot).
+        GpuTimestampProfiler m_gpuTimestampProfiler;
+        uint64_t             m_gpuProfilerFrameCounter = 0;
 
         std::vector<DeferredUploadBatch> m_deferredUploadBatches;
         RayTracingScene m_rayTracingScene;
         GpuSoftwareRayTracer m_gpuSoftwareRayTracer;
         IrradianceProbeGrid m_probeGrid;
         bool     m_giBakeRequested    = false;
+        bool     m_giContinuousMode   = false;
         bool     m_giBakeClearPending = false;
         uint32_t m_giBakeFrameIndex   = 0u;
         GIBakeStatus m_giBakeStatus{};
@@ -529,6 +705,32 @@ namespace SasamiRenderer
         bool                          m_computeCmdListReady = false;
         ComPtr<ID3D12Fence>           m_crossQueueFence;
         UINT64                        m_crossQueueFenceVal  = 0;
+
+        // Per frame-buffer slot: fence value the compute queue was signaled with
+        // after that slot's compute command list was last submitted (0 if that
+        // slot's allocator/command list have never been used). Reuses
+        // m_crossQueueFence's timeline. Waited on by WaitForComputeFrameFence()
+        // before Reset()-ing the slot on a later frame, so the reset is safe even
+        // though RendererFrameCoordinator's graphics-only frame fence never waits
+        // on compute queue work.
+        std::vector<UINT64> m_computeFrameFenceValues;
+        HANDLE               m_computeFrameFenceEvent = nullptr;
+
+        // Extra graphics command list slots opened when a Node ends at a genuine
+        // cross-queue join (RenderGraph::Execute's submitCurrentGraphicsNode /
+        // acquireNextGraphicsNode). One vector per frame-buffer slot; grows on
+        // demand as additional joins occur within a single frame. Reuse across
+        // frames is safe under the same guarantee as the primary per-frame command
+        // list: RendererFrameCoordinator::BeginFrame waits for that frame-buffer
+        // slot's frame fence (signaled only after all of that frame's graphics
+        // work, including every Node command list, has been submitted) before any
+        // of the slot's allocators are reset again.
+        struct GraphicsNodeCommandList
+        {
+            CommandAllocator allocator;
+            CommandList      cmdList;
+        };
+        std::vector<std::vector<GraphicsNodeCommandList>> m_graphicsNodeCommandLists; // [frame-buffer][node slot]
 
         // Composed subsystems  Emust be declared after all members they reference.
         SceneSynchronizer  m_sceneSynchronizer;

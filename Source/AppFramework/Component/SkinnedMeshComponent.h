@@ -27,14 +27,17 @@ namespace SasamiRenderer
         bool HasAnimation() const;
         int CurrentAnimation() const;
         void SetTranslation(float x, float y, float z);
+        void SetUniformScale(float scale);
         void Clear();
 
     private:
         struct SkinnedMeshSource
         {
             SkinnedMesh mesh;
+            uint64_t meshId = 0;
             std::shared_ptr<const CpuTextureRgba8> albedoTexture;
             std::shared_ptr<const CpuTextureRgba8> occlusionTexture;
+            std::shared_ptr<const CpuTextureRgba8> normalTexture;
             SurfaceMaterial material;
             bool transparent = false;
         };

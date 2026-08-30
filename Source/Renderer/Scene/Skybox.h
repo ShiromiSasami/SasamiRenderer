@@ -4,6 +4,7 @@
 #include "Renderer/Resources/RenderPipelineStateCache.h"
 #include "Renderer/Scene/IblSystem.h"
 #include "Renderer/Scene/RenderLightProxy.h"
+#include "Renderer/Scene/SkyCubemapGenerator.h"
 #include "Renderer/Structures/RendererEnums.h"
 
 #include <cstdint>
@@ -26,7 +27,12 @@ namespace SasamiRenderer
                                                                               const float extra1[4],
                                                                               const float extra2[4])>;
 
-        bool Initialize(IRHIDevice& device, const AllocateSrvRangeCallback& allocateSrvRange);
+        // srvHeap is the shader-visible CBV/SRV/UAV heap backing allocateSrvRange. The GPU
+        // cubemap generator must bind it before dispatching: EnsureTexturesUploaded runs
+        // right after the frame command list is reset, when no heap is bound yet.
+        bool Initialize(IRHIDevice& device,
+                        const AllocateSrvRangeCallback& allocateSrvRange,
+                        DescriptorHeap* srvHeap = nullptr);
         void Shutdown();
 
         void SetHdrEquirectData(std::vector<float> pixels, UINT width, UINT height);
@@ -34,6 +40,9 @@ namespace SasamiRenderer
         void SetLdrCubemapFaceData(std::vector<std::vector<uint8_t>> facePixels, UINT width, UINT height);
         void SetLoadFormat(SkyboxLoadFormat format) { m_skyboxLoadFormat = format; }
         SkyboxLoadFormat GetLoadFormat() const { return m_skyboxLoadFormat; }
+
+        // Worker-pregenerated IBL data (see IblSystem::AdoptPregeneratedIblData).
+        void AdoptPregeneratedIblData(IblSystem::GeneratedIblData&& data);
 
         void RefreshEnvironmentAssets();
         void EnsureSkyboxTextureUploaded(CommandList* cmdList);
@@ -60,6 +69,7 @@ namespace SasamiRenderer
         bool IsIblEnabled() const { return m_iblSystem.IsEnabled(); }
         float GetIblPrefilterMaxMip() const { return m_iblSystem.GetPrefilterMaxMip(); }
         GpuDescriptorHandle GetIblSrvTable() const { return m_iblSystem.GetSrvTable(); }
+        GpuDescriptorHandle GetIblSpecularSrvTable() const { return m_iblSystem.GetSpecularSrvTable(); }
         ID3D12Resource* GetIblPrefilterResource() const { return m_iblSystem.GetPrefilterResource(); }
         bool HasDiffuseShCoefficients() const { return m_iblSystem.HasDiffuseShCoefficients(); }
         const float (*GetDiffuseShCoefficients() const)[3] { return m_iblSystem.GetDiffuseShCoefficients(); }
@@ -110,6 +120,9 @@ namespace SasamiRenderer
 
         Resource m_skyboxTexture;
         Resource m_skyboxTextureUpload;
+        SkyCubemapGenerator m_cubemapGenerator;
+        AllocateSrvRangeCallback m_srvAlloc;
+        bool m_gpuCubemapGenerationFailed = false;
         bool m_skyboxTextureUploaded = false;
         bool m_skyboxUploadAttempted = false;
         bool m_skyboxTextureIsHdr = false;

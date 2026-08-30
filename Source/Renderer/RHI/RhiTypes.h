@@ -538,11 +538,35 @@ namespace SasamiRenderer
         float metallic = 0.0f;
     };
 
+    struct RhiBackendSkinnedMeshDrawDesc
+    {
+        uint64_t vertexBufferHandle = 0;
+        uint64_t indexBufferHandle = 0;
+        uint32_t vertexCount = 0;
+        uint32_t indexCount = 0;
+        uint32_t vertexStride = 0;
+        uint32_t indexSizeInBytes = 0;
+        bool index32Bit = true;
+        bool transparent = false;
+        uint64_t albedoSrv = 0;
+        uint64_t occlusionSrv = 0;
+        float model[16] = {};
+        float baseColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        float emissive[3] = {};
+        float roughness = 0.5f;
+        float metallic = 0.0f;
+        // Points at Skeleton::kMaxBones * 16 floats (row-major 4x4 palette); owned by the caller
+        // for the duration of the synchronous ExecuteBackendFrame call, same convention as `draws`.
+        const float* boneMatrices = nullptr;
+    };
+
     struct RhiBackendMeshFrameDesc
     {
         bool enabled = false;
         const RhiBackendMeshDrawDesc* draws = nullptr;
         uint32_t drawCount = 0;
+        const RhiBackendSkinnedMeshDrawDesc* skinnedDraws = nullptr;
+        uint32_t skinnedDrawCount = 0;
         float viewProjection[16] = {};
         float cameraPos[3] = {};
         float sunDir[3] = { 0.0f, -1.0f, 0.0f };
@@ -755,5 +779,15 @@ namespace SasamiRenderer
         bool supportsRayTracingPipeline = false;
         bool supportsDescriptorIndexing = false;
         bool supportsTimelineSemaphore = false;
+        // Whether device-level resource creation (buffers/textures/views/allocators/fences)
+        // may be called from worker threads. True for D3D12 (device is free-threaded per
+        // Microsoft docs), D3D11 (ID3D11Device, not the immediate context) and Vulkan
+        // (device-level creates with per-object external sync). False for OpenGL
+        // (single context bound to one thread) -> use main-thread time slicing instead.
+        bool supportsThreadedResourceCreation = false;
+        // Whether shader/PSO creation may run on worker threads. Same backend rationale
+        // as supportsThreadedResourceCreation; D3D12 PSO creation is officially
+        // free-threaded.
+        bool supportsThreadedPipelineCreation = false;
     };
 }
