@@ -226,9 +226,13 @@ namespace SasamiRenderer
             }
             UpdateSubresources(cmdList->Get(), outTexture.Get(), outUpload.Get(), 0, 0, 6, subresources.data());
 
+            // Combined state: this builds the IBL fallback cubes, which DXR reads from the
+            // miss shader (a non-pixel stage) via ResourceDescriptorHeap[]. Bindless access
+            // is invisible to the debug layer's static checks, so the state has to be right
+            // up front. Matches CreateTextureCubeFromFloatFacesWithMips below.
             auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(outTexture.Get(),
                 D3D12_RESOURCE_STATE_COPY_DEST,
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
             cmdList->ResourceBarrier(1, &barrier);
             return true;
         }

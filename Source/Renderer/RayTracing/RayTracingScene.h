@@ -124,6 +124,10 @@ namespace SasamiRenderer
         bool iblEnabled = false;
         float iblIntensity = 0.0f;
         float iblPrefilterMaxMip = 0.0f;
+        // Bindless heap index of the IBL prefiltered-cube SRV, for DXR's
+        // ResourceDescriptorHeap[] lookups. SWRT binds the same cube through a
+        // descriptor table instead, so it ignores this field.
+        uint32_t iblPrefilterDescriptorIndex = 0;
         // Direct-light micro-shadowing strength [0,1] (Chan 2018); shared with the raster paths.
         float aoDirectLightingStrength = 0.5f;
         bool directionalLightMarkerEnabled = false;

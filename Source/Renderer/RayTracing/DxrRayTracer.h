@@ -108,12 +108,15 @@ namespace SasamiRenderer
             uint32_t maxBounceCount = kDefaultRayTracingBounceCount;
             float dynamicResolutionScale = 1.0f;
             float aoMicroShadowStrength = 0.0f;
-            float padding = 0.0f;
+            // Occupies the former `padding` slot so cameraPosition stays at offset 80.
+            uint32_t iblPrefilterDescriptorIndex = 0;
             float cameraPosition[4] = {};
             float inverseViewProjection[16] = {};
             float directionalLightDirection[4] = {};
             float directionalLightColorIntensity[4] = {};
             float directionalLightMarkerParams[4] = {};
+            // x: iblPrefilterMaxMip, y: iblIntensity, z: iblEnabled (0/1), w: unused.
+            float skyEnvParams[4] = {};
             GpuPointLight pointLights[kMaxPointLights];
             GpuSpotLight spotLights[kMaxSpotLights];
         };
@@ -121,6 +124,12 @@ namespace SasamiRenderer
                       "FrameConstants.cameraPosition must match HLSL cbuffer packing.");
         static_assert(offsetof(FrameConstants, inverseViewProjection) == 96u,
                       "FrameConstants.inverseViewProjection must match HLSL cbuffer packing.");
+        static_assert(offsetof(FrameConstants, iblPrefilterDescriptorIndex) == 76u,
+                      "iblPrefilterDescriptorIndex must fill the last scalar slot before "
+                      "cameraPosition; moving it shifts every float4 that follows.");
+        static_assert(offsetof(FrameConstants, skyEnvParams) % 16u == 0u,
+                      "FrameConstants.skyEnvParams must be 16-byte aligned; HLSL forbids a "
+                      "float4 straddling a cbuffer row boundary.");
 
         struct MeshRecord
         {

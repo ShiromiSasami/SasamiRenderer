@@ -5,6 +5,7 @@
 #include "Renderer/RayTracing/RayTracingScene.h"
 #include "Renderer/Scene/LightSystem.h"
 #include <cstdint>
+#include <functional>
 #include <limits>
 
 namespace SasamiRenderer
@@ -45,6 +46,10 @@ namespace SasamiRenderer
             Skybox*              skybox                = nullptr;
             IrradianceProbeGrid* probeGrid             = nullptr;
             DescriptorHeap*      srvHeap               = nullptr;
+            // Resolves a GPU descriptor handle to its flat index in srvHeap, for the
+            // bindless indices DXR's root signature (CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED)
+            // expects. Same shape as SceneSubmitter::InitParams::srvIndexFn.
+            std::function<UINT(GpuDescriptorHandle)> srvIndexFn;
         };
 
         // Per-frame camera/viewport data shared across execute calls.
@@ -150,6 +155,7 @@ namespace SasamiRenderer
         Skybox*              m_skybox               = nullptr;
         IrradianceProbeGrid* m_probeGrid            = nullptr;
         DescriptorHeap*      m_srvHeap              = nullptr;
+        std::function<UINT(GpuDescriptorHandle)> m_srvIndexFn;
 
         CacheState m_cache{};
         uint32_t   m_giFrameIndex = 0u;

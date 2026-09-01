@@ -174,6 +174,15 @@ namespace SasamiRenderer
         outConstants.directionalLightMarkerParams[2] = frameDesc.directionalLightMarkerHaloAngularRadius;
         outConstants.directionalLightMarkerParams[3] = frameDesc.directionalLightMarkerBrightness;
 
+        // Environment lookup for the miss shader. Mirrors SWRT's SampleReflectionEnvironment:
+        // the prefiltered cube sampled at roughness*maxMip, scaled by the IBL intensity, with
+        // the procedural gradient as the fallback when IBL is unavailable.
+        outConstants.iblPrefilterDescriptorIndex = frameDesc.iblPrefilterDescriptorIndex;
+        outConstants.skyEnvParams[0] = frameDesc.iblPrefilterMaxMip;
+        outConstants.skyEnvParams[1] = frameDesc.iblIntensity;
+        outConstants.skyEnvParams[2] = frameDesc.iblEnabled ? 1.0f : 0.0f;
+        outConstants.skyEnvParams[3] = 0.0f;
+
         if (frameDesc.pointLights) {
             outConstants.pointLightCount = std::min<uint32_t>(kMaxPointLights, static_cast<uint32_t>(frameDesc.pointLights->size()));
             for (uint32_t i = 0; i < outConstants.pointLightCount; ++i) {

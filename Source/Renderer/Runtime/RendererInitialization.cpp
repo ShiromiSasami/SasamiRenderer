@@ -422,6 +422,9 @@ namespace SasamiRenderer
             swrtParams.skybox               = &m_skybox;
             swrtParams.probeGrid            = &m_probeGrid;
             swrtParams.srvHeap              = m_srvAllocator.GetHeap();
+            swrtParams.srvIndexFn           = [this](GpuDescriptorHandle handle) {
+                return m_srvAllocator.GetIndex(handle);
+            };
             m_swrtExecutor.Initialize(swrtParams);
         }
 

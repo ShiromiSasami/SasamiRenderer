@@ -101,6 +101,7 @@ namespace SasamiRenderer
         m_skybox               = params.skybox;
         m_probeGrid            = params.probeGrid;
         m_srvHeap              = params.srvHeap;
+        m_srvIndexFn           = params.srvIndexFn;
     }
 
     SWRTExecutor::PartialBehavior SWRTExecutor::ResolveBehavior(RayTracingPerformancePreset preset) const
@@ -251,6 +252,11 @@ namespace SasamiRenderer
         frameDesc.iblIntensity                 = settings.iblIntensity;
         frameDesc.aoDirectLightingStrength     = settings.aoDirectLightingStrength;
         frameDesc.iblPrefilterMaxMip           = m_skybox->GetIblPrefilterMaxMip();
+        // DXR samples the prefiltered cube bindlessly, so it needs the descriptor's flat
+        // heap index rather than the table handle SWRT binds. GetIblSpecularSrvTable()
+        // points at the prefiltered cube (first of the prefilter+BRDF pair).
+        frameDesc.iblPrefilterDescriptorIndex  = m_srvIndexFn
+            ? m_srvIndexFn(m_skybox->GetIblSpecularSrvTable()) : 0u;
         frameDesc.directionalLightMarkerEnabled         = m_skybox->IsDirectionalLightMarkerEnabled();
         frameDesc.directionalLightMarkerAngularRadius   = m_skybox->GetDirectionalLightMarkerAngularRadius();
         frameDesc.directionalLightMarkerHaloAngularRadius = m_skybox->GetDirectionalLightMarkerHaloAngularRadius();
