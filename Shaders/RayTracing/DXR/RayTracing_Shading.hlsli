@@ -52,6 +52,22 @@ float3 SkyColor(float3 rayDirection)
     return lerp(float3(0.10, 0.12, 0.18), float3(0.50, 0.62, 0.90), t);
 }
 
+// 環境ラジアンスのサンプリング。ミスシェーダーが空を解決する唯一の入口。
+// SWRT の SampleReflectionEnvironment (SWRT_Reflection_Shading.hlsli) と同じ意味論:
+//   IBL が有効なら prefilter 済みキューブを roughness*maxMip の mip でサンプルし
+//   IBL 強度を掛ける。無効なら手続きグラデーションにフォールバックする。
+// 参照先を差し替えたい場合 (例: 生の Skybox キューブ) はここだけを変更すればよい。
+float3 SampleEnvironment(float3 rayDirection, float roughness)
+{
+    if (gFrame.skyEnvParams.z > 0.5) {
+        TextureCube prefilteredEnv = ResourceDescriptorHeap[gFrame.iblPrefilterDescriptorIndex];
+        const float mip = saturate(roughness) * gFrame.skyEnvParams.x;
+        return prefilteredEnv.SampleLevel(LinearWrapSampler, rayDirection, mip).rgb
+             * gFrame.skyEnvParams.y;
+    }
+    return SkyColor(rayDirection);
+}
+
 float3 ApplyDirectionalLightMarker(float3 color, float3 sampleDir)
 {
     if (gFrame.directionalLightMarkerParams.x <= 0.5 || gFrame.directionalLightColorIntensity.a <= 0.0) {

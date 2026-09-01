@@ -32,12 +32,15 @@ SamplerState LinearWrapSampler : register(s0);
 
 // 輝度レイ（カメラレイ・反射レイ）を発行するヘルパー。
 // bounceIndex を渡すことでバウンス回数を ClosestHitShader が追跡できる。
-RadiancePayload TraceRadianceRay(RayDesc ray, uint bounceIndex)
+// roughnessHint はこのレイを生成した面の粗さで、ミスシェーダーが
+// 環境キューブの mip 選択に使う（粗い面ほどぼけた空が映る）。
+RadiancePayload TraceRadianceRay(RayDesc ray, uint bounceIndex, float roughnessHint)
 {
     RadiancePayload payload;
     payload.color = 0.0.xxx;
     payload.hit = 0u;
     payload.bounceIndex = bounceIndex;
+    payload.roughnessHint = roughnessHint;
 
     TraceRay(SceneBVH,
              RAY_FLAG_FORCE_OPAQUE,
@@ -51,11 +54,14 @@ RadiancePayload TraceRadianceRay(RayDesc ray, uint bounceIndex)
 }
 
 // ミスシェーダー: 輝度レイが何にも当たらなかった場合に呼ばれる。
-// 空の色（グラジエント）を返し、太陽ディスクのマーカーも描画する。
+// レイ方向の環境ラジアンス（IBL prefilter キューブ、無ければ手続きグラデーション）を
+// 返し、太陽ディスクのマーカーも描画する。
 [shader("miss")]
 void MissShader(inout RadiancePayload payload)
 {
-    payload.color = ApplyDirectionalLightMarker(SkyColor(WorldRayDirection()), WorldRayDirection());
+    const float3 rayDirection = WorldRayDirection();
+    const float3 environment = SampleEnvironment(rayDirection, payload.roughnessHint);
+    payload.color = ApplyDirectionalLightMarker(environment, rayDirection);
     payload.hit = 0u;
 }
 
@@ -274,7 +280,8 @@ void ClosestHitShader(inout RadiancePayload payload, in Attributes attributes)
             reflectionRay.TMin = 0.01;
             reflectionRay.TMax = 10000.0;
 
-            const RadiancePayload reflectionPayload = TraceRadianceRay(reflectionRay, payload.bounceIndex + 1u);
+            const RadiancePayload reflectionPayload =
+                TraceRadianceRay(reflectionRay, payload.bounceIndex + 1u, roughness);
             result += reflectionPayload.color * reflectionF * reflectionStrength;
         }
     }
@@ -299,8 +306,9 @@ void ClosestHitShader(inout RadiancePayload payload, in Attributes attributes)
         transmissionRay.TMin = 0.01;
         transmissionRay.TMax = 10000.0;
 
+        // 透過は屈折した視線そのものなので、粗さでぼかさずシャープな空を見せる。
         const RadiancePayload transmissionPayload =
-            TraceRadianceRay(transmissionRay, payload.bounceIndex + 1u);
+            TraceRadianceRay(transmissionRay, payload.bounceIndex + 1u, 0.0);
         float3 transmittedRadiance =
             transmissionPayload.color * lerp(1.0.xxx, albedo, effectiveTransmission * 0.35);
         if (materialThickness > 0.0) {
@@ -373,6 +381,8 @@ void RayGenShader()
     payload.color = 0.0.xxx;
     payload.hit = 0u;
     payload.bounceIndex = 1u;
+    // カメラレイは背景をそのまま見るので最もシャープな mip を使う。
+    payload.roughnessHint = 0.0;
 
     TraceRay(SceneBVH,
              RAY_FLAG_FORCE_OPAQUE,

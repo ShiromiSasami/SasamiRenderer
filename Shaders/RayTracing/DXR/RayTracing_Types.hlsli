@@ -69,12 +69,15 @@ struct FrameConstants
     uint maxBounceCount;
     float dynamicResolutionScale;
     float aoMicroShadowStrength;
-    float padding;
+    // Occupies the former `padding` slot so cameraPosition stays at offset 80.
+    uint iblPrefilterDescriptorIndex;
     float4 cameraPosition;
     row_major float4x4 inverseViewProjection;
     float4 directionalLightDirection;
     float4 directionalLightColorIntensity;
     float4 directionalLightMarkerParams;
+    // x: iblPrefilterMaxMip, y: iblIntensity, z: iblEnabled (0/1), w: unused.
+    float4 skyEnvParams;
     PointLightData pointLights[MAX_POINT_LIGHTS];
     SpotLightData spotLights[MAX_SPOT_LIGHTS];
 };
@@ -84,6 +87,10 @@ struct RadiancePayload
     float3 color;
     uint hit;
     uint bounceIndex;
+    // Surface roughness that spawned this ray. The miss shader turns it into the
+    // prefiltered-cube mip level, so a rough surface reflects a blurred sky while
+    // camera rays (0.0) get the sharpest mip.
+    float roughnessHint;
 };
 
 struct ShadowPayload
