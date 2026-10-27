@@ -6,7 +6,7 @@
 #include <string>
 #include <wrl.h>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // =========================================================================
     // FluidHeightfieldSim
@@ -171,4 +171,8 @@ namespace SasamiRenderer
         std::string m_lastPipelineError;
     };
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // Renders each irradiance probe as a sphere coloured by its accumulated SH irradiance.
     // Each sphere fragment evaluates GI_EvaluateProbeSH for its surface normal, producing
@@ -56,3 +56,7 @@ namespace SasamiRenderer
         bool     m_enabled      = false;  // Off by default
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

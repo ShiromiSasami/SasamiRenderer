@@ -40,6 +40,7 @@ cbuffer ReSTIRFrameConstants : register(b0)
     uint   g_spotLightCount;
     uint   g_gbufferWidth;
     uint   g_gbufferHeight;
+    uint   g_punctualLightFalloff; // RendererEnums::PunctualLightFalloff (offset 256)
 };
 
 Texture2D<float4> g_rasterNormal   : register(t6); // xyz=N*0.5+0.5, w=camera distance
@@ -105,7 +106,11 @@ void CS_ReSTIR_Initial(uint3 id : SV_DispatchThreadID)
     if (roughness >= 0.01f)
     {
         uint rngState = ReSTIRSeed(pixel, g_frameIndex, 11u);
-        float2 xi = float2(Rand01(rngState), RadicalInverseVdC(rngState));
+        // Two independent PCG draws: RadicalInverseVdC(rngState) reinterpreted the
+        // same hashed state as Rand01, correlating xi.x and xi.y.
+        float2 xi;
+        xi.x = Rand01(rngState);
+        xi.y = Rand01(rngState);
         float3 H = TangentToWorld(SampleGGX_H(xi, roughness), primaryN);
         reflDir = reflect(primaryRayDir, H);
         if (dot(reflDir, primaryN) <= 0.0f)

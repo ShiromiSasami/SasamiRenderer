@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {
@@ -277,7 +277,9 @@ namespace SasamiRenderer
         pipelineDesc.raster.cullMode = RhiCullMode::Back;
         pipelineDesc.depthStencil.depthTestEnabled = true;
         pipelineDesc.depthStencil.depthWriteEnabled = false;
-        pipelineDesc.depthStencil.depthCompare = RhiCompareOp::LessEqual;
+        // Reverse-Z: near is 1.0, so the comparison has to be GreaterEqual. See the fluid surface
+        // pass, where the standard-Z version was confirmed on hardware to hide the geometry.
+        pipelineDesc.depthStencil.depthCompare = RhiCompareOp::GreaterEqual;
         pipelineDesc.depthStencil.stencilEnabled = false;
         pipelineDesc.colorFormats = &colorFormat;
         pipelineDesc.colorFormatCount = 1;
@@ -334,4 +336,4 @@ namespace SasamiRenderer
         return true;
     }
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

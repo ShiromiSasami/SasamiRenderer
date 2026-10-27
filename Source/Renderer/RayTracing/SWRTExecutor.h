@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <limits>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     class RenderTargetPool;
     class GpuSoftwareRayTracer;
@@ -155,3 +155,7 @@ namespace SasamiRenderer
         uint32_t   m_giFrameIndex = 0u;
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

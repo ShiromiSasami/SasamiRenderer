@@ -9,8 +9,16 @@
 
 #include <cstdint>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
+    namespace
+    {
+        // The state the graph imports the SSR scene-colour copy in, and therefore the state this
+        // pass must both expect and leave it in.
+        constexpr D3D12_RESOURCE_STATES kSceneColorCopyReadState =
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    }
+
     namespace
     {
         bool UsesScreenSpaceReflectionDebugView(RendererEnums::GBufferDebugView view)
@@ -94,8 +102,11 @@ namespace SasamiRenderer
             CD3DX12_RESOURCE_BARRIER::Transition(inputs.ssr.sceneColorResource,
                                                  D3D12_RESOURCE_STATE_RENDER_TARGET,
                                                  D3D12_RESOURCE_STATE_COPY_SOURCE),
+            // 0xC0, not 0x80: this texture is imported into the graph in the state the RHI
+            // actually creates it in (NON_PIXEL|PIXEL), and the restore at the end of this pass
+            // puts it back there. Naming PIXEL alone here was one of the two id=527 leftovers.
             CD3DX12_RESOURCE_BARRIER::Transition(inputs.ssr.sceneColorCopyResource,
-                                                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                                 kSceneColorCopyReadState,
                                                  D3D12_RESOURCE_STATE_COPY_DEST),
         };
         cmdList->ResourceBarrier(_countof(preCopy), preCopy);
@@ -195,7 +206,7 @@ namespace SasamiRenderer
         D3D12_RESOURCE_BARRIER toComposite[] = {
             CD3DX12_RESOURCE_BARRIER::Transition(inputs.ssr.sceneColorCopyResource,
                                                  D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                                                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
+                                                 kSceneColorCopyReadState),
             CD3DX12_RESOURCE_BARRIER::Transition(inputs.ssr.reflectionResource,
                                                  D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),

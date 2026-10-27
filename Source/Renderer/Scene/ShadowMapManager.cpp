@@ -16,7 +16,7 @@
 #include "Foundation/Tools/ScopedPerfTimer.h"
 #include "d3dx12.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {
@@ -97,7 +97,7 @@ namespace SasamiRenderer
         CpuDescriptorHandle shadowCpu{};
         GpuDescriptorHandle shadowGpu{};
         if (!allocateSrvRange || !allocateSrvRange(1, shadowCpu, shadowGpu)) {
-            DebugLogDialog("ShadowMapManager::Initialize: SRV allocation failed for shadow map.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("ShadowMapManager::Initialize: SRV allocation failed for shadow map.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
         m_shadowSrvCpu = shadowCpu;
@@ -119,7 +119,7 @@ namespace SasamiRenderer
         CpuDescriptorHandle spotShadowCpu{};
         GpuDescriptorHandle spotShadowGpu{};
         if (!allocateSrvRange(1, spotShadowCpu, spotShadowGpu)) {
-            DebugLogDialog("ShadowMapManager::Initialize: SRV allocation failed for spot shadow map.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("ShadowMapManager::Initialize: SRV allocation failed for spot shadow map.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
         m_spotShadowSrvCpu = spotShadowCpu;
@@ -143,7 +143,7 @@ namespace SasamiRenderer
         CpuDescriptorHandle pointShadowCpu{};
         GpuDescriptorHandle pointShadowGpu{};
         if (!allocateSrvRange(1, pointShadowCpu, pointShadowGpu)) {
-            DebugLogDialog("ShadowMapManager::Initialize: SRV allocation failed for point shadow map.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("ShadowMapManager::Initialize: SRV allocation failed for point shadow map.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
         m_pointShadowSrvCpu = pointShadowCpu;
@@ -164,7 +164,7 @@ namespace SasamiRenderer
         CpuDescriptorHandle vsmSrvCpu{};
         GpuDescriptorHandle vsmSrvGpu{};
         if (!allocateSrvRange(1, vsmSrvCpu, vsmSrvGpu)) {
-            DebugLogDialog("ShadowMapManager::Initialize: SRV allocation failed for VSM shadow map.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("ShadowMapManager::Initialize: SRV allocation failed for VSM shadow map.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
         m_vsmSrvCpu = vsmSrvCpu;
@@ -223,7 +223,7 @@ namespace SasamiRenderer
         // 最適クリア値を指定することで GPU ドライバが最適化できる
         D3D12_CLEAR_VALUE clear = {};
         clear.Format = DXGI_FORMAT_D32_FLOAT;
-        clear.DepthStencil.Depth = 1.0f; // 遠方（未書き込み）は深度 1.0
+        clear.DepthStencil.Depth = 0.0f; // Reverse-Z: unwritten (far) depth clears to 0.0, near is 1.0
         clear.DepthStencil.Stencil = 0;
 
         m_shadowMapHandle = {};
@@ -263,14 +263,14 @@ namespace SasamiRenderer
                                                        &clear,
                                                        m_shadowMap);
             if (FAILED(hr)) {
-                DebugLogDialog("ShadowMapManager::EnsureShadowResources: Shadow map resource creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+                DebugLogDialog("ShadowMapManager::EnsureShadowResources: Shadow map resource creation failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
                 return false;
             }
         }
 
         Resource* shadowMap = GetShadowMapResource();
         if (!shadowMap || !shadowMap->IsValid()) {
-            DebugLogDialog("ShadowMapManager::EnsureShadowResources: Shadow map compatibility resource lookup failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("ShadowMapManager::EnsureShadowResources: Shadow map compatibility resource lookup failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             m_shadowMap.Reset();
             if (m_shadowMapHandle.IsValid()) {
                 m_device->DestroyRhiResource(m_shadowMapHandle);
@@ -290,7 +290,7 @@ namespace SasamiRenderer
             }
             m_shadowMapHandle = {};
             m_shadowMapCompat = nullptr;
-            DebugLogDialog("ShadowMapManager::EnsureShadowResources: Shadow DSV heap creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("ShadowMapManager::EnsureShadowResources: Shadow DSV heap creation failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
 
@@ -362,7 +362,7 @@ namespace SasamiRenderer
 
         D3D12_CLEAR_VALUE clear = {};
         clear.Format = DXGI_FORMAT_D16_UNORM;
-        clear.DepthStencil.Depth = 1.0f;
+        clear.DepthStencil.Depth = 0.0f; // Reverse-Z: far plane clears to 0.0, near plane is 1.0
 
         CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_DEFAULT);
         HRESULT hr = S_OK;
@@ -393,14 +393,14 @@ namespace SasamiRenderer
                                                    &clear,
                                                    m_spotShadowMap);
             if (FAILED(hr)) {
-                DebugLogDialog("ShadowMapManager::EnsureSpotShadowResources: texture creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+                DebugLogDialog("ShadowMapManager::EnsureSpotShadowResources: texture creation failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
                 return false;
             }
         }
 
         Resource* spotShadowMap = GetSpotShadowMapResource();
         if (!spotShadowMap || !spotShadowMap->IsValid()) {
-            DebugLogDialog("ShadowMapManager::EnsureSpotShadowResources: texture compatibility resource lookup failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("ShadowMapManager::EnsureSpotShadowResources: texture compatibility resource lookup failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             m_spotShadowMap.Reset();
             if (m_spotShadowMapHandle.IsValid()) {
                 m_device->DestroyRhiResource(m_spotShadowMapHandle);
@@ -419,7 +419,7 @@ namespace SasamiRenderer
             }
             m_spotShadowMapHandle = {};
             m_spotShadowMapCompat = nullptr;
-            DebugLogDialog("ShadowMapManager::EnsureSpotShadowResources: DSV heap creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("ShadowMapManager::EnsureSpotShadowResources: DSV heap creation failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
 
@@ -496,7 +496,7 @@ namespace SasamiRenderer
 
         D3D12_CLEAR_VALUE clear = {};
         clear.Format = DXGI_FORMAT_D16_UNORM;
-        clear.DepthStencil.Depth = 1.0f;
+        clear.DepthStencil.Depth = 0.0f; // Reverse-Z: far plane clears to 0.0, near plane is 1.0
 
         CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_DEFAULT);
         HRESULT hr = S_OK;
@@ -527,14 +527,14 @@ namespace SasamiRenderer
                                                    &clear,
                                                    m_pointShadowMap);
             if (FAILED(hr)) {
-                DebugLogDialog("ShadowMapManager::EnsurePointShadowResources: texture creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+                DebugLogDialog("ShadowMapManager::EnsurePointShadowResources: texture creation failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
                 return false;
             }
         }
 
         Resource* pointShadowMap = GetPointShadowMapResource();
         if (!pointShadowMap || !pointShadowMap->IsValid()) {
-            DebugLogDialog("ShadowMapManager::EnsurePointShadowResources: texture compatibility resource lookup failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("ShadowMapManager::EnsurePointShadowResources: texture compatibility resource lookup failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             m_pointShadowMap.Reset();
             if (m_pointShadowMapHandle.IsValid()) {
                 m_device->DestroyRhiResource(m_pointShadowMapHandle);
@@ -553,7 +553,7 @@ namespace SasamiRenderer
             }
             m_pointShadowMapHandle = {};
             m_pointShadowMapCompat = nullptr;
-            DebugLogDialog("ShadowMapManager::EnsurePointShadowResources: DSV heap creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("ShadowMapManager::EnsurePointShadowResources: DSV heap creation failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
 
@@ -665,7 +665,7 @@ namespace SasamiRenderer
                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &vsmClear, m_vsmMap);
             if (FAILED(hr)) {
                 DebugLogDialog("ShadowMapManager::EnsureVsmResources: vsmMap creation failed.\n",
-                               L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+                               L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
                 return false;
             }
         }
@@ -698,7 +698,7 @@ namespace SasamiRenderer
                 D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, m_vsmMapTemp);
             if (FAILED(hr)) {
                 DebugLogDialog("ShadowMapManager::EnsureVsmResources: vsmMapTemp creation failed.\n",
-                               L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+                               L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
                 m_vsmMap.Reset();
                 m_vsmMapTemp.Reset();
                 if (m_vsmMapHandle.IsValid()) {
@@ -721,7 +721,7 @@ namespace SasamiRenderer
         hr = m_device->CreateDescriptorHeap(rtvHeapDesc, m_vsmRtvHeap);
         if (FAILED(hr)) {
             DebugLogDialog("ShadowMapManager::EnsureVsmResources: RTV heap creation failed.\n",
-                           L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+                           L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             m_vsmMap.Reset(); m_vsmMapTemp.Reset();
             if (m_vsmMapHandle.IsValid()) {
                 m_device->DestroyRhiResource(m_vsmMapHandle);
@@ -745,7 +745,7 @@ namespace SasamiRenderer
         Resource* vsmMapTemp = GetVsmMapTempResource();
         if (!vsmMap || !vsmMap->IsValid() || !vsmMapTemp || !vsmMapTemp->IsValid()) {
             DebugLogDialog("ShadowMapManager::EnsureVsmResources: VSM compatibility resource lookup failed.\n",
-                           L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+                           L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             m_vsmMap.Reset(); m_vsmMapTemp.Reset(); m_vsmRtvHeap = {};
             if (m_vsmMapHandle.IsValid()) {
                 m_device->DestroyRhiResource(m_vsmMapHandle);
@@ -775,7 +775,7 @@ namespace SasamiRenderer
         hr = m_device->CreateDescriptorHeap(blurHeapDesc, m_vsmBlurDescHeap);
         if (FAILED(hr)) {
             DebugLogDialog("ShadowMapManager::EnsureVsmResources: blur descriptor heap creation failed.\n",
-                           L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+                           L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             m_vsmMap.Reset(); m_vsmMapTemp.Reset(); m_vsmRtvHeap = {};
             if (m_vsmMapHandle.IsValid()) {
                 m_device->DestroyRhiResource(m_vsmMapHandle);

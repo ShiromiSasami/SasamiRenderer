@@ -3,19 +3,25 @@
 #include "Foundation/Tools/DebugOutput.h"
 #include "d3dx12.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
-    bool FxaaRenderPass::EnsureResources(GraphicsDevice& device, UINT width, UINT height)
+    bool FxaaRenderPass::EnsureResources(GraphicsDevice& device, const SrvAllocFn& allocateSrv, UINT width, UINT height)
     {
         if (width == 0u || height == 0u) {
             return false;
         }
-        if (m_inputCopyTexture.IsValid() && m_width == width && m_height == height) {
+        // CopyResource needs identical formats, so the copy follows the back buffer's own format.
+        const DXGI_FORMAT inputFormat = m_backBufferResource
+            ? m_backBufferResource->GetDesc().Format
+            : DXGI_FORMAT_R8G8B8A8_UNORM;
+        if (m_inputCopyTexture.IsValid() && m_width == width && m_height == height && m_inputFormat == inputFormat) {
             return true;
         }
 
         m_inputCopyTexture.Reset();
-        m_srvHeap.Reset();
+        m_inputFormat = DXGI_FORMAT_UNKNOWN;
+        // The descriptor slot itself is kept across resizes -- only the view written into it
+        // is recreated below, since the shared heap's allocator cannot hand a slot back.
         m_width = 0;
         m_height = 0;
 
@@ -23,7 +29,7 @@ namespace SasamiRenderer
         heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
 
         const D3D12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Tex2D(
-            DXGI_FORMAT_R8G8B8A8_UNORM, width, height, 1, 1);
+            inputFormat, width, height, 1, 1);
 
         if (FAILED(device.CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
                                                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
@@ -31,25 +37,26 @@ namespace SasamiRenderer
             return false;
         }
 
-        D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
-        heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        heapDesc.NumDescriptors = 1u;
-        heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-        if (FAILED(device.CreateDescriptorHeap(heapDesc, m_srvHeap))) {
-            m_inputCopyTexture.Reset();
-            return false;
+        // One descriptor from the shared heap, taken once: the allocator bumps, so requesting
+        // it again on each resize would leak a slot per resize.
+        if (!m_srvAllocated) {
+            if (!allocateSrv || !allocateSrv(1u, m_inputCopySrvCpu, m_inputCopySrv)) {
+                m_inputCopyTexture.Reset();
+                return false;
+            }
+            m_srvAllocated = true;
         }
 
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        srvDesc.Format = inputFormat;
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
         srvDesc.Texture2D.MipLevels = 1;
-        device.CreateShaderResourceView(m_inputCopyTexture, &srvDesc, m_srvHeap.GetCPUDescriptorHandleForHeapStart());
-        m_inputCopySrv = m_srvHeap.GetGPUDescriptorHandleForHeapStart();
+        device.CreateShaderResourceView(m_inputCopyTexture, &srvDesc, m_inputCopySrvCpu);
 
         m_width = width;
         m_height = height;
+        m_inputFormat = inputFormat;
         return true;
     }
 
@@ -83,6 +90,18 @@ namespace SasamiRenderer
             return true;
         }
         if (!m_inputCopyTexture.IsValid() || !m_backBufferResource) {
+            return true;
+        }
+        // A PSO's RTV format must match the bound RTV, so the PSO is picked per back-buffer
+        // format; any format without a variant skips. Known limitation: in HDR10 mode the effect
+        // operates on PQ-encoded values.
+        const bool hdr10 = (m_inputFormat == DXGI_FORMAT_R10G10B10A2_UNORM);
+        if (!hdr10 && m_inputFormat != DXGI_FORMAT_R8G8B8A8_UNORM) {
+            static bool s_warned = false;
+            if (!s_warned) {
+                s_warned = true;
+                OutputDebugStringA("FxaaRenderPass: back buffer format has no matching PSO variant; pass skipped.\n");
+            }
             return true;
         }
 
@@ -121,12 +140,12 @@ namespace SasamiRenderer
         cmdList->ResourceBarrier(_countof(postCopy), postCopy);
 
         cmdList->SetGraphicsRootSignature(pipelineStateCache->GetRootSignature());
-        cmdList->SetPipelineState(pipelineStateCache->GetFxaaPipelineState());
+        cmdList->SetPipelineState(hdr10 ? pipelineStateCache->GetFxaaHdr10PipelineState()
+                                        : pipelineStateCache->GetFxaaPipelineState());
         cmdList->RSSetViewports(1, inputs.execution.viewport);
         cmdList->RSSetScissorRects(1, inputs.execution.scissorRect);
 
-        DescriptorHeap* heaps[] = { &m_srvHeap };
-        cmdList->SetDescriptorHeaps(1, heaps);
+        // No SetDescriptorHeaps: m_inputCopySrv is in the main heap the frame already has bound.
         cmdList->SetGraphicsRootDescriptorTable(0, m_inputCopySrv);
 
         static const float kIdentity[16] = {

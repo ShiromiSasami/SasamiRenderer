@@ -7,7 +7,7 @@
 
 #include "AppFramework/Component/IComponent.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     class SObject
     {
@@ -63,3 +63,4 @@ namespace SasamiRenderer
         std::unordered_map<std::type_index, std::unique_ptr<IComponent>> m_components;
     };
 }
+namespace SasamiEngine { using namespace App; }

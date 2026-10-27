@@ -2,7 +2,7 @@
 #include "Renderer/Scene/MeshBufferUploadUtility.h"
 #include "Renderer/Structures/SkinnedVertex.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     SkinnedMeshBuffer::~SkinnedMeshBuffer()
     {

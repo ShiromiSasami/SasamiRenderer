@@ -2,11 +2,47 @@
 
 #include "Foundation/Tools/DebugOutput.h"
 
-namespace SasamiRenderer
+#include <imgui_internal.h>
+
+#include <string>
+
+namespace SasamiEngine::App
 {
-    namespace
-    {
-        constexpr UINT IMGUI_SRV_DESCRIPTOR_COUNT = 64;
+    namespace {
+        // Dear ImGui's error recovery (1.91.5+) reports a mismatched Begin/End or Push/Pop through a
+        // red tooltip by default. That tooltip is itself a window whose End() runs the recovery again,
+        // so one leaked stack entry recursed until the stack overflowed (c00000fd). Route the
+        // message to our log instead and keep the silent recovery.
+        void LogImGuiError(ImGuiContext* ctx, void*, const char* msg)
+        {
+            // A leak repeats every frame; the first few lines are enough to find it.
+            static int s_loggedErrors = 0;
+            if (s_loggedErrors >= 32) {
+                return;
+            }
+            ++s_loggedErrors;
+            const ImGuiWindow* window = ctx ? ctx->CurrentWindow : nullptr;
+            DebugLog((std::string("[ImGui] error in window '") + (window ? window->Name : "NULL") + "': " +
+                      (msg ? msg : "") + "\n").c_str());
+        }
+
+        void InstallErrorLogging()
+        {
+            ImGuiIO& io = ImGui::GetIO();
+            io.ConfigErrorRecoveryEnableTooltip = false;
+            io.ConfigErrorRecoveryEnableDebugLog = false;
+            ImGuiContext& g = *ImGui::GetCurrentContext();
+            g.ErrorCallback = &LogImGuiError;
+            g.ErrorCallbackUserData = nullptr;
+        }
+
+        // Windows can be dragged into each other or onto the screen edges (docking branch).
+        // Multi-viewport (windows outside the main HWND) stays off: every UIRenderBackend would
+        // need the platform-window renderer hooks for it.
+        void EnableDocking()
+        {
+            ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        }
     }
 
     ImGuiCoordinator& ImGuiCoordinator::Instance()
@@ -15,52 +51,30 @@ namespace SasamiRenderer
         return s_instance;
     }
 
-    bool ImGuiCoordinator::Initialize(HWND hWnd,
-                                  ID3D12Device* device,
-                                  ID3D12CommandQueue* queue,
-                                  DXGI_FORMAT rtvFormat,
-                                  DXGI_FORMAT dsvFormat,
-                                  int numFramesInFlight)
+    bool ImGuiCoordinator::Initialize(HWND hWnd, const UI::UIRenderBackendInitDesc& desc)
     {
         if (m_initialized)
             return true;
-        if (!device || !queue) {
-            return InitializePlatformOnly(hWnd);
-        }
-
-        // Descriptor heap for ImGui textures
-        D3D12_DESCRIPTOR_HEAP_DESC desc = {};
-        desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        desc.NumDescriptors = IMGUI_SRV_DESCRIPTOR_COUNT;
-        desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-        if (FAILED(device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_srvHeap))))
-            return false;
-        m_srvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-        ResetSrvDescriptorAllocator(desc.NumDescriptors);
 
         IMGUI_CHECKVERSION();
         // Enable per-monitor DPI awareness for proper mouse scaling on DPI changes
         ImGui_ImplWin32_EnableDpiAwareness();
         ImGui::CreateContext();
         ImGui::StyleColorsDark();
+        InstallErrorLogging();
+        EnableDocking();
         if (!ImGui_ImplWin32_Init(hWnd))
             return false;
 
-        ImGui_ImplDX12_InitInfo info{};
-        info.Device = device;
-        info.CommandQueue = queue;
-        info.NumFramesInFlight = numFramesInFlight;
-        info.RTVFormat = rtvFormat;
-        info.DSVFormat = dsvFormat;
-        info.SrvDescriptorHeap = m_srvHeap.Get();
-        info.UserData = this;
-        info.SrvDescriptorAllocFn = &ImGuiCoordinator::AllocateSrvDescriptorForImGui;
-        info.SrvDescriptorFreeFn = &ImGuiCoordinator::FreeSrvDescriptorForImGui;
-        if (!ImGui_ImplDX12_Init(&info))
-            return false;
+        m_backend = UI::CreateUIRenderBackend();
+        if (m_backend && !m_backend->Initialize(desc)) {
+            // The renderer backend failed to stand up (or the build has none). Fall back to
+            // platform-only: input and window drawers still work, only rendering is skipped.
+            m_backend.reset();
+        }
+        m_frameOverlay.SetBackend(m_backend.get());
 
         m_initialized = true;
-        m_dx12BackendInitialized = true;
         return true;
     }
 
@@ -73,6 +87,7 @@ namespace SasamiRenderer
         ImGui_ImplWin32_EnableDpiAwareness();
         ImGui::CreateContext();
         ImGui::StyleColorsDark();
+        EnableDocking();
         if (!ImGui_ImplWin32_Init(hWnd))
             return false;
 
@@ -82,60 +97,103 @@ namespace SasamiRenderer
         ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
 
         m_initialized = true;
-        m_dx12BackendInitialized = false;
         return true;
     }
 
     void ImGuiCoordinator::Shutdown()
     {
         if (!m_initialized) return;
-        if (m_dx12BackendInitialized) {
-            ImGui_ImplDX12_Shutdown();
+        if (m_backend) {
+            m_backend->Shutdown();
+            m_backend.reset();
         }
+        m_frameOverlay.SetBackend(nullptr);
         ImGui_ImplWin32_Shutdown();
         ImGui::DestroyContext();
-        m_srvHeap.Reset();
-        m_srvDescriptorSize = 0;
-        m_freeSrvDescriptorIndices.clear();
-        m_windows.clear();
-        m_dx12BackendInitialized = false;
+        m_panels.Clear();
+        m_overlays.clear();
         m_initialized = false;
     }
 
     void ImGuiCoordinator::NewFrame()
     {
         if (!m_initialized) return;
-        if (m_dx12BackendInitialized) {
-            ImGui_ImplDX12_NewFrame();
+        if (m_backend) {
+            m_backend->NewFrame();
+        }
+        // A frame that ran NewFrame but never reached RenderFrame (e.g. the frame a scene is
+        // replaced) left ImGui's frame open. NewFrame on top of it leaked one font-stack entry per
+        // occurrence ("Forgot to call Render() or EndFrame()" in Debug); close it without drawing.
+        if (!m_frameEnded) {
+            ImGui::EndFrame();
+            m_frameEnded = true;
         }
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
-        for (auto& w : m_windows)
-        {
-            if (ImGui::Begin(w.first.c_str()))
-            {
-                if (w.second) w.second();
-            }
-            ImGui::End();
+        // A dock space over the whole client area. The central node is passthru, so the scene
+        // stays visible and clicks on it still reach the app (WantCaptureMouse stays false).
+        // Nothing is drawn until a window is docked.
+        if (m_dockSpaceEnabled) {
+            m_dockSpaceId = ImGui::DockSpaceOverViewport(0, nullptr, ImGuiDockNodeFlags_PassthruCentralNode);
         }
+
+        m_panels.Draw();
+
+        // After the windows, so an overlay can sit visually on top of them, and outside the
+        // Begin/End pair so a collapsed window cannot suppress it.
+        for (auto& overlay : m_overlays)
+        {
+            if (overlay) overlay();
+        }
+
+        m_frameEnded = false;
     }
 
-    void ImGuiCoordinator::Render(ID3D12GraphicsCommandList* cmdList, D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle)
+    void ImGuiCoordinator::EndFrame()
     {
-        if (!m_initialized) return;
+        if (!m_initialized || m_frameEnded) return;
+        // This is the only place ImGui::Render() is called. Draw data has to exist before the
+        // backend's own frame runs: on D3D12 the app hands the overlay a command list later in
+        // the same frame, but every other backend records the overlay from inside its own
+        // Present-bound frame (see IRhiFrameOverlay), which can happen before control ever
+        // returns to ApplicationCore's render call.
         ImGui::Render();
-        if (!m_dx12BackendInitialized || !cmdList) return;
-        // Bind RTV and heap
-        cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
-        ID3D12DescriptorHeap* heaps[] = { m_srvHeap.Get() };
-        cmdList->SetDescriptorHeaps(1, heaps);
-        ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), cmdList);
+        m_frameEnded = true;
+    }
+
+    void ImGuiCoordinator::RenderDrawData(const Render::RhiOverlayFrameContext& context)
+    {
+        if (!m_initialized || !m_backend || !m_drawVisible) return;
+        m_backend->RenderDrawData(context);
+    }
+
+    void ImGuiCoordinator::SetDrawVisible(bool visible)
+    {
+        m_drawVisible = visible;
+        m_frameOverlay.SetVisible(visible);
+    }
+
+    Render::IRhiFrameOverlay* ImGuiCoordinator::GetFrameOverlay()
+    {
+        return &m_frameOverlay;
     }
 
     void ImGuiCoordinator::RegisterWindow(const char* name, std::function<void()> drawFn)
     {
-        m_windows.emplace_back(name ? name : "Window", std::move(drawFn));
+        m_panels.AddWindow(name ? name : "Window", "App", std::move(drawFn));
+    }
+
+    void ImGuiCoordinator::RegisterTab(const char* windowName, const char* category, const char* tabLabel,
+                                       std::function<void()> drawFn)
+    {
+        m_panels.AddTab(windowName ? windowName : "Window", category ? category : "App",
+                        tabLabel ? tabLabel : "Tab", std::move(drawFn));
+    }
+
+    void ImGuiCoordinator::RegisterOverlay(std::function<void()> drawFn)
+    {
+        m_overlays.push_back(std::move(drawFn));
     }
 
     bool ImGuiCoordinator::HandleMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -152,85 +210,5 @@ namespace SasamiRenderer
     bool ImGuiCoordinator::WantsKeyboardCapture() const
     {
         return m_initialized ? ImGui::GetIO().WantCaptureKeyboard : false;
-    }
-
-    void ImGuiCoordinator::AllocateSrvDescriptorForImGui(ImGui_ImplDX12_InitInfo* info,
-                                                         D3D12_CPU_DESCRIPTOR_HANDLE* outCpuHandle,
-                                                         D3D12_GPU_DESCRIPTOR_HANDLE* outGpuHandle)
-    {
-        auto* coordinator = info ? static_cast<ImGuiCoordinator*>(info->UserData) : nullptr;
-        if (!coordinator) {
-            *outCpuHandle = {};
-            *outGpuHandle = {};
-            return;
-        }
-        coordinator->AllocateSrvDescriptor(outCpuHandle, outGpuHandle);
-    }
-
-    void ImGuiCoordinator::FreeSrvDescriptorForImGui(ImGui_ImplDX12_InitInfo* info,
-                                                     D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle,
-                                                     D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle)
-    {
-        auto* coordinator = info ? static_cast<ImGuiCoordinator*>(info->UserData) : nullptr;
-        if (!coordinator) {
-            return;
-        }
-        coordinator->FreeSrvDescriptor(cpuHandle, gpuHandle);
-    }
-
-    void ImGuiCoordinator::ResetSrvDescriptorAllocator(UINT descriptorCount)
-    {
-        m_freeSrvDescriptorIndices.clear();
-        m_freeSrvDescriptorIndices.reserve(descriptorCount);
-        for (UINT i = descriptorCount; i > 0; --i) {
-            m_freeSrvDescriptorIndices.push_back(i - 1);
-        }
-    }
-
-    void ImGuiCoordinator::AllocateSrvDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE* outCpuHandle,
-                                                 D3D12_GPU_DESCRIPTOR_HANDLE* outGpuHandle)
-    {
-        if (!outCpuHandle || !outGpuHandle) {
-            return;
-        }
-        if (!m_srvHeap || m_freeSrvDescriptorIndices.empty()) {
-            *outCpuHandle = {};
-            *outGpuHandle = {};
-            DebugLog("ImGuiCoordinator: SRV descriptor heap exhausted.\n");
-            return;
-        }
-
-        const UINT index = m_freeSrvDescriptorIndices.back();
-        m_freeSrvDescriptorIndices.pop_back();
-
-        const D3D12_CPU_DESCRIPTOR_HANDLE cpuStart = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
-        const D3D12_GPU_DESCRIPTOR_HANDLE gpuStart = m_srvHeap->GetGPUDescriptorHandleForHeapStart();
-        outCpuHandle->ptr = cpuStart.ptr + static_cast<SIZE_T>(index) * m_srvDescriptorSize;
-        outGpuHandle->ptr = gpuStart.ptr + static_cast<UINT64>(index) * m_srvDescriptorSize;
-    }
-
-    void ImGuiCoordinator::FreeSrvDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle,
-                                             D3D12_GPU_DESCRIPTOR_HANDLE)
-    {
-        if (!m_srvHeap || m_srvDescriptorSize == 0 || cpuHandle.ptr == 0) {
-            return;
-        }
-
-        const D3D12_CPU_DESCRIPTOR_HANDLE cpuStart = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
-        if (cpuHandle.ptr < cpuStart.ptr) {
-            return;
-        }
-
-        const SIZE_T offset = cpuHandle.ptr - cpuStart.ptr;
-        if ((offset % m_srvDescriptorSize) != 0) {
-            return;
-        }
-
-        const UINT index = static_cast<UINT>(offset / m_srvDescriptorSize);
-        if (index >= IMGUI_SRV_DESCRIPTOR_COUNT) {
-            return;
-        }
-
-        m_freeSrvDescriptorIndices.push_back(index);
     }
 }

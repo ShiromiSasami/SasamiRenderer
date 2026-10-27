@@ -1,5 +1,5 @@
 #include "Object/SObject.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
 }

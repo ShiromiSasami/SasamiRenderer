@@ -2,7 +2,7 @@
 #include "Renderer/Scene/LightSystem.h"
 #include "d3dx12.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     bool RenderTargetPool::CreateOrResizeDepthBuffer(IRHIDevice& device, UINT width, UINT height)
     {
@@ -19,7 +19,7 @@ namespace SasamiRenderer
 
         D3D12_CLEAR_VALUE clear = {};
         clear.Format = DXGI_FORMAT_D32_FLOAT;
-        clear.DepthStencil.Depth = 1.0f;
+        clear.DepthStencil.Depth = 0.0f; // Reverse-Z: far plane clears to 0.0, near plane is 1.0
         clear.DepthStencil.Stencil = 0;
 
         CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_DEFAULT);
@@ -314,7 +314,9 @@ namespace SasamiRenderer
 
             D3D12_SHADER_RESOURCE_VIEW_DESC gbufferAlbedoNullSrvDesc{};
             gbufferAlbedoNullSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-            gbufferAlbedoNullSrvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+            // GBuffer PS writes linear albedo; the _SRGB view encodes on write and decodes on
+            // read so the 8-bit store keeps its precision in the darks. Must match the real SRV format below.
+            gbufferAlbedoNullSrvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
             gbufferAlbedoNullSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
             gbufferAlbedoNullSrvDesc.Texture2D.MipLevels = 1;
             device.CreateShaderResourceView(nullResource, &gbufferAlbedoNullSrvDesc, m_gbufferAlbedoSrvCpu);
@@ -799,8 +801,15 @@ namespace SasamiRenderer
             return true;
         };
 
-        if (!createGBufferTexture(DXGI_FORMAT_R8G8B8A8_UNORM,
-                                  RhiFormat::R8G8B8A8UNorm,
+        // GBuffer PS writes linear albedo; the _SRGB view encodes on write and decodes on read
+        // so the 8-bit store keeps its precision in the darks. Both arguments have to name the
+        // sRGB format: CreateCompatibleTexture builds the resource from the RhiFormat whenever
+        // the backend supports RHI resource creation (DX12 does), and a fully typed D3D12
+        // resource cannot be viewed through a different format. Leaving the RhiFormat as UNorm
+        // would create a UNORM resource under an _SRGB RTV/SRV, which is only legal for a
+        // swapchain buffer or a TYPELESS resource -- not for this one.
+        if (!createGBufferTexture(DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+                                  RhiFormat::R8G8B8A8UNormSrgb,
                                   m_gbufferAlbedo,
                                   m_gbufferAlbedoHandle,
                                   m_gbufferAlbedoRtv,

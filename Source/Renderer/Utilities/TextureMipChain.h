@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // CPU-side RGBA8 mip chain. Levels are stored back-to-back in `data`, tightly
     // packed (row pitch == width * 4), level 0 first.
@@ -44,3 +44,7 @@ namespace SasamiRenderer
                                    bool srgbColor);
     }
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

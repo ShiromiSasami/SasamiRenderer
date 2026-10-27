@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-namespace SasamiRenderer::Debug
+namespace SasamiEngine::App::Debug
 {
     // Handles one request line and returns the line to send back. Invoked on the
     // transport's own thread; implementations of this callback are responsible for
@@ -32,3 +32,4 @@ namespace SasamiRenderer::Debug
         virtual const std::string& EndpointName() const = 0;
     };
 }
+namespace SasamiEngine { using namespace App; }

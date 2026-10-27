@@ -1,6 +1,8 @@
 #ifndef SASAMI_GI_PROBE_TRACING_HLSLI
 #define SASAMI_GI_PROBE_TRACING_HLSLI
 
+#include "Shared/Common/PunctualLightFalloff.hlsli"
+
 // SH projection, probe ray distribution, and hit shading helpers.
 
 void ProjectOntoSH(float3 dir, float3 radiance, inout float3 sh[kSHCount])
@@ -68,10 +70,11 @@ float3 FresnelSchlickGI(float cosTheta, float3 F0)
 
 float GGX_D_GI(float NdotH, float roughness)
 {
-    float a = roughness * roughness;
+    // Floor alpha (Filament MIN_PERCEPTUAL_ROUGHNESS 0.045) rather than the denominator.
+    float a = max(roughness * roughness, 0.002025f);
     float a2 = a * a;
     float d = (NdotH * NdotH) * (a2 - 1.0f) + 1.0f;
-    return a2 / max(3.14159265f * d * d, 1e-7f);
+    return a2 / (3.14159265f * d * d);
 }
 
 float GGX_V_GI(float NdotL, float NdotV, float roughness)
@@ -129,9 +132,7 @@ float3 ShadePBRAtHit(float3 pos, float3 N, float3 V, GpuMaterial mat)
         bool inShadow = TraceAnyHit(pos + N * g_shadowBias, Lp, 0.001f, dist - 0.001f);
         if (inShadow) continue;
 
-        float t = dist / max(pl.range, 1e-4f);
-        float atten = saturate(1.0f - t * t);
-        atten = atten * atten;
+        float atten = PunctualLightFalloff(dist, pl.range, g_punctualLightFalloff);
 
         float3 H    = normalize(Lp + V);
         float NdotV = max(dot(N, V), 0.001f);
@@ -166,9 +167,7 @@ float3 ShadePBRAtHit(float3 pos, float3 N, float3 V, GpuMaterial mat)
         if (inShadow) continue;
 
         float spotAtten = smoothstep(sl.cosOuter, sl.cosInner, cosA);
-        float t = dist / max(sl.range, 1e-4f);
-        float atten = saturate(1.0f - t * t);
-        atten = atten * atten * spotAtten;
+        float atten = PunctualLightFalloff(dist, sl.range, g_punctualLightFalloff) * spotAtten;
 
         float3 H    = normalize(Ls + V);
         float NdotV = max(dot(N, V), 0.001f);

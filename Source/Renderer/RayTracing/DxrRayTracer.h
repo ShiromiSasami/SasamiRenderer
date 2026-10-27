@@ -10,7 +10,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     class DxrRayTracer
     {
@@ -108,7 +108,7 @@ namespace SasamiRenderer
             uint32_t maxBounceCount = kDefaultRayTracingBounceCount;
             float dynamicResolutionScale = 1.0f;
             float aoMicroShadowStrength = 0.0f;
-            float padding = 0.0f;
+            uint32_t punctualLightFalloff = 2u; // RendererEnums::PunctualLightFalloff
             float cameraPosition[4] = {};
             float inverseViewProjection[16] = {};
             float directionalLightDirection[4] = {};
@@ -163,3 +163,7 @@ namespace SasamiRenderer
         RhiAccelerationStructureHandle m_tlasHandle{};
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

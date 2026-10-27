@@ -50,6 +50,7 @@ cbuffer ReSTIRFrameConstants : register(b0)
     uint   g_spotLightCount;
     uint   g_cbPad0;
     uint   g_cbPad1;
+    uint   g_punctualLightFalloff; // RendererEnums::PunctualLightFalloff (offset 256)
 };
 
 Texture2D<float4> g_gbuffer         : register(t6);  // secondary normal.xyz + hit distance
@@ -153,8 +154,7 @@ void CS_ReSTIR_Shade(uint3 id : SV_DispatchThreadID)
                 if (!inShadow && NdotL > 0.0f)
                 {
                     // Distance attenuation
-                    float t     = dist / max(lightRange, 1e-4f);
-                    float atten = saturate(1.0f - t * t) * (1.0f - t * t);
+                    float atten = PunctualLightFalloff(dist, lightRange, g_punctualLightFalloff);
                     // Micro-shadowing (Chan 2018) using the reflected surface's own baked AO.
                     // This is the AO of the secondary hit, not the primary-surface SSAO that
                     // SWRT_ReflectionComposite_PS.hlsl intentionally omits — no double counting.
@@ -184,7 +184,7 @@ void CS_ReSTIR_Shade(uint3 id : SV_DispatchThreadID)
     // Ambient
     color += albedo * g_ambientColor * g_ambientIntensity * hitAo;
 
-    // Roughness attenuation only — Fresnel is applied per-channel in PBR_PS.hlsl.
+    // Roughness attenuation only — Fresnel is applied per-channel in PBR_BRDF.hlsli.
     // (Same convention as SWRT_Reflection_CS.hlsl: alpha = roughnessAtten, not fresnelWeight.)
     g_shadedOut[id.xy] = float4(color, 1.0f);
 }

@@ -19,7 +19,7 @@
 #include <vector>
 #endif
 
-namespace SasamiRenderer::JobSystem
+namespace SasamiEngine::Foundation::JobSystem
 {
     namespace
     {

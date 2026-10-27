@@ -5,7 +5,7 @@
 #include "Foundation/Tools/DebugOutput.h"
 #include "Renderer/RenderGraph/RenderGraph.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     void DeferredLightingRenderPass::BuildRequirements(RenderPassRequirementBuilder& builder) const
     {

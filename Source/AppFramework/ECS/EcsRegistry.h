@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     class EcsRegistry
     {
@@ -332,3 +332,4 @@ namespace SasamiRenderer
         std::unordered_map<std::type_index, std::unique_ptr<IComponentPool>> m_componentPools;
     };
 }
+namespace SasamiEngine { using namespace App; }

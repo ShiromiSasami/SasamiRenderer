@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <DirectXPackedVector.h>
 #include <utility>
 
 #include "Foundation/Tools/DebugOutput.h"
@@ -37,9 +38,18 @@ namespace
 
 }
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     using Math::Mul4x4;
+
+    void Skybox::InitializeNativeOnly(IRHIDevice& device)
+    {
+        // The native backends return from Renderer::Initialize long before the full Skybox setup
+        // (which builds D3D12 descriptor-heap views they cannot use). They still need the device
+        // pointer, though: EnsureNativeEnvironmentCubemap creates its RHI cube texture through it.
+        // Without this the native sky silently fell back to the procedural colour forever.
+        m_device = &device;
+    }
 
     bool Skybox::Initialize(IRHIDevice& device,
                             const AllocateSrvRangeCallback& allocateSrvRange,
@@ -50,7 +60,7 @@ namespace SasamiRenderer
         CpuDescriptorHandle skyboxCpu{};
         GpuDescriptorHandle skyboxGpu{};
         if (!allocateSrvRange || !allocateSrvRange(1, skyboxCpu, skyboxGpu)) {
-            DebugLogDialog("Skybox::Initialize: SRV allocation failed for skybox.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("Skybox::Initialize: SRV allocation failed for skybox.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
         m_skyboxSrvCpu = skyboxCpu;
@@ -58,12 +68,12 @@ namespace SasamiRenderer
         m_srvAlloc = allocateSrvRange;
 
         if (!m_iblSystem.Initialize(device, allocateSrvRange)) {
-            DebugLogDialog("Skybox::Initialize: IBL system initialization failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("Skybox::Initialize: IBL system initialization failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
 
         if (!InitializeGeometry()) {
-            DebugLogDialog("Skybox::Initialize: geometry initialization failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("Skybox::Initialize: geometry initialization failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
 
@@ -190,6 +200,23 @@ namespace SasamiRenderer
         ResetSkyboxResources();
         ResetIblResources();
 
+        // Same reasoning as m_skyboxTexture above: this cubemap is derived from the equirect
+        // pixels cleared below, so it must be torn down and rebuilt alongside them.
+        if (m_device && m_nativeEnvCubemap.IsValid()) {
+            m_device->DestroyRhiResource(m_nativeEnvCubemap);
+        }
+        m_nativeEnvCubemap = {};
+        m_nativeEnvCubemapTried = false;
+        m_nativeEnvCubemapSrv = 0;
+
+        // Same lifetime as m_nativeEnvCubemap: both are rebuilt together by the next
+        // EnsureNativeEnvironmentCubemap call, guarded by the single m_nativeEnvCubemapTried latch.
+        if (m_device && m_nativeAmbientCubemap.IsValid()) {
+            m_device->DestroyRhiResource(m_nativeAmbientCubemap);
+        }
+        m_nativeAmbientCubemap = {};
+        m_nativeAmbientCubemapSrv = 0;
+
         m_hdrEquirectLoaded = false;
         m_hdrEquirectTried = false;
         m_hdrEquirectWidth = 0;
@@ -299,7 +326,11 @@ namespace SasamiRenderer
         }
 
         if (m_sourceType == SourceType::None || m_sourceWidth == 0 || m_sourceHeight == 0) {
-            DebugLog("Skybox::EnsureHdrEnvironmentLoaded failed: equirect input data is not set.\n");
+            // Not a failure: a sample that never sets an HDR environment lands here every run, and
+            // EnsureIblTexturesUploaded takes the false as a flag rather than an error. Saying
+            // "failed" made this the only hit when grepping the logs of FluidApp, RayMarchApp,
+            // ToonApp and NeuralShaderApp for real problems.
+            DebugLog("Skybox::EnsureHdrEnvironmentLoaded: no equirect input set, skip equirect load.\n");
             return false;
         }
 
@@ -512,7 +543,8 @@ namespace SasamiRenderer
             return false;
         }
 
-        PublishSkyboxSrv(DXGI_FORMAT_R8G8B8A8_UNORM);
+        // 8-bit sky faces are sRGB-encoded (IEC 61966-2-1); the _SRGB view decodes to linear on sample.
+        PublishSkyboxSrv(DXGI_FORMAT_R8G8B8A8_UNORM_SRGB);
         m_skyboxTextureUploaded = true;
         m_skyboxTextureIsHdr = false;
         return true;
@@ -549,7 +581,8 @@ namespace SasamiRenderer
             return false;
         }
 
-        PublishSkyboxSrv(DXGI_FORMAT_R8G8B8A8_UNORM);
+        // Fallback face colors are authored as sRGB bytes as well.
+        PublishSkyboxSrv(DXGI_FORMAT_R8G8B8A8_UNORM_SRGB);
         m_skyboxTextureUploaded = true;
         m_skyboxTextureIsHdr = false;
         return true;
@@ -580,6 +613,132 @@ namespace SasamiRenderer
         }
 
         (void)UploadFallbackSkyboxTexture(cmdList);
+    }
+
+    RhiTextureHandle Skybox::BuildNativeCubemap(uint32_t faceSize, uint64_t& outCubemapSrv)
+    {
+        outCubemapSrv = 0;
+
+        std::vector<std::vector<float>> faces;
+        RendererMathUtility::GenerateSkyCubemapFromEquirect(m_hdrEquirectPixels, m_hdrEquirectWidth,
+                                                             m_hdrEquirectHeight, faceSize, faces);
+        if (faces.size() != 6u) {
+            return {};
+        }
+
+        // The upload copies exactly rowPitch * faceSize bytes out of every pointer, so a face that
+        // came back shorter than the generator's contract would be read past its end. Check rather
+        // than trust: an over-read here would be silent corruption, not a crash.
+        const size_t expectedFloats = static_cast<size_t>(faceSize) * faceSize * 4u;
+
+        // Keep all six converted faces alive together until after the upload call below; the
+        // RHI call only takes raw pointers, so any face vector destroyed early would dangle.
+        std::vector<std::vector<uint16_t>> halfFaces(6);
+        const void* facePtrs[6] = {};
+        for (uint32_t face = 0; face < 6; ++face) {
+            const std::vector<float>& src = faces[face];
+            if (src.size() != expectedFloats) {
+                DebugLog("Skybox::BuildNativeCubemap: unexpected face size from "
+                         "GenerateSkyCubemapFromEquirect, skipping native cubemap.\n");
+                return {};
+            }
+            std::vector<uint16_t>& dst = halfFaces[face];
+            dst.resize(src.size());
+            for (size_t i = 0; i < src.size(); ++i) {
+                dst[i] = DirectX::PackedVector::XMConvertFloatToHalf(src[i]);
+            }
+            facePtrs[face] = dst.data();
+        }
+
+        RhiTextureHandle cubemap = m_device->CreateRhiTextureCubeFromFaces(
+            faceSize, facePtrs, faceSize * 8u, RhiFormat::R16G16B16A16Float);
+
+        if (!cubemap.IsValid()) {
+            DebugLog("Skybox::BuildNativeCubemap: backend could not create the native cubemap.\n");
+            return cubemap;
+        }
+
+        DebugLog(("Skybox::BuildNativeCubemap: built native cubemap (face size " +
+                  std::to_string(faceSize) + ").\n").c_str());
+
+        // Same allocate-then-create-view pattern SceneSubmitter uses for 2D scene textures: the
+        // descriptor's cpu.ptr becomes the opaque handle a backend resolves on its own later.
+        RhiDescriptorAllocation srvAlloc = m_device->AllocateRhiDescriptors(RhiDescriptorHeapType::CbvSrvUav, 1, true);
+        if (srvAlloc.cpu.IsValid()) {
+            RhiTextureViewDesc srvDesc{};
+            srvDesc.format = RhiFormat::R16G16B16A16Float;
+            srvDesc.dimension = RhiTextureViewDimension::TextureCube;
+            srvDesc.baseMipLevel = 0;
+            srvDesc.mipLevelCount = 1;
+            srvDesc.baseArrayLayer = 0;
+            srvDesc.arrayLayerCount = 6;
+            if (m_device->CreateRhiShaderResourceView(cubemap, srvDesc, srvAlloc.cpu)) {
+                outCubemapSrv = srvAlloc.cpu.ptr;
+            } else {
+                DebugLog("Skybox::BuildNativeCubemap: failed to create SRV for the native cubemap.\n");
+            }
+        } else {
+            DebugLog("Skybox::BuildNativeCubemap: descriptor allocation failed for the native cubemap SRV.\n");
+        }
+
+        return cubemap;
+    }
+
+    RhiTextureHandle Skybox::EnsureNativeEnvironmentCubemap()
+    {
+        // Latched like the GPU cubemap generator above: a failed attempt (no HDR source, or a
+        // backend that cannot build cube textures) should not be retried every frame.
+        if (m_nativeEnvCubemapTried) {
+            return m_nativeEnvCubemap;
+        }
+
+        // Deliberately not latched yet: the HDR source arrives asynchronously
+        // (ApplicationCore::LoadSkyboxAsync), so during the first frames "no source" means "not
+        // yet", not a verdict. Latching here froze the answer before the data ever landed and the
+        // native sky never got its cubemap. Returning early is cheap, so polling costs nothing.
+        //
+        // Check the raw source rather than m_hdrEquirectLoaded: that flag is only raised by
+        // EnsureHdrEnvironmentLoaded, which the D3D12 upload path drives. Calling that helper
+        // before the pixels exist would trip ITS own one-shot latch and permanently poison the
+        // load, so it must not be invoked until there is something to promote.
+        if (!m_device || m_sourceType != SourceType::HdrRgbFloat || m_sourceHdrRgb.empty()) {
+            // Not an error: samples that never load an HDR environment hit this every frame.
+            return {};
+        }
+
+        if (!EnsureHdrEnvironmentLoaded() || m_hdrEquirectPixels.empty() ||
+            m_hdrEquirectWidth == 0 || m_hdrEquirectHeight == 0) {
+            // The source existed but could not be promoted: a real failure, so stop retrying.
+            m_nativeEnvCubemapTried = true;
+            return {};
+        }
+
+        // The source is present, so from here every outcome -- success or failure -- is final and
+        // must not be retried: generation below is expensive.
+        m_nativeEnvCubemapTried = true;
+
+        // A far smaller base face than the D3D12 HDR path (2048) is fine here: this cubemap only
+        // backs the native (non-D3D12) preview paths, which have no mip chain or filtered IBL yet.
+        constexpr uint32_t kNativeFaceSize = 1024u;
+        constexpr uint32_t kNativeAmbientFaceSize = 32u;
+        // Build the small ambient cube first and use it as a capability probe. Backends without a
+        // CreateRhiTextureCubeFromFaces override (DirectX 11 and OpenGL today) return an invalid
+        // handle, and generating the 1024^2 environment cube for them means convolving a 4K
+        // equirect into six megapixel faces every startup only to throw the result away.
+        m_nativeAmbientCubemap = BuildNativeCubemap(kNativeAmbientFaceSize, m_nativeAmbientCubemapSrv);
+        if (!m_nativeAmbientCubemap.IsValid()) {
+            return {};
+        }
+
+        m_nativeEnvCubemap = BuildNativeCubemap(kNativeFaceSize, m_nativeEnvCubemapSrv);
+
+        // A second, much smaller cube built from the same equirect source for use as diffuse
+        // ambient. Sampling the 1024^2 cube above along the surface normal reads like a mirror
+        // (high-frequency, specular-looking) rather than an irradiance term; a 32^2 cube is coarse
+        // enough that its texels are already close to a box-filtered average of a wide solid angle,
+        // which is a cheap (not physically correct) stand-in for a real cosine convolution.
+
+        return m_nativeEnvCubemap;
     }
 
     void Skybox::Render(IRhiCommandEncoder* enc,

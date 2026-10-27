@@ -9,7 +9,7 @@
 #include "Foundation/Tools/DebugOutput.h"
 #include "d3dx12.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {
@@ -30,16 +30,117 @@ namespace SasamiRenderer
                                   utf8.data(), required, nullptr, nullptr);
             return utf8;
         }
+
+        bool IsKnownCaptureTargetName(const std::string& name)
+        {
+            static const char* const kKnownNames[] = {
+                "backbuffer",
+                "shadow0", "shadow1", "shadow2", "shadow3",
+                "gbuffer.albedo", "gbuffer.normal", "gbuffer.material", "gbuffer.emissive", "gbuffer.specular",
+            };
+            for (const char* candidate : kKnownNames) {
+                if (name == candidate) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        struct ResolvedCaptureTarget
+        {
+            ID3D12Resource* resource = nullptr;
+            UINT subresource = 0;
+            D3D12_RESOURCE_STATES restingState = D3D12_RESOURCE_STATE_COMMON;
+        };
+
+        // Resolves a capture target name to a live resource. Must be called at record time --
+        // holding a resolved resource pointer across frames would go stale across a resize.
+        ResolvedCaptureTarget ResolveCaptureTarget(const std::string& name, RenderTargetPool& renderTargetPool,
+                                                    LightSystem& lightSystem, UINT backIndex)
+        {
+            ResolvedCaptureTarget target;
+            if (name == "backbuffer") {
+                const auto* backBuffer = renderTargetPool.GetBackBufferResource(backIndex);
+                if (backBuffer && backBuffer->IsValid()) {
+                    target.resource = backBuffer->Get();
+                }
+                target.subresource = 0;
+                target.restingState = D3D12_RESOURCE_STATE_PRESENT;
+            } else if (name.size() == 7 && name.compare(0, 6, "shadow") == 0 && name[6] >= '0' && name[6] <= '3') {
+                Resource& shadowMap = lightSystem.GetShadowMapManager().GetShadowMap();
+                if (shadowMap.IsValid()) {
+                    target.resource = shadowMap.Get();
+                }
+                target.subresource = static_cast<UINT>(name[6] - '0');
+                target.restingState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            } else if (name == "gbuffer.albedo") {
+                Resource& res = renderTargetPool.GetGBufferAlbedo();
+                if (res.IsValid()) {
+                    target.resource = res.Get();
+                }
+                target.subresource = 0;
+                target.restingState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            } else if (name == "gbuffer.normal") {
+                Resource& res = renderTargetPool.GetGBufferNormal();
+                if (res.IsValid()) {
+                    target.resource = res.Get();
+                }
+                target.subresource = 0;
+                target.restingState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            } else if (name == "gbuffer.material") {
+                Resource& res = renderTargetPool.GetGBufferMaterial();
+                if (res.IsValid()) {
+                    target.resource = res.Get();
+                }
+                target.subresource = 0;
+                target.restingState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            } else if (name == "gbuffer.emissive") {
+                Resource& res = renderTargetPool.GetGBufferEmissive();
+                if (res.IsValid()) {
+                    target.resource = res.Get();
+                }
+                target.subresource = 0;
+                target.restingState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            } else if (name == "gbuffer.specular") {
+                Resource& res = renderTargetPool.GetGBufferSpecularWorkflow();
+                if (res.IsValid()) {
+                    target.resource = res.Get();
+                }
+                target.subresource = 0;
+                target.restingState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            }
+            return target;
+        }
     }
 
-    void Renderer::RequestScreenshot(const std::wstring& path)
+    std::string Renderer::RequestTargetDump(const std::string& name, const std::wstring& path)
     {
+        // Request acceptance is backend-agnostic; RendererFrameGraph.cpp's native-backend
+        // frame path completes (or rejects) requests it cannot fulfil itself.
+        if (!IsKnownCaptureTargetName(name)) {
+            return "unknown capture target: " + name;
+        }
+
+        // Only one capture can be outstanding at a time -- the poll protocol (screenshot
+        // status) assumes a single request/result pair.
+        if (m_screenshotRequested) {
+            return "capture already in progress";
+        }
+
         m_screenshotPath = path;
+        m_captureTargetName = name;
         m_screenshotRequested = true;
 
         // A stale result from a previous request must not be picked up by a fresh poll.
         m_screenshotResultReady = false;
         m_screenshotResult.clear();
+
+        return {};
+    }
+
+    void Renderer::RequestScreenshot(const std::wstring& path)
+    {
+        RequestTargetDump("backbuffer", path);
     }
 
     bool Renderer::ConsumeScreenshotResult(std::string& outMessage)
@@ -77,30 +178,31 @@ namespace SasamiRenderer
         // Screenshots are a rare debug operation, so re-initializing on every request (rather
         // than tracking init state with an extra member) is cheap enough to not matter.
         // Initialize() begins with Shutdown() internally and is safe to call repeatedly.
-        if (!m_backBufferCapture.Initialize(m_device->GetDevice())) {
+        if (!m_textureCapture.Initialize(m_device->GetDevice())) {
             fail("ERR capture init failed");
             return;
         }
 
-        const auto* backBuffer = m_renderTargetPool.GetBackBufferResource(backIndex);
-        if (!backBuffer || !backBuffer->IsValid()) {
-            fail("ERR back buffer unavailable");
+        const ResolvedCaptureTarget target =
+            ResolveCaptureTarget(m_captureTargetName, m_renderTargetPool, m_lightSystem, backIndex);
+        if (!target.resource) {
+            fail("ERR capture target unavailable");
             return;
         }
 
         // Every SubmitAndPresent call site (main frame graph, both graph-failure fallbacks,
         // and RenderBootFrame) reaches this with the back buffer already in PRESENT state.
         D3D12_RESOURCE_BARRIER toCopySource = CD3DX12_RESOURCE_BARRIER::Transition(
-            backBuffer->Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_SOURCE);
+            target.resource, target.restingState, D3D12_RESOURCE_STATE_COPY_SOURCE, target.subresource);
         cmdList->ResourceBarrier(1, &toCopySource);
 
-        const bool recorded = m_backBufferCapture.RecordCopy(cmdList->Get(), backBuffer->Get());
+        const bool recorded = m_textureCapture.RecordCopy(cmdList->Get(), target.resource, target.subresource);
 
-        // The COPY_SOURCE -> PRESENT restore must run even on failure: the transition to
+        // The COPY_SOURCE -> resting-state restore must run even on failure: the transition to
         // COPY_SOURCE above already executed on the command list.
-        D3D12_RESOURCE_BARRIER toPresent = CD3DX12_RESOURCE_BARRIER::Transition(
-            backBuffer->Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PRESENT);
-        cmdList->ResourceBarrier(1, &toPresent);
+        D3D12_RESOURCE_BARRIER toResting = CD3DX12_RESOURCE_BARRIER::Transition(
+            target.resource, D3D12_RESOURCE_STATE_COPY_SOURCE, target.restingState, target.subresource);
+        cmdList->ResourceBarrier(1, &toResting);
 
         if (!recorded) {
             fail("ERR record copy failed");
@@ -123,7 +225,7 @@ namespace SasamiRenderer
         // on the GPU first, or mapping returns garbage or a torn frame.
         WaitForGPU();
 
-        const bool ok = m_backBufferCapture.SaveToPng(m_screenshotPath);
+        const bool ok = m_textureCapture.SaveToPng(m_screenshotPath);
         if (ok) {
             const std::string utf8Path = ToUtf8(m_screenshotPath);
             m_screenshotResult = "OK " + utf8Path;

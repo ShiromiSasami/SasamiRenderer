@@ -7,7 +7,7 @@
 #include "Foundation/Math/Color.h"
 #include "Renderer/Scene/RenderLightProxy.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     class SpotLight : public SObject
     {
@@ -69,3 +69,4 @@ namespace SasamiRenderer
         float m_outerAngle = 0.436332f;
     };
 }
+namespace SasamiEngine { using namespace App; }

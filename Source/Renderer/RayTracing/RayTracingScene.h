@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     static constexpr uint32_t kRayTracingFrameFlagDirectionalShadow = 1u << 0;
     static constexpr uint32_t kMinRayTracingBounceCount = 1u;
@@ -126,6 +126,8 @@ namespace SasamiRenderer
         float iblPrefilterMaxMip = 0.0f;
         // Direct-light micro-shadowing strength [0,1] (Chan 2018); shared with the raster paths.
         float aoDirectLightingStrength = 0.5f;
+        // RendererEnums::PunctualLightFalloff as uint; shared with the raster paths.
+        uint32_t punctualLightFalloff = 2u;
         bool directionalLightMarkerEnabled = false;
         float directionalLightMarkerAngularRadius = 0.02f;
         float directionalLightMarkerHaloAngularRadius = 0.08f;
@@ -158,3 +160,7 @@ namespace SasamiRenderer
         float lastFrameMs = 0.0f;
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

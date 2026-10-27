@@ -22,15 +22,15 @@
 
 using Microsoft::WRL::ComPtr;
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {
         bool CompileCS(ID3D12Device* dev, const wchar_t* relPath, const char* entry, ComPtr<ID3DBlob>& outBlob,
                        std::string& outError)
         {
-            const std::wstring csTarget = ShaderCompilationService::ResolveEffectiveComputeShaderTarget(dev, "6_6");
-            const std::string profileNarrow(csTarget.begin(), csTarget.end());
+            const std::string profileNarrow =
+                "cs_" + ShaderCompilationService::ResolveEffectiveShaderModel(dev, "6_6");
 
             std::vector<uint8_t> bytecode;
             if (!ShaderCompilationService::GetOrCompileShaderBytecodeDxc(
@@ -600,7 +600,9 @@ namespace SasamiRenderer
         // the baked field at alpha * radiance -- e.g. 1% of the correct value at
         // ema_alpha = 0.01, which reads as "GI does nothing". EMA is meaningful only
         // once a full pass has produced valid data (continuous-mode refresh passes).
-        out.emaAlpha        = IsBaked() ? m_emaAlpha : 1.0f;
+        // Continuous mode calls ResetBakeState after every pass, so IsBaked() alone is
+        // never true there; blendWithHistory carries "the buffer holds a finished pass".
+        out.emaAlpha        = (IsBaked() || desc.blendWithHistory) ? m_emaAlpha : 1.0f;
         out.maxTraceDistance = m_maxTraceDistance;
         out.shadowBias      = desc.shadowBias;
         out.frameIndex      = desc.frameIndex;
@@ -621,7 +623,7 @@ namespace SasamiRenderer
             ? std::min(static_cast<uint32_t>(desc.pointLights->size()), kMaxPointLights) : 0u;
         out.spotLightCount = desc.spotLights
             ? std::min(static_cast<uint32_t>(desc.spotLights->size()), kMaxSpotLights) : 0u;
-        out.pad2 = 0u;
+        out.punctualLightFalloff = desc.punctualLightFalloff;
         out.pad3 = 0u;
     }
 
@@ -944,4 +946,4 @@ namespace SasamiRenderer
         return m_initialized ? AllocateProbeBuffer(device) : true;
     }
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

@@ -7,7 +7,7 @@
 #include "Renderer/Passes/Core/RenderPassSetupContext.h"
 #include "Renderer/Scene/RenderLightProxy.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // Full-frame SDF raymarching renderer.
     // Renders a procedural scene (sphere, box, capsule, ground plane) entirely via
@@ -36,3 +36,7 @@ namespace SasamiRenderer
         float m_debugMode    = 0.0f;   // 0=off, 1=distance heatmap
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

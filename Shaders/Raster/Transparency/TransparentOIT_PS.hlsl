@@ -45,9 +45,13 @@ OITOutput PSMain(PSInput input)
     // multiplicative revealage. This is order independent, but still an
     // approximation for thick/nested media.
     float z = saturate(input.position.z);
+    // Weighted Blended OIT (McGuire & Bavoil 2013) wants nearer fragments to weigh more.
+    // Under reverse-Z, z increases toward the camera (near = 1.0, far = 0.0), so the
+    // depth-weight term is now (0.1 + z * 0.9) instead of (1.0 - z * 0.9): larger z (near)
+    // now yields a larger weight, matching the original near-favoring intent.
     float weight = clamp(pow(min(1.0, coverageAlpha * 10.0) + 0.01, 3.0) *
                          100000000.0 *
-                         pow(1.0 - z * 0.9, 3.0),
+                         pow(0.1 + z * 0.9, 3.0),
                          0.01,
                          3000.0);
 

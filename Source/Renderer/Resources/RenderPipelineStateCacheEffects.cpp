@@ -18,7 +18,7 @@
 
 #pragma comment(lib, "d3dcompiler.lib")
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     using Microsoft::WRL::ComPtr;
 
@@ -183,7 +183,8 @@ namespace SasamiRenderer
             auto cloudDS = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
             cloudDS.DepthEnable    = TRUE;
             cloudDS.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-            cloudDS.DepthFunc      = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+            // Reverse-Z: near=1.0, far=0.0, so a fragment passes when its depth is >= what's stored.
+            cloudDS.DepthFunc      = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
             cloudDS.StencilEnable  = FALSE;
 
             D3D12_GRAPHICS_PIPELINE_STATE_DESC pso = {};
@@ -204,4 +205,4 @@ namespace SasamiRenderer
         return true;
     }
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

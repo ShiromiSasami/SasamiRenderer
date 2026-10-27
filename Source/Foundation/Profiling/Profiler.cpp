@@ -22,10 +22,10 @@
 
 TRACELOGGING_DEFINE_PROVIDER(
     g_sasamiProfilerProvider,
-    "SasamiRenderer",
+    "SasamiEngine",
     (0x7f4d1fb4, 0x2cb4, 0x4c78, 0x9b, 0x2f, 0x40, 0x5c, 0x2b, 0x6e, 0x6d, 0x51));
 
-namespace SasamiRenderer::Profiler
+namespace SasamiEngine::Foundation::Profiler
 {
     namespace
     {
@@ -73,7 +73,7 @@ namespace SasamiRenderer::Profiler
             TraceLoggingString(SafeName(name), "Name"));
     }
 
-    void BeginGpuEvent(CommandList* cmdList, const char* name)
+    void BeginGpuEvent(SasamiEngine::Render::CommandList* cmdList, const char* name)
     {
         if (!cmdList || !cmdList->Get()) {
             return;
@@ -86,7 +86,7 @@ namespace SasamiRenderer::Profiler
 #endif
     }
 
-    void EndGpuEvent(CommandList* cmdList)
+    void EndGpuEvent(SasamiEngine::Render::CommandList* cmdList)
     {
         if (!cmdList || !cmdList->Get()) {
             return;

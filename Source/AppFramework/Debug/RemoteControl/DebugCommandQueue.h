@@ -8,7 +8,7 @@
 #include <string>
 #include <string_view>
 
-namespace SasamiRenderer::Debug
+namespace SasamiEngine::App::Debug
 {
     // Thread-safe hand-off queue between the debug transport's receive thread
     // and the main thread. The receive thread submits a request line and
@@ -51,3 +51,4 @@ namespace SasamiRenderer::Debug
         bool m_shuttingDown = false;
     };
 }
+namespace SasamiEngine { using namespace App; }

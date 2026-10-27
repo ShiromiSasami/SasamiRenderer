@@ -43,6 +43,7 @@ cbuffer ReSTIRFrameConstants : register(b0)
     uint   g_spotLightCount;
     uint   g_cbPad0;
     uint   g_cbPad1;
+    uint   g_punctualLightFalloff; // RendererEnums::PunctualLightFalloff (offset 256)
 };
 
 Texture2D<float4> g_shadedColor : register(t6);   // scratch SRV[0]

@@ -13,7 +13,7 @@
 
 #include <cstddef>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace LightCBLayout
     {
@@ -138,6 +138,45 @@ namespace SasamiRenderer
             // z: 最小バリアンス（デフォルト 0.00002）
             // w: ブラー有効フラグ（1.0 = 有効）
             float vsmParams[4];
+
+            // Cel shading controls, global rather than per-material: the GBuffer has no spare
+            // channel to carry them per surface, and one consistent look across the scene is
+            // what a toon style wants anyway. Only read when the surface selects ShadingModel::Toon.
+            // x: band count, y: band edge softness, z: specular threshold, w: specular softness
+            float toonParams[4];
+            // x: rim strength, y: rim power, z: specular intensity, w: shadow floor (darkest band)
+            float toonParams2[4];
+            // x: ambient scale applied to indirect diffuse on Toon surfaces,
+            // y: depth-rim width (px at 1 m, 0 disables), z: depth-rim threshold (m), w: depth-rim strength
+            float toonParams3[4];
+
+            // Inverted-hull outline. x: width in world units (0 disables), yzw: line colour.
+            float toonOutline[4];
+
+            // SDF face shadow (LightSystem::ToonFaceSettings). xyz: face forward (world, unit),
+            // w: edge softness in threshold units.
+            float toonFaceForward[4];
+            // xyz: face right (world, unit; negate it to mirror the map), w: 1 = enabled.
+            float toonFaceRight[4];
+
+            // Toon hair angel ring (LightSystem::ToonHairSettings).
+            // x/y: primary/secondary tangent shift, z/w: primary/secondary band width.
+            float toonHairShift[4];
+            // x: primary strength, y: secondary strength, z: edge softness, w: 1 = enabled.
+            float toonHairStrength[4];
+            // xyz: head up (world), w unused.
+            float toonHairUp[4];
+            // Front-hair screen-space shadow: x march length (m), y occluder thickness (m),
+            // z strength (0..1), w 1 = enabled.
+            float toonHairShadow[4];
+            // Head sphere normals: xyz head centre (world), w sphere radius (m).
+            float toonHeadSphere[4];
+            // x blend toward the sphere normal (0..1), w 1 = enabled.
+            float toonHeadNormal[4];
         };
     }
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

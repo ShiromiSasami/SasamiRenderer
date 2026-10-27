@@ -1,6 +1,7 @@
 // VulkanGraphicsDeviceCommandEncoder.cpp
 // VulkanRhiCommandEncoder implementation, plus VulkanGraphicsDevice initialize/getter methods.
 #include "Renderer/Backends/Vulkan/VulkanGraphicsDevice.h"
+#include "Renderer/Backends/Vulkan/VulkanGraphicsDeviceUtils.h"
 
 #if RHI_VULKAN
 
@@ -13,218 +14,23 @@
 #include <vector>
 
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {
-        bool HasExtension(const std::vector<VkExtensionProperties>& extensions, const char* name)
-        {
-            return std::any_of(extensions.begin(), extensions.end(),
-                               [name](const VkExtensionProperties& extension) {
-                                   return std::strcmp(extension.extensionName, name) == 0;
-                               });
-        }
 
-        std::vector<VkExtensionProperties> EnumerateDeviceExtensions(VkPhysicalDevice physicalDevice)
-        {
-            uint32_t extensionCount = 0;
-            vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extensionCount, nullptr);
-            std::vector<VkExtensionProperties> extensions(extensionCount);
-            if (extensionCount > 0) {
-                vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extensionCount, extensions.data());
-            }
-            return extensions;
-        }
 
-        VkFormat ToVkFormat(RhiFormat format)
-        {
-            switch (format) {
-            case RhiFormat::R8UNorm: return VK_FORMAT_R8_UNORM;
-            case RhiFormat::R8G8B8A8UNorm: return VK_FORMAT_R8G8B8A8_UNORM;
-            case RhiFormat::B8G8R8A8UNorm: return VK_FORMAT_B8G8R8A8_UNORM;
-            case RhiFormat::R16G16B16A16Float: return VK_FORMAT_R16G16B16A16_SFLOAT;
-            case RhiFormat::R32G32B32Float: return VK_FORMAT_R32G32B32_SFLOAT;
-            case RhiFormat::R32G32Float: return VK_FORMAT_R32G32_SFLOAT;
-            case RhiFormat::R16Float: return VK_FORMAT_R16_SFLOAT;
-            case RhiFormat::R16Typeless: return VK_FORMAT_D16_UNORM;
-            case RhiFormat::R16UNorm: return VK_FORMAT_R16_UNORM;
-            case RhiFormat::R32Float: return VK_FORMAT_R32_SFLOAT;
-            case RhiFormat::R32UInt: return VK_FORMAT_R32_UINT;
-            case RhiFormat::R32Typeless: return VK_FORMAT_D32_SFLOAT;
-            case RhiFormat::D16UNorm: return VK_FORMAT_D16_UNORM;
-            case RhiFormat::D32Float: return VK_FORMAT_D32_SFLOAT;
-            case RhiFormat::D24UNormS8UInt: return VK_FORMAT_D24_UNORM_S8_UINT;
-            default: return VK_FORMAT_UNDEFINED;
-            }
-        }
 
-        VkImageUsageFlags ToVkImageUsage(RhiTextureUsageFlags usage)
-        {
-            VkImageUsageFlags flags = 0;
-            if (HasFlag(usage, RhiTextureUsageFlags::ShaderResource)) {
-                flags |= VK_IMAGE_USAGE_SAMPLED_BIT;
-            }
-            if (HasFlag(usage, RhiTextureUsageFlags::RenderTarget)) {
-                flags |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-            }
-            if (HasFlag(usage, RhiTextureUsageFlags::DepthStencil)) {
-                flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-            }
-            if (HasFlag(usage, RhiTextureUsageFlags::UnorderedAccess)) {
-                flags |= VK_IMAGE_USAGE_STORAGE_BIT;
-            }
-            if (HasFlag(usage, RhiTextureUsageFlags::CopySource)) {
-                flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-            }
-            if (HasFlag(usage, RhiTextureUsageFlags::CopyDest)) {
-                flags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-            }
-            return flags;
-        }
 
-        VkBufferUsageFlags ToVkBufferUsage(RhiBufferUsageFlags usage)
-        {
-            VkBufferUsageFlags flags = 0;
-            if (HasFlag(usage, RhiBufferUsageFlags::Vertex)) {
-                flags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-            }
-            if (HasFlag(usage, RhiBufferUsageFlags::Index)) {
-                flags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-            }
-            if (HasFlag(usage, RhiBufferUsageFlags::Constant)) {
-                flags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-            }
-            if (HasFlag(usage, RhiBufferUsageFlags::ShaderResource) ||
-                HasFlag(usage, RhiBufferUsageFlags::Structured)) {
-                flags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-            }
-            if (HasFlag(usage, RhiBufferUsageFlags::UnorderedAccess)) {
-                flags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-            }
-            if (HasFlag(usage, RhiBufferUsageFlags::CopySource)) {
-                flags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-            }
-            if (HasFlag(usage, RhiBufferUsageFlags::CopyDest)) {
-                flags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-            }
-            if (HasFlag(usage, RhiBufferUsageFlags::AccelerationStructure)) {
-#ifdef VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR
-                flags |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
-#endif
-            }
-            return flags;
-        }
 
-        VkMemoryPropertyFlags ToVkMemoryProperties(RhiMemoryUsage usage)
-        {
-            switch (usage) {
-            case RhiMemoryUsage::CpuToGpu:
-                return VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-            case RhiMemoryUsage::GpuToCpu:
-                return VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
-            case RhiMemoryUsage::GpuOnly:
-            default:
-                return VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-            }
-        }
 
-        VkImageViewType ToVkImageViewType(RhiTextureViewDimension dimension)
-        {
-            switch (dimension) {
-            case RhiTextureViewDimension::Texture1D: return VK_IMAGE_VIEW_TYPE_1D;
-            case RhiTextureViewDimension::Texture1DArray: return VK_IMAGE_VIEW_TYPE_1D_ARRAY;
-            case RhiTextureViewDimension::Texture2DArray: return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-            case RhiTextureViewDimension::Texture3D: return VK_IMAGE_VIEW_TYPE_3D;
-            case RhiTextureViewDimension::TextureCube: return VK_IMAGE_VIEW_TYPE_CUBE;
-            case RhiTextureViewDimension::TextureCubeArray: return VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
-            case RhiTextureViewDimension::Texture2D:
-            default: return VK_IMAGE_VIEW_TYPE_2D;
-            }
-        }
 
-        VkImageAspectFlags ToVkAspectMask(RhiFormat format)
-        {
-            switch (format) {
-            case RhiFormat::R16Typeless:
-            case RhiFormat::R32Typeless:
-            case RhiFormat::D16UNorm:
-            case RhiFormat::D32Float:
-                return VK_IMAGE_ASPECT_DEPTH_BIT;
-            case RhiFormat::D24UNormS8UInt:
-                return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-            default:
-                return VK_IMAGE_ASPECT_COLOR_BIT;
-            }
-        }
 
-        VkShaderStageFlagBits ToVkShaderStage(RhiShaderStageFlags stage)
-        {
-            switch (stage) {
-            case RhiShaderStageFlags::Vertex: return VK_SHADER_STAGE_VERTEX_BIT;
-            case RhiShaderStageFlags::Hull: return VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
-            case RhiShaderStageFlags::Domain: return VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
-            case RhiShaderStageFlags::Geometry: return VK_SHADER_STAGE_GEOMETRY_BIT;
-            case RhiShaderStageFlags::Pixel: return VK_SHADER_STAGE_FRAGMENT_BIT;
-            case RhiShaderStageFlags::Compute: return VK_SHADER_STAGE_COMPUTE_BIT;
-            default: return VK_SHADER_STAGE_FLAG_BITS_MAX_ENUM;
-            }
-        }
 
-        VkShaderStageFlags ToVkShaderStages(RhiShaderStageFlags stages)
-        {
-            const uint32_t flags = static_cast<uint32_t>(stages);
-            VkShaderStageFlags result = 0;
-            if (flags & static_cast<uint32_t>(RhiShaderStageFlags::Vertex)) result |= VK_SHADER_STAGE_VERTEX_BIT;
-            if (flags & static_cast<uint32_t>(RhiShaderStageFlags::Hull)) result |= VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
-            if (flags & static_cast<uint32_t>(RhiShaderStageFlags::Domain)) result |= VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
-            if (flags & static_cast<uint32_t>(RhiShaderStageFlags::Geometry)) result |= VK_SHADER_STAGE_GEOMETRY_BIT;
-            if (flags & static_cast<uint32_t>(RhiShaderStageFlags::Pixel)) result |= VK_SHADER_STAGE_FRAGMENT_BIT;
-            if (flags & static_cast<uint32_t>(RhiShaderStageFlags::Compute)) result |= VK_SHADER_STAGE_COMPUTE_BIT;
-            return result != 0 ? result : VK_SHADER_STAGE_ALL;
-        }
 
-        VkPrimitiveTopology ToVkTopology(RhiPrimitiveTopology topology)
-        {
-            switch (topology) {
-            case RhiPrimitiveTopology::TriangleStrip: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-            case RhiPrimitiveTopology::LineList: return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-            case RhiPrimitiveTopology::LineStrip: return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
-            case RhiPrimitiveTopology::PointList: return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
-            case RhiPrimitiveTopology::PatchList: return VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
-            case RhiPrimitiveTopology::TriangleList:
-            default: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-            }
-        }
 
-        VkCullModeFlags ToVkCullMode(RhiCullMode mode)
-        {
-            switch (mode) {
-            case RhiCullMode::None: return VK_CULL_MODE_NONE;
-            case RhiCullMode::Front: return VK_CULL_MODE_FRONT_BIT;
-            case RhiCullMode::Back:
-            default: return VK_CULL_MODE_BACK_BIT;
-            }
-        }
 
-        VkPolygonMode ToVkPolygonMode(RhiFillMode mode)
-        {
-            return mode == RhiFillMode::Wireframe ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
-        }
 
-        VkCompareOp ToVkCompareOp(RhiCompareOp op)
-        {
-            switch (op) {
-            case RhiCompareOp::Never: return VK_COMPARE_OP_NEVER;
-            case RhiCompareOp::Less: return VK_COMPARE_OP_LESS;
-            case RhiCompareOp::Equal: return VK_COMPARE_OP_EQUAL;
-            case RhiCompareOp::LessEqual: return VK_COMPARE_OP_LESS_OR_EQUAL;
-            case RhiCompareOp::Greater: return VK_COMPARE_OP_GREATER;
-            case RhiCompareOp::NotEqual: return VK_COMPARE_OP_NOT_EQUAL;
-            case RhiCompareOp::GreaterEqual: return VK_COMPARE_OP_GREATER_OR_EQUAL;
-            case RhiCompareOp::Always:
-            default: return VK_COMPARE_OP_ALWAYS;
-            }
-        }
 
         VkImageLayout ToVkImageLayout(RhiResourceState state)
         {
@@ -242,42 +48,6 @@ namespace SasamiRenderer
             }
         }
 
-        VkAccessFlags ToVkAccessFlags(RhiResourceState state)
-        {
-            switch (state) {
-            case RhiResourceState::RenderTarget: return VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-            case RhiResourceState::DepthWrite: return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-            case RhiResourceState::DepthRead: return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
-            case RhiResourceState::ShaderResource: return VK_ACCESS_SHADER_READ_BIT;
-            case RhiResourceState::UnorderedAccess: return VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-            case RhiResourceState::CopySource: return VK_ACCESS_TRANSFER_READ_BIT;
-            case RhiResourceState::CopyDest: return VK_ACCESS_TRANSFER_WRITE_BIT;
-            case RhiResourceState::Present: return VK_ACCESS_MEMORY_READ_BIT;
-            case RhiResourceState::Common:
-            default: return 0;
-            }
-        }
-
-        VkPipelineStageFlags ToVkPipelineStage(RhiResourceState state)
-        {
-            switch (state) {
-            case RhiResourceState::RenderTarget: return VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-            case RhiResourceState::DepthWrite:
-            case RhiResourceState::DepthRead:
-                return VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-            case RhiResourceState::ShaderResource:
-            case RhiResourceState::UnorderedAccess:
-                return VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-            case RhiResourceState::CopySource:
-            case RhiResourceState::CopyDest:
-                return VK_PIPELINE_STAGE_TRANSFER_BIT;
-            case RhiResourceState::Present:
-                return VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-            case RhiResourceState::Common:
-            default:
-                return VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-            }
-        }
     }
 
     class VulkanRhiCommandEncoder final : public IRhiCommandEncoder
@@ -668,12 +438,18 @@ namespace SasamiRenderer
             if (!IsValid() || !viewports || count == 0) {
                 return;
             }
+            // Vulkan's NDC has +Y pointing down, D3D12's points up. Flip it here with a negative
+            // viewport height (VK_KHR_maintenance1, core in 1.1) so that one projection matrix and
+            // one set of shaders serve every backend -- the same trick the native mesh path already
+            // uses (VulkanGraphicsDevice::RecordNativeMesh). Without this, passes moved off the
+            // D3D12 surface onto this encoder would render vertically mirrored on Vulkan only,
+            // while the native path kept looking correct.
             std::vector<VkViewport> vkViewports(count);
             for (uint32_t i = 0; i < count; ++i) {
                 vkViewports[i].x = viewports[i].x;
-                vkViewports[i].y = viewports[i].y;
+                vkViewports[i].y = viewports[i].y + viewports[i].height;  // move origin to the bottom edge
                 vkViewports[i].width = viewports[i].width;
-                vkViewports[i].height = viewports[i].height;
+                vkViewports[i].height = -viewports[i].height;
                 vkViewports[i].minDepth = viewports[i].minDepth;
                 vkViewports[i].maxDepth = viewports[i].maxDepth;
             }
@@ -724,6 +500,23 @@ namespace SasamiRenderer
             if (IsValid() && BindDescriptors(m_computeDescriptors, VK_PIPELINE_BIND_POINT_COMPUTE)) {
                 vkCmdDispatch(m_commandBuffer, dispatch.groupCountX, dispatch.groupCountY, dispatch.groupCountZ);
             }
+        }
+
+        void UavBarrier(const RhiResourceHandle*, uint32_t) override
+        {
+            // A global memory barrier is the recommended form for compute-to-compute hazards
+            // (Khronos synchronization examples); per-resource barriers add nothing here.
+            if (!IsValid()) {
+                return;
+            }
+            VkMemoryBarrier barrier{};
+            barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+            barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+            vkCmdPipelineBarrier(m_commandBuffer,
+                                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                 0, 1, &barrier, 0, nullptr, 0, nullptr);
         }
 
         void SetVertexBuffers(uint32_t startSlot, uint32_t count, const RhiVertexBufferView* views) override
@@ -1141,5 +934,5 @@ namespace SasamiRenderer
     }
 
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render
 #endif

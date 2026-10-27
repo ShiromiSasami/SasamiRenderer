@@ -11,7 +11,7 @@
 #include <thread>
 #include <vector>
 
-namespace SasamiRenderer::ShaderCompilationService
+namespace SasamiEngine::Render::ShaderCompilationService
 {
     // Stateless aside from filesystem I/O: source-root resolution, cache-path derivation
     // and staleness checks are all pure functions of the file system. Concurrent duplicate
@@ -101,4 +101,4 @@ namespace SasamiRenderer::ShaderCompilationService
 
         return true;
     }
-} // namespace SasamiRenderer::ShaderCompilationService
+} // namespace SasamiEngine::Render::ShaderCompilationService

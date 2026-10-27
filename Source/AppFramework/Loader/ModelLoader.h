@@ -7,11 +7,11 @@
 #include "Renderer/Structures/Skeleton.h"
 #include "Renderer/Structures/SkeletonAnimation.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
 	// Minimal OBJ loader: supports v / vt / f (triangulated or polygons -> fan)
 	// Ignores materials and normals. Generates a vertex per index (non-indexed).
-	bool LoadOBJ(const std::string& path, std::vector<SasamiRenderer::Vertex>& outVertices);
+	bool LoadOBJ(const std::string& path, std::vector<SasamiEngine::Render::Vertex>& outVertices);
 
     enum class StaticModelFormat
     {
@@ -28,6 +28,7 @@ namespace SasamiRenderer
         std::string occlusionTexturePath;
         std::string normalTexturePath;
         std::string metallicRoughnessTexturePath;
+        std::string emissiveTexturePath; // sRGB; multiplied by SurfaceMaterial::emissive (glTF 2.0 3.9.3)
         SurfaceMaterial material;
         float localTransform[16] = {
             1,0,0,0,
@@ -53,6 +54,8 @@ namespace SasamiRenderer
         float roughnessFactor = 1.0f;
         float occlusionStrength = 1.0f;
         bool alphaBlend = false;
+        bool alphaMask = false;
+        float alphaCutoff = 0.5f;
         float transmissionFactor = 0.0f;
         float ior = 1.5f;
         float thicknessFactor = 0.0f;
@@ -93,6 +96,7 @@ namespace SasamiRenderer
         std::vector<std::string>       albedoTexturePaths;
         std::vector<std::string>       occlusionTexturePaths;
         std::vector<std::string>       normalTexturePaths;
+        std::vector<std::string>       emissiveTexturePaths;
         std::vector<SurfaceMaterial>   materials;
     };
 
@@ -102,8 +106,14 @@ namespace SasamiRenderer
                          StaticModelFormat format,
                          float uniformScale,
                          std::vector<LoadedStaticMesh>& outMeshes);
+    // The parse + convert step of LoadStaticModel, without StaticMeshCache, the vertex-cache
+    // reorder or the triangle stats. Use LoadStaticModel; this is for load-time measurements.
+    bool LoadStaticModelUncached(const std::string& path,
+                                 StaticModelFormat format,
+                                 float uniformScale,
+                                 std::vector<LoadedStaticMesh>& outMeshes);
 
     // glTF 2.0 loader for skinned meshes with skeleton and animations.
     bool LoadGLTFSkinned(const std::string& path, SkinnedModelData& outData);
 }
-
+namespace SasamiEngine { using namespace App; }

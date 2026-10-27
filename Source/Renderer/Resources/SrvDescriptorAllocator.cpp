@@ -4,7 +4,7 @@
 
 #include <string>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     bool SrvDescriptorAllocator::Initialize(IRHIDevice& device, UINT capacity)
     {

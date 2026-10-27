@@ -6,7 +6,7 @@
 #include "AppFramework/Component/TransformComponent.h"
 #include "Renderer/Scene/RenderCameraProxy.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     class Camera : public SObject {
     public:
@@ -104,7 +104,16 @@ namespace SasamiRenderer
         bool m_moveLeft = false;
         bool m_moveRight = false;
         float m_moveSpeed = 1.0f;
-        float m_nearClip = 0.0005f;
+        // 0.05, not the 0.0005 this used to default to. With far at 500 that old value gave a
+        // near/far ratio of 1e6, and non-reversed depth spends nearly all of its precision just
+        // in front of the near plane -- almost none was left at the 10-100m range where the
+        // scene actually is. Coplanar detail (window frames, cornices, decals) Z-fought, which
+        // showed up as dashed black outlines and as speckle in the Normal/NdotL debug views.
+        // Verified by sweeping this value from one fixed camera pose: the artifacts are dense
+        // at 0.0005 and essentially gone by 0.05 (Tools/Debug/sweep-clip-shadow.ps1).
+        // Raise this further if precision is still short; lower it only for a scene that truly
+        // needs sub-centimetre geometry right at the lens.
+        float m_nearClip = 0.05f;
         float m_farClip = 500.0f;
         CameraMode m_cameraMode = CameraMode::Pbr;
         int m_lastX = 0;
@@ -112,3 +121,4 @@ namespace SasamiRenderer
     };
 
 }
+namespace SasamiEngine { using namespace App; }

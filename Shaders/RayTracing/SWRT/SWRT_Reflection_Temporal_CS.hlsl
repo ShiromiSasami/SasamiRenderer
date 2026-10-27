@@ -58,7 +58,8 @@ float3 ReconstructWorldPos(uint2 gbufferPixel, float cameraDistance)
 {
     float ndcX = ((float(gbufferPixel.x) + 0.5f) / float(g_gbufferWidth)) * 2.0f - 1.0f;
     float ndcY = -((float(gbufferPixel.y) + 0.5f) / float(g_gbufferHeight)) * 2.0f + 1.0f;
-    float4 viewRayH = mul(float4(ndcX, ndcY, 1.0f, 1.0f), g_invVP);
+    // Reverse-Z: far plane is NDC z = 0 (see SWRT_Reflection_Shading.hlsli).
+    float4 viewRayH = mul(float4(ndcX, ndcY, 0.0f, 1.0f), g_invVP);
     float3 viewRay = normalize(viewRayH.xyz / viewRayH.w - g_cameraPos);
     return g_cameraPos + viewRay * cameraDistance;
 }

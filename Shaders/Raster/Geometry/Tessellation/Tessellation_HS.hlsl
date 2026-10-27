@@ -21,7 +21,7 @@ struct HSConst
     float3 patchDebugColor : COLOR1; // unique color per patch for debug visualization
 };
 
-// 16-colour debug palette (matches MeshletDebug_PS.hlsl for visual consistency)
+// 16-colour debug palette, hashed per patch so neighbouring patches differ.
 static const float3 kPatchDebugColors[16] =
 {
     float3(0.94f, 0.20f, 0.20f),

@@ -24,7 +24,7 @@
 #undef max
 #endif
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {
@@ -250,6 +250,7 @@ namespace SasamiRenderer
         frameDesc.iblEnabled                   = m_skybox->IsIblEnabled();
         frameDesc.iblIntensity                 = settings.iblIntensity;
         frameDesc.aoDirectLightingStrength     = settings.aoDirectLightingStrength;
+        frameDesc.punctualLightFalloff         = static_cast<uint32_t>(settings.punctualLightFalloff);
         frameDesc.iblPrefilterMaxMip           = m_skybox->GetIblPrefilterMaxMip();
         frameDesc.directionalLightMarkerEnabled         = m_skybox->IsDirectionalLightMarkerEnabled();
         frameDesc.directionalLightMarkerAngularRadius   = m_skybox->GetDirectionalLightMarkerAngularRadius();
@@ -624,6 +625,7 @@ namespace SasamiRenderer
         reflectionDesc.frameDesc.pointLights      = &m_lightSystem->GetPointLights();
         reflectionDesc.frameDesc.spotLights       = &m_lightSystem->GetSpotLights();
         reflectionDesc.frameDesc.aoDirectLightingStrength = settings.aoDirectLightingStrength;
+        reflectionDesc.frameDesc.punctualLightFalloff     = static_cast<uint32_t>(settings.punctualLightFalloff);
         std::memcpy(reflectionDesc.frameDesc.inverseViewProjection, ctx.cameraInvPV, sizeof(ctx.cameraInvPV));
         std::memcpy(reflectionDesc.frameDesc.cameraPosition, ctx.cameraPos, sizeof(ctx.cameraPos));
 
@@ -662,6 +664,7 @@ namespace SasamiRenderer
                 giDesc.ambientColor[2]   = 0.1f;
                 giDesc.ambientIntensity  = 1.0f;
                 giDesc.shadowBias        = 0.005f;
+                giDesc.punctualLightFalloff = static_cast<uint32_t>(settings.punctualLightFalloff);
                 giDesc.frameIndex        = m_giFrameIndex++;
                 m_probeGrid->UpdateProbes(giDesc, bvhAddrs, *m_device, *cmdList);
             }

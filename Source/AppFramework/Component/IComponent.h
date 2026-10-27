@@ -2,7 +2,7 @@
 
 #include <concepts>
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     class IComponent
     {
@@ -13,3 +13,4 @@ namespace SasamiRenderer
     template<typename T>
     concept ComponentType = std::derived_from<T, IComponent>;
 }
+namespace SasamiEngine { using namespace App; }

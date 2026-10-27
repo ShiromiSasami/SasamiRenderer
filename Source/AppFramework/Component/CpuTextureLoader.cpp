@@ -3,7 +3,7 @@
 #include "ApplicationResourcePaths.h"
 #include "Component/CpuTexturePathCache.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     std::shared_ptr<const CpuTextureRgba8> LoadCpuTextureFromPath(const std::string& path)
     {

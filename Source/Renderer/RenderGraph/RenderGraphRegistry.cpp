@@ -4,7 +4,7 @@
 #include "Renderer/RenderGraph/RenderGraph.h"
 #include "Foundation/Tools/DebugOutput.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     ResourceHandle ResourceRegistry::Register(std::string_view resourceName)
     {
@@ -115,4 +115,4 @@ namespace SasamiRenderer
     }
 
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

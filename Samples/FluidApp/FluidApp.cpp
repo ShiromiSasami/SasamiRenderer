@@ -1,10 +1,21 @@
 #include "FluidApp.h"
 #include "ApplicationCore.h"
+#include "Renderer/Scene/SurfaceMaterialFactory.h"
+#include "Object/SampleFloorBox.h"
+#include "Light/DefaultSunLight.h"
 #include "ApplicationEntryPoint.h"
+#include "AppFramework/Debug/VoxelOccupancyViewer.h"
+#include "AppFramework/Debug/RemoteControl/DebugCommandRegistry.h"
+#include "Input/CameraInputBinding.h"
 #include "Input/InputSystem.h"
 #include "Object/StaticModel.h"
 #include "Renderer/Scene/SurfaceMaterial.h"
+#include "Renderer/Runtime/Renderer.h"
 #include "UI/ImGuiCoordinator.h"
+#include "UI/UIButton.h"
+#include "UI/UIIntVolume.h"
+#include "UI/UIText.h"
+#include "UI/UIVolume.h"
 #include "Foundation/Tools/DebugOutput.h"
 #include "Foundation/Math/MathUtil.h"
 #include "imgui.h"
@@ -13,25 +24,14 @@
 #include <vector>
 #include <algorithm>
 #include <cmath>
+#include <string>
 #include <boost/signals2/connection.hpp>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Sample::Fluid
 {
     namespace
     {
-        SurfaceMaterial MakeMaterial(float r, float g, float b, float roughness, float metallic)
-        {
-            SurfaceMaterial material{};
-            material.baseColor[0] = r;
-            material.baseColor[1] = g;
-            material.baseColor[2] = b;
-            material.baseColor[3] = 1.0f;
-            material.roughness = roughness;
-            material.metallic = metallic;
-            material.reflectionStrength = Math::DefaultReflectionStrength(roughness, metallic);
-            material.occlusionStrength = 1.0f;
-            return material;
-        }
+        constexpr float kBistroOffsetX = 60.0f;
     }
 
     void FluidApp::OnInit(ApplicationCore& app)
@@ -62,83 +62,121 @@ namespace SasamiRenderer
             return;
         }
 
-        StaticModel::BoxDesc floorDesc{};
-        floorDesc.width = 12.0f;
-        floorDesc.height = 0.2f;
-        floorDesc.depth = 12.0f;
-        floorDesc.material = MakeMaterial(0.52f, 0.54f, 0.58f, 0.9f, 0.0f);
-        floorModel->AddBox(floorDesc);
-        floorModel->SetTranslation(0.0f, -0.1f, 0.5f);
+        AddSampleFloorBox(*floorModel, MakeOpaqueSurfaceMaterial(0.52f, 0.54f, 0.58f, 0.9f, 0.0f));
 
         app.FitFluidToSceneBounds(-6.0f, -6.0f, 6.0f, 6.0f, 0.0f);
         // Enabled by default: this app's whole purpose is demoing the fluid system.
+        // The floor box is 0.2 tall centred at y = -0.1, so its top face is exactly y = 0. Leaving
+        // the water there put an alpha-blended surface coplanar with an opaque one, which z-fights.
+        app.SetFluidSurfaceHeight(0.05f);
         app.SetFluidSurfaceEnabled(true);
 
         // Set up directional light (sun)
-        DirectionalLight sun{};
-        sun.yaw       = 45.0f;
-        sun.pitch     = 40.0f;
-        sun.intensity = 2.5f;
-        sun.color.r = 1.00f;
-        sun.color.g = 0.95f;
-        sun.color.b = 0.85f;
-        app.SetDirectionalLight(sun);
+        app.SetDirectionalLight(MakeDefaultSunLight());
 
         // Input bindings
-        auto& input = InputSystem::Instance();
-        static std::vector<boost::signals2::scoped_connection> s_connections;
-        s_connections.clear();
+        m_inputConnections = ConnectCameraInput([this]() { return m_camera; });
 
-        s_connections.emplace_back(input.ConnectOnKeyDown([this](WPARAM k) {
-            if (m_camera) m_camera->OnKeyDown(k);
-        }));
-        s_connections.emplace_back(input.ConnectOnKeyUp([this](WPARAM k) {
-            if (m_camera) m_camera->OnKeyUp(k);
-        }));
-        s_connections.emplace_back(input.ConnectOnMouseDown([this](int x, int y) {
-            if (m_camera) m_camera->OnMouseDown(x, y);
-        }));
-        s_connections.emplace_back(input.ConnectOnMouseUp([this]() {
-            if (m_camera) m_camera->OnMouseUp();
-        }));
-        s_connections.emplace_back(input.ConnectOnMouseMove([this](int x, int y, bool held) {
-            if (m_camera) m_camera->OnMouseMove(x, y, held);
-        }));
-        s_connections.emplace_back(input.ConnectOnMouseWheel([this](int d) {
-            if (m_camera) m_camera->OnMouseWheel(d);
-        }));
+        RegisterBistroCommand(app);
 
-        // UI window
-        ImGuiCoordinator::Instance().RegisterWindow("Fluid", [this, &app]() {
-            if (!m_camera) { ImGui::TextDisabled("Camera unavailable."); return; }
-
-            // FPS
-            ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
-
-            // Camera position
-            const auto& pos = m_camera->Transform().position;
-            ImGui::Text("Pos: (%.2f, %.2f, %.2f)", pos.x, pos.y, pos.z);
-
+        // UI window: one registered tab per page of the "Fluid" window.
+        ImGuiCoordinator& ui = ImGuiCoordinator::Instance();
+        ui.RegisterTab("Fluid", "Fluid", "Water", [this, &app]() { DrawWaterTab(app); });
+        ui.RegisterTab("Fluid", "Fluid", "Smoke", [this, &app]() { DrawSmokeTab(app); });
+        // Voxel occupancy and the wind flow overlay live here rather than in PBRApp:
+        // the projected wind is a fluid solve, so it belongs to the fluid sample.
+        ui.RegisterTab("Fluid", "Fluid", "Voxel / Wind", [this, &app]() {
+            DrawBistroControls(app);
             ImGui::Separator();
-
-            float speed = m_camera->MoveSpeed();
-            if (ImGui::SliderFloat("Move Speed", &speed, 0.1f, 30.0f)) {
-                m_camera->SetMoveSpeed(speed);
-            }
-
-            ImGui::Separator();
-            float waveSpeed = app.GetFluidWaveSpeed();
-            if (ImGui::SliderFloat("Wave Speed", &waveSpeed, 0.5f, 20.0f)) {
-                app.SetFluidWaveSpeed(waveSpeed);
-            }
-            float damping = app.GetFluidDamping();
-            if (ImGui::SliderFloat("Damping", &damping, 0.9f, 1.0f)) {
-                app.SetFluidDamping(damping);
-            }
-            if (ImGui::Button("Inject Splash")) {
-                app.InjectFluidSplash(0.0f, 0.0f, 1.0f, 2.0f);
-            }
+            UI::TextDisabled("1-bit occupancy of opaque static geometry (DX12 only).");
+            app.GetVoxelViewer().DrawContents(app);
         });
+    }
+
+    void FluidApp::DrawWaterTab(ApplicationCore& app)
+    {
+        if (!m_camera) { ImGui::TextDisabled("Camera unavailable."); return; }
+
+        // FPS
+        ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+
+        // Camera position
+        const auto& pos = m_camera->Transform().position;
+        ImGui::Text("Pos: (%.2f, %.2f, %.2f)", pos.x, pos.y, pos.z);
+
+        ImGui::Separator();
+
+        float speed = m_camera->MoveSpeed();
+        if (UI::Volume("Move Speed", &speed, 0.1f, 30.0f)) {
+            m_camera->SetMoveSpeed(speed);
+        }
+
+        ImGui::Separator();
+        float waveSpeed = app.GetFluidWaveSpeed();
+        if (UI::Volume("Wave Speed", &waveSpeed, 0.5f, 20.0f)) {
+            app.SetFluidWaveSpeed(waveSpeed);
+        }
+        float damping = app.GetFluidDamping();
+        if (UI::Volume("Damping", &damping, 0.9f, 1.0f)) {
+            app.SetFluidDamping(damping);
+        }
+        if (ImGui::Button("Inject Splash")) {
+            app.InjectFluidSplash(0.0f, 0.0f, 1.0f, 2.0f);
+        }
+    }
+
+    void FluidApp::DrawSmokeTab(ApplicationCore& app)
+    {
+        // Same knobs as the smoke.* debug commands; they stay available in every app.
+        Renderer& renderer = app.GetRenderer();
+        UI::TextDisabled("Grid-based smoke (GPU Gems ch.38). Its buffers are upload heaps, DX12 only.");
+
+        bool enabled = renderer.GetSmokeEnabled();
+        if (ImGui::Checkbox("Enable smoke (smoke)", &enabled)) {
+            renderer.SetSmokeEnabled(enabled);
+        }
+        bool emitter = renderer.GetSmokeEmitterActive();
+        if (ImGui::Checkbox("Emitter active", &emitter)) {
+            renderer.SetSmokeEmitterActive(emitter);
+        }
+
+        int buoyancyMode = static_cast<int>(renderer.GetSmokeBuoyancyMode());
+        bool modeChanged = ImGui::RadioButton("Buoyancy: density", &buoyancyMode, 0);
+        ImGui::SameLine();
+        modeChanged |= ImGui::RadioButton("temperature (Fedkiw 2001)", &buoyancyMode, 1);
+        if (modeChanged) {
+            renderer.SetSmokeBuoyancyMode(static_cast<SmokeVolumeSim::BuoyancyMode>(buoyancyMode));
+        }
+
+        float vorticity = renderer.GetSmokeVorticity();
+        if (UI::Volume("Vorticity", &vorticity, 0.0f, 10.0f)) {
+            renderer.SetSmokeVorticity(vorticity);
+        }
+        int jacobi = static_cast<int>(renderer.GetSmokeJacobiIterations());
+        if (UI::IntVolume("Jacobi iterations", &jacobi, 1, 200)) {
+            renderer.SetSmokeJacobiIterations(static_cast<uint32_t>(jacobi));
+        }
+
+        // The sim normalises the direction and has no getter for it, so the panel keeps its own copy.
+        float windStrength = renderer.GetSmokeWindStrength();
+        bool windChanged = ImGui::DragFloat3("Wind direction", m_smokeWindDir, 0.01f, -1.0f, 1.0f);
+        windChanged |= UI::Volume("Wind strength", &windStrength, 0.0f, 20.0f);
+        if (windChanged) {
+            renderer.SetSmokeWind(m_smokeWindDir[0], m_smokeWindDir[1], m_smokeWindDir[2], windStrength);
+        }
+
+        ImGui::Separator();
+        UI::Text("Grid %u x %u x %u  cell %.3f",
+                 renderer.GetSmokeCountX(),
+                 renderer.GetSmokeCountY(),
+                 renderer.GetSmokeCountZ(),
+                 renderer.GetSmokeCellSize());
+        UI::Text("Origin (%.2f, %.2f, %.2f)",
+                 renderer.GetSmokeOriginX(),
+                 renderer.GetSmokeOriginY(),
+                 renderer.GetSmokeOriginZ());
+        UI::Text("Solid obstacles: %s (smoke.solid 1, needs voxel.scene)",
+                 renderer.IsSmokeSolidActive() ? "on" : "off");
     }
 
     void FluidApp::OnUpdate(ApplicationCore& app, float deltaTime)
@@ -159,16 +197,71 @@ namespace SasamiRenderer
 
     void FluidApp::OnShutdown(ApplicationCore& app)
     {
+        m_inputConnections.clear();
         app.ClearObjects();
         m_camera = nullptr;
+        m_bistroModel = nullptr;
     }
 
-    void FluidApp::OnResize(ApplicationCore& app, UINT width, UINT height)
+    bool FluidApp::LoadBistro(ApplicationCore& app, std::string& error)
     {
-        (void)app;
-        (void)width;
-        (void)height;
+        if (m_bistroModel) {
+            return true;
+        }
+        StaticModel* model = app.CreateStaticModel();
+        if (!model) {
+            error = "static model creation failed";
+            return false;
+        }
+        // Synchronous, as in PBRApp: parsing this FBX on a worker thread kills the process.
+        if (!model->LoadModel(BISTRO_EXTERIOR_PATH, StaticModel::ModelFormat::Fbx, 1.0f)) {
+            app.DeleteObject(model);
+            error = std::string("load failed: Assets/") + BISTRO_EXTERIOR_PATH;
+            return false;
+        }
+        // Same +X offset as PBRApp, which also keeps the water pool at the origin clear.
+        model->SetTranslation(kBistroOffsetX, 0.0f, 0.0f);
+        m_bistroModel = model;
+        return true;
     }
+
+    void FluidApp::DrawBistroControls(ApplicationCore& app)
+    {
+        if (m_bistroModel) {
+            UI::Text("Bistro loaded at x=%.0f (fluid.bistro)", kBistroOffsetX);
+            return;
+        }
+        if (UI::Button("Load Bistro")) {
+            m_bistroError.clear();
+            LoadBistro(app, m_bistroError);
+        }
+        ImGui::SameLine();
+        UI::TextDisabled("blocks a few seconds; obstacles for voxel/wind/smoke");
+        if (!m_bistroError.empty()) {
+            ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Error: %s", m_bistroError.c_str());
+        }
+    }
+
+    void FluidApp::RegisterBistroCommand(ApplicationCore& app)
+    {
+        Debug::DebugCommandRegistry* registry = app.GetDebugCommandRegistry();
+        if (!registry) {
+            return;
+        }
+        // The lambda captures this; FluidApp outlives the registry (ApplicationEntryPoint.h
+        // declares the application before ApplicationCore).
+        registry->Register("fluid.bistro",
+            "- load the Bistro exterior (sync) at x=60 as fluid/wind obstacles; no-op if already loaded",
+            [this, &app](const std::vector<std::string>&) -> std::string {
+                const bool already = m_bistroModel != nullptr;
+                std::string error;
+                if (!LoadBistro(app, error)) {
+                    return "ERR " + error;
+                }
+                return already ? "OK bistro already loaded" : "OK bistro loaded offsetX=60";
+            });
+    }
+
 }
 
-SASAMI_IMPLEMENT_APPLICATION(SasamiRenderer::FluidApp, 1280, 720, L"Fluid Sample")
+SASAMI_IMPLEMENT_APPLICATION(SasamiEngine::Sample::Fluid::FluidApp, 1280, 720, L"Fluid Sample")

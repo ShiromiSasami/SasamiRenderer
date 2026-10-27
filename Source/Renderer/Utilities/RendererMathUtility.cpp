@@ -1,18 +1,20 @@
 #include "Renderer/Utilities/RendererMathUtility.h"
 
-#include "Renderer/Structures/Float3.h"
+#include "Foundation/Math/Float3.h"
 
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
+#include <vector>
 
 namespace
 {
-    using SasamiRenderer::Math::Float3;
-    using SasamiRenderer::Math::Cross;
-    using SasamiRenderer::Math::Dot;
-    using SasamiRenderer::Math::Normalize;
+    using SasamiEngine::Foundation::Math::Float3;
+    using SasamiEngine::Foundation::Math::Cross;
+    using SasamiEngine::Foundation::Math::Dot;
+    using SasamiEngine::Foundation::Math::Normalize;
 
     static float ClampFloat(float x, float minV, float maxV)
     {
@@ -120,6 +122,104 @@ namespace
         return c0 * (1.0f - ty) + c1 * ty;
     }
 
+    struct EquirectMipLevel
+    {
+        std::uint32_t width = 0;
+        std::uint32_t height = 0;
+        std::vector<float> pixels; // RGB, same layout as the source equirect.
+    };
+
+    static std::vector<EquirectMipLevel> BuildEquirectMipChain(const std::vector<float>& hdrPixels,
+                                                               std::uint32_t width,
+                                                               std::uint32_t height)
+    {
+        // Box-filtered (2x2 average) mip chain down to 1x1. Level 0 is the source itself.
+        std::vector<EquirectMipLevel> chain;
+        EquirectMipLevel base;
+        base.width = width;
+        base.height = height;
+        base.pixels = hdrPixels;
+        chain.push_back(std::move(base));
+        while (chain.back().width > 1u || chain.back().height > 1u) {
+            const EquirectMipLevel& src = chain.back();
+            EquirectMipLevel dst;
+            dst.width = (src.width > 1u) ? (src.width / 2u) : 1u;
+            dst.height = (src.height > 1u) ? (src.height / 2u) : 1u;
+            dst.pixels.assign(static_cast<std::size_t>(dst.width) * dst.height * 3u, 0.0f);
+            for (std::uint32_t y = 0; y < dst.height; ++y) {
+                const std::uint32_t sy0 = y * 2u;
+                const std::uint32_t sy1 = (sy0 + 1u < src.height) ? (sy0 + 1u) : sy0;
+                for (std::uint32_t x = 0; x < dst.width; ++x) {
+                    const std::uint32_t sx0 = x * 2u;
+                    const std::uint32_t sx1 = (sx0 + 1u < src.width) ? (sx0 + 1u) : sx0;
+                    for (std::uint32_t c = 0; c < 3u; ++c) {
+                        const float s00 = src.pixels[(static_cast<std::size_t>(sy0) * src.width + sx0) * 3u + c];
+                        const float s10 = src.pixels[(static_cast<std::size_t>(sy0) * src.width + sx1) * 3u + c];
+                        const float s01 = src.pixels[(static_cast<std::size_t>(sy1) * src.width + sx0) * 3u + c];
+                        const float s11 = src.pixels[(static_cast<std::size_t>(sy1) * src.width + sx1) * 3u + c];
+                        dst.pixels[(static_cast<std::size_t>(y) * dst.width + x) * 3u + c] =
+                            (s00 + s10 + s01 + s11) * 0.25f;
+                    }
+                }
+            }
+            chain.push_back(std::move(dst));
+        }
+        return chain;
+    }
+
+    static Float3 SampleEquirectMipLevel(const EquirectMipLevel& level, float u, float v)
+    {
+        // Bilinear: wrap in u, clamp in v.
+        const float fx = u * static_cast<float>(level.width) - 0.5f;
+        const float fy = v * static_cast<float>(level.height) - 0.5f;
+        const int x0 = static_cast<int>(std::floor(fx));
+        const int y0 = static_cast<int>(std::floor(fy));
+        const float tx = fx - static_cast<float>(x0);
+        const float ty = fy - static_cast<float>(y0);
+
+        const int w = static_cast<int>(level.width);
+        const int h = static_cast<int>(level.height);
+        auto wrapX = [w](int x) -> int {
+            x %= w;
+            if (x < 0) x += w;
+            return x;
+        };
+        auto clampY = [h](int y) -> int {
+            if (y < 0) return 0;
+            if (y >= h) return h - 1;
+            return y;
+        };
+        auto fetch = [&](int x, int y) -> Float3 {
+            const std::size_t idx = (static_cast<std::size_t>(clampY(y)) * level.width +
+                                     static_cast<std::size_t>(wrapX(x))) * 3u;
+            return { level.pixels[idx + 0], level.pixels[idx + 1], level.pixels[idx + 2] };
+        };
+
+        const Float3 c0 = fetch(x0, y0) * (1.0f - tx) + fetch(x0 + 1, y0) * tx;
+        const Float3 c1 = fetch(x0, y0 + 1) * (1.0f - tx) + fetch(x0 + 1, y0 + 1) * tx;
+        return c0 * (1.0f - ty) + c1 * ty;
+    }
+
+    static Float3 SampleEquirectLod(const std::vector<EquirectMipLevel>& chain, const Float3& dir, float lod)
+    {
+        // Same direction -> UV mapping as SampleEquirect; trilinear blend between adjacent mip levels.
+        const float pi = 3.1415926535f;
+        const float u = std::atan2(dir.z, dir.x) / (2.0f * pi) + 0.5f;
+        const float v = std::acos(ClampFloat(dir.y, -1.0f, 1.0f)) / pi;
+
+        const float maxLod = static_cast<float>(chain.size() - 1u);
+        lod = ClampFloat(lod, 0.0f, maxLod);
+        const std::size_t lo = static_cast<std::size_t>(std::floor(lod));
+        const std::size_t hi = (lo + 1u < chain.size()) ? (lo + 1u) : lo;
+        const float t = lod - static_cast<float>(lo);
+        const Float3 a = SampleEquirectMipLevel(chain[lo], u, v);
+        if (hi == lo || t <= 0.0f) {
+            return a;
+        }
+        const Float3 b = SampleEquirectMipLevel(chain[hi], u, v);
+        return a * (1.0f - t) + b * t;
+    }
+
     static Float3 CosineSampleHemisphere(float u1, float u2)
     {
         // Cosine-weighted hemisphere sampling:
@@ -180,11 +280,11 @@ namespace
 
     static float GeometrySchlickGGX(float nDotV, float roughness)
     {
-        // Schlick-GGX G1 with Disney remapping:
-        // k = (roughness + 1)^2 / 8
+        // Schlick-GGX G1 for image-based lighting:
+        // k = alpha / 2, alpha = roughness^2 (Karis 2013). The Disney (roughness + 1)^2 / 8
+        // remap is only for analytic lights; using it here over-darkens the LUT.
         // G1 = N.V / (N.V * (1-k) + k)
-        const float r = roughness + 1.0f;
-        const float k = (r * r) / 8.0f;
+        const float k = (roughness * roughness) * 0.5f;
         return nDotV / MaxFloat(nDotV * (1.0f - k) + k, 1e-6f);
     }
 
@@ -196,9 +296,11 @@ namespace
         float a = 0.0f;
         float b = 0.0f;
         const Float3 n = { 0.0f, 0.0f, 1.0f };
+        // Sample D and evaluate G with the same roughness, or the LUT integrates a mismatched BRDF.
+        roughness = MaxFloat(roughness, 0.04f);
         for (std::uint32_t i = 0; i < sampleCount; ++i) {
             const auto xi = Hammersley(i, sampleCount);
-            const Float3 h = ImportanceSampleGGX(xi, MaxFloat(roughness, 0.04f), n);
+            const Float3 h = ImportanceSampleGGX(xi, roughness, n);
             const Float3 l = Normalize(h * (2.0f * Dot(v, h)) - v);
 
             const float nDotL = MaxFloat(l.z, 0.0f);
@@ -240,7 +342,7 @@ namespace
     }
 }
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace RendererMathUtility
     {
@@ -409,6 +511,13 @@ namespace SasamiRenderer
             // Specular prefilter (split-sum first term):
             // prefiltered(R, roughness) ~= sum L(wi) * (N.wi) / sum (N.wi)
             // wi are generated via GGX importance sampling per roughness(mip).
+            // Source mip selection from the sample PDF to suppress aliasing/fireflies:
+            // Colbert & Krivanek 2007, "GPU-Based Importance Sampling" (GPU Gems 3 ch.20); Karis 2013 (UE4 notes).
+            // lod = 0.5*log2(omegaS/omegaP) + 1, omegaS = 1/(N*pdf), omegaP = base texel solid angle.
+            const float pi = 3.1415926535f;
+            const std::vector<EquirectMipLevel> sourceMips = BuildEquirectMipChain(hdrPixels, hdrWidth, hdrHeight);
+            const float texelSolidAngleBase =
+                (2.0f * pi / static_cast<float>(hdrWidth)) * (pi / static_cast<float>(hdrHeight));
             for (std::uint32_t face = 0; face < 6; ++face) {
                 for (std::uint32_t mip = 0; mip < mipLevels; ++mip) {
                     const std::uint32_t size = (baseFaceSize >> mip) > 0 ? (baseFaceSize >> mip) : 1u;
@@ -422,14 +531,25 @@ namespace SasamiRenderer
                             const Float3 v = r;
                             Float3 acc = { 0.0f, 0.0f, 0.0f };
                             float weight = 0.0f;
+                            const float ggxRoughness = MaxFloat(roughness, 0.04f);
+                            const float ggxAlpha = ggxRoughness * ggxRoughness;
                             for (std::uint32_t i = 0; i < sampleCount; ++i) {
                                 const auto xi = Hammersley(i, sampleCount);
-                                const Float3 h = ImportanceSampleGGX(xi, MaxFloat(roughness, 0.04f), r);
+                                const Float3 h = ImportanceSampleGGX(xi, ggxRoughness, r);
                                 const float vDotH = MaxFloat(Dot(v, h), 0.0f);
                                 const Float3 l = Normalize(h * (2.0f * vDotH) - v);
                                 const float nDotL = MaxFloat(Dot(r, l), 0.0f);
                                 if (nDotL > 0.0f) {
-                                    const Float3 s = SampleEquirect(hdrPixels, hdrWidth, hdrHeight, l);
+                                    const float nDotH = MaxFloat(Dot(r, h), 0.0f);
+                                    const float a2 = ggxAlpha * ggxAlpha;
+                                    const float denom = nDotH * nDotH * (a2 - 1.0f) + 1.0f;
+                                    const float d = a2 / MaxFloat(pi * denom * denom, 1e-12f);
+                                    const float pdf = d * nDotH / MaxFloat(4.0f * vDotH, 1e-6f);
+                                    const float omegaS = 1.0f / (static_cast<float>(sampleCount) * MaxFloat(pdf, 1e-12f));
+                                    const float sinPolar = std::sqrt(MaxFloat(0.0f, 1.0f - l.y * l.y));
+                                    const float omegaP = texelSolidAngleBase * MaxFloat(sinPolar, 1e-4f);
+                                    const float lod = 0.5f * std::log2(omegaS / omegaP) + 1.0f;
+                                    const Float3 s = SampleEquirectLod(sourceMips, l, lod);
                                     acc += s * nDotL;
                                     weight += nDotL;
                                 }

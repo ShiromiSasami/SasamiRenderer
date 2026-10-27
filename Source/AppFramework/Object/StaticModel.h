@@ -6,7 +6,7 @@
 #include "Object/SObject.h"
 #include "Component/MeshComponent.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     class ApplicationCore;
 
@@ -57,6 +57,7 @@ namespace SasamiRenderer
         void AddSphere(const SphereDesc& desc = {});
         bool SetMaterial(size_t meshIndex, const SurfaceMaterial& material);
         const SurfaceMaterial* GetMaterial(size_t meshIndex) const;
+        bool SetDynamicVertices(size_t meshIndex, bool dynamic);
         void ClearModel();
         void SetTranslation(float x, float y, float z);
 
@@ -64,6 +65,16 @@ namespace SasamiRenderer
         ModelFormat GetModelFormat() const          { return MeshComponentRef().GetLoadedFormat(); }
         float GetModelUniformScale() const          { return MeshComponentRef().GetLoadedUniformScale(); }
         Vector3 GetModelTranslation() const         { return MeshComponentRef().GetTranslation(); }
+
+        using InstanceTransform = MeshComponent::InstanceTransform;
+        void SetInstanceTransforms(std::vector<InstanceTransform> transforms)
+        {
+            MeshComponentRef().SetInstanceTransforms(std::move(transforms));
+        }
+        const std::vector<InstanceTransform>& GetInstanceTransforms() const
+        {
+            return MeshComponentRef().GetInstanceTransforms();
+        }
 
         MeshComponent& MeshComponentRef()
         {
@@ -79,3 +90,4 @@ namespace SasamiRenderer
         }
     };
 }
+namespace SasamiEngine { using namespace App; }

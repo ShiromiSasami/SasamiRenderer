@@ -10,7 +10,7 @@
 #include "Renderer/Scene/SurfaceMaterial.h"
 #include "Renderer/Structures/Mesh.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     class SkinnedMeshComponent : public IComponent
     {
@@ -28,6 +28,13 @@ namespace SasamiRenderer
         int CurrentAnimation() const;
         void SetTranslation(float x, float y, float z);
         void SetUniformScale(float scale);
+        // Row-major, row-vector component transform (translation in [12..14]).
+        void SetModelMatrix(const float matrix[16]) { for (int i = 0; i < 16; ++i) m_model[i] = matrix[i]; }
+        const float* GetModelMatrix() const { return m_model; }
+        // Axis-aligned bounds of the bind-pose vertices in component space (before GetModelMatrix).
+        // Animation is ignored, so a posed character can stick out of them. False when empty.
+        bool ComputeLocalBounds(float outMin[3], float outMax[3]) const;
+        const std::string& GetAssetPath() const { return m_debugAssetPath; }
         void Clear();
 
     private:
@@ -38,6 +45,7 @@ namespace SasamiRenderer
             std::shared_ptr<const CpuTextureRgba8> albedoTexture;
             std::shared_ptr<const CpuTextureRgba8> occlusionTexture;
             std::shared_ptr<const CpuTextureRgba8> normalTexture;
+            std::shared_ptr<const CpuTextureRgba8> emissiveTexture;
             SurfaceMaterial material;
             bool transparent = false;
         };
@@ -54,3 +62,4 @@ namespace SasamiRenderer
         };
     };
 }
+namespace SasamiEngine { using namespace App; }

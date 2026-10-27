@@ -3,7 +3,7 @@
 #include <array>
 #include <string>
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     class ApplicationResourcePaths final
     {
@@ -23,3 +23,4 @@ namespace SasamiRenderer
                                               bool& outIsHdr);
     };
 }
+namespace SasamiEngine { using namespace App; }

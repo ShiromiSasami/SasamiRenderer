@@ -22,7 +22,7 @@
 
 using Microsoft::WRL::ComPtr;
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {
@@ -35,8 +35,8 @@ namespace SasamiRenderer
         bool CompileCS(ID3D12Device* dev, const wchar_t* relPath, const char* entry, ComPtr<ID3DBlob>& outBlob,
                        std::string& outError)
         {
-            const std::wstring csTarget = ShaderCompilationService::ResolveEffectiveComputeShaderTarget(dev, "6_6");
-            const std::string profileNarrow(csTarget.begin(), csTarget.end());
+            const std::string profileNarrow =
+                "cs_" + ShaderCompilationService::ResolveEffectiveShaderModel(dev, "6_6");
 
             std::vector<uint8_t> bytecode;
             if (!ShaderCompilationService::GetOrCompileShaderBytecodeDxc(
@@ -430,4 +430,4 @@ namespace SasamiRenderer
         return true;
     }
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

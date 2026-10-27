@@ -1,17 +1,9 @@
-// MeshShader_MS.hlsl - Mesh Shader: per-meshlet triangle output
-// Reads: t0=MeshletDesc[], t1=VertexBuffer (StructuredBuffer<Vertex>),
-//        t2=MeshletIndex buffer, b0=CameraCB, b1=DrawCB
-// Outputs: up to 192 vertices (64 tris * 3), up to 64 primitives.
+// MeshShader_MS.hlsl - Mesh Shader: per-cluster triangle output for virtual-geometry clusters.
+// Reads: t0=ClusterDesc[] (indices from AS payload), t1=VertexBuffer, t2=cluster-local vertex
+//        index remap, t6=packed cluster triangles, b0=CameraCB, b1=DrawCB
+// Outputs: up to kClusterMaxVertices vertices, up to kClusterMaxTriangles primitives.
 
-#include "Shared/Common/MeshletConstants.hlsli"
-
-struct MeshletDesc
-{
-    uint   indexOffset;
-    uint   indexCount;
-    float3 boundsCenter;
-    float  boundsRadius;
-};
+#include "Raster/Geometry/MeshShader/MeshShader_Common.hlsli"
 
 struct Vertex
 {
@@ -21,41 +13,13 @@ struct Vertex
     float2 uv;
 };
 
-struct DrawCBData
-{
-    row_major float4x4 model;
-    row_major float4x4 inverseModel;
-    uint     meshletOffset;
-    uint     meshletCount;
-    uint     pad0;
-    uint     pad1;
-};
+StructuredBuffer<Vertex> g_vertices         : register(t1);
+// StructuredBuffer, not a typed Buffer<uint>: t2/t6 are bound as inline root descriptor SRVs
+// (RenderPipelineStateCacheMeshShader.cpp) and root SRVs may only be raw or structured buffers.
+StructuredBuffer<uint>   g_clusterVertices  : register(t2);
+StructuredBuffer<uint>   g_clusterTriangles : register(t6);
 
-cbuffer CameraCB : register(b0)
-{
-    row_major float4x4 g_viewProj;
-    row_major float4x4 g_proj;
-    float3   g_cameraPos;
-    float    g_cameraPad;
-}
-
-cbuffer DrawCB : register(b1)
-{
-    DrawCBData g_draw;
-}
-
-StructuredBuffer<MeshletDesc> g_meshletDescs   : register(t0);
-StructuredBuffer<Vertex>      g_vertices        : register(t1);
-Buffer<uint>                  g_meshletIndices  : register(t2);
-
-struct ASPayload
-{
-    uint     meshletIndex;
-    row_major float4x4 model;
-    row_major float4x4 inverseModel;
-};
-
-// Must match PBR_PS.hlsl PSInput
+// Must match MeshShaderGBuffer_PS.hlsl PSInput
 struct PSInput
 {
     float4 position : SV_POSITION;
@@ -64,37 +28,22 @@ struct PSInput
     float4 color    : COLOR0;
     float4 lightPos : TEXCOORD1;
     float3 worldPos : TEXCOORD2;
+    // Cluster provenance for the debug views (g_clusterDebugMode). nointerpolation because
+    // these are integers and constant across the whole cluster.
+    nointerpolation uint2 clusterInfo : TEXCOORD3; // x = absolute cluster index, y = owning group
 };
 
-// Meshlet size = 64 triangles (kMaxTrianglesPerMeshlet in MeshletBuffer.h).
-// Each triangle is output as-is; culled meshlets never reach the MS at all
-// (AS only calls DispatchMesh(1,1,1,...) for meshlets that pass the cull).
-// kMaxTrianglesPerMeshlet comes from Shared/Common/MeshletConstants.hlsli.
-static const uint GROUP_SIZE  = kMaxTrianglesPerMeshlet; // one wave, one thread per triangle
-static const uint kMaxVerts   = 3u * kMaxTrianglesPerMeshlet; // 192 verts (no vertex sharing)
-static const uint kMaxPrims   = kMaxTrianglesPerMeshlet;      // 64 prims
-
-// Per-primitive attribute: carries the exact meshlet index to the PS.
-// Currently unread - the MS pipeline pairs with CookTorranceGGX_PS, and the
-// meshlet debug view runs on the VS path (see MeshletDebug_PS.hlsl), which cannot
-// receive a per-primitive attribute.  Kept because it is the correct source for the
-// meshlet index once a mesh-shader debug PSO exists; unconsumed MS outputs are legal.
-struct MeshletPrimAttr
-{
-    uint meshletIdx : MESHLET_INDEX;
-};
-
-// Helper: build a PSInput by fetching vertex 'vi' and transforming it.
-PSInput MakeVertex(uint vi, row_major float4x4 model, row_major float4x4 invModel)
+// Build a PSInput from vertex 'vi', transformed with the current draw's model matrix
+// (DrawCB, b1 - visible to the mesh shader stage).
+PSInput MakeVertex(uint vi)
 {
     Vertex vert = g_vertices[vi];
 
-    float4 worldPos4  = mul(float4(vert.position, 1.0f), model);
-    float3x3 normalMat = (float3x3)invModel;
+    float4 worldPos4    = mul(float4(vert.position, 1.0f), g_draw.model);
+    float3x3 normalMat  = (float3x3)g_draw.inverseModel;
     // Matrix-first so the normal gets transpose(inverse(model)); positions above use
-    // the row-vector product, so mul(normal, normalMat) would apply the inverse
-    // rotation instead and light rotated meshes from the wrong side.
-    float3 worldNorm   = normalize(mul(normalMat, vert.normal));
+    // the row-vector product on the other side.
+    float3 worldNorm     = normalize(mul(normalMat, vert.normal));
 
     PSInput o;
     o.position = mul(worldPos4, g_viewProj);
@@ -106,33 +55,28 @@ PSInput MakeVertex(uint vi, row_major float4x4 model, row_major float4x4 invMode
     return o;
 }
 
-[numthreads(GROUP_SIZE, 1, 1)]
+[numthreads(kClusterMaxTriangles, 1, 1)]
 [outputtopology("triangle")]
 void MS_Meshlet(
-    in  payload ASPayload      inPayload,
-    uint        gtid           : SV_GroupThreadID,
-    out vertices PSInput       outVerts[kMaxVerts],
-    out indices  uint3         outPrims[kMaxPrims],
-    out primitives MeshletPrimAttr outPrimAttrs[kMaxPrims])
+    uint         gtid : SV_GroupThreadID,
+    uint         gid  : SV_GroupID,
+    in  payload  ASPayload inPayload,
+    out vertices PSInput   outVerts[kClusterMaxVertices],
+    out indices  uint3     outPrims[kClusterMaxTriangles])
 {
-    MeshletDesc desc   = g_meshletDescs[inPayload.meshletIndex];
-    uint inputTriCount = min(desc.indexCount, kMaxTrianglesPerMeshlet);
+    ClusterDesc c = g_clusters[inPayload.clusterIndices[gid]];
 
-    SetMeshOutputCounts(inputTriCount * 3u, inputTriCount);
+    SetMeshOutputCounts(c.vertexCount, c.triangleCount);
 
-    // Strided loop instead of a single `if (gtid < inputTriCount)`: if GROUP_SIZE
-    // is ever raised past kMaxTrianglesPerMeshlet this still emits every triangle
-    // exactly once instead of silently dropping the ones beyond thread count.
-    for (uint t = gtid; t < inputTriCount; t += GROUP_SIZE)
+    if (gtid < c.vertexCount)
     {
-        uint baseIdx = desc.indexOffset + t * 3u;
-        uint vBase   = t * 3u;
+        outVerts[gtid] = MakeVertex(g_clusterVertices[c.vertexOffset + gtid]);
+        outVerts[gtid].clusterInfo = uint2(inPayload.clusterIndices[gid], c.group);
+    }
 
-        outVerts[vBase + 0] = MakeVertex(g_meshletIndices[baseIdx + 0u], inPayload.model, inPayload.inverseModel);
-        outVerts[vBase + 1] = MakeVertex(g_meshletIndices[baseIdx + 1u], inPayload.model, inPayload.inverseModel);
-        outVerts[vBase + 2] = MakeVertex(g_meshletIndices[baseIdx + 2u], inPayload.model, inPayload.inverseModel);
-
-        outPrims[t] = uint3(vBase, vBase + 1u, vBase + 2u);
-        outPrimAttrs[t].meshletIdx = inPayload.meshletIndex;
+    if (gtid < c.triangleCount)
+    {
+        uint packed = g_clusterTriangles[c.triangleOffset + gtid];
+        outPrims[gtid] = uint3(packed & 0xFFu, (packed >> 8) & 0xFFu, (packed >> 16) & 0xFFu);
     }
 }

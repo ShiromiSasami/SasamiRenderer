@@ -12,7 +12,7 @@
 #include <string_view>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     class RenderPassRegistry
     {
@@ -35,10 +35,11 @@ namespace SasamiRenderer
         };
 
         static constexpr size_t kBuiltinPassCount =
-            static_cast<size_t>(RendererEnums::RenderPassType::ScreenSpaceReflectionComposite) + 1u;
+            static_cast<size_t>(RendererEnums::RenderPassType::ToonOutline) + 1u;
 
         void SetBuiltinPasses(std::array<std::shared_ptr<IRenderPass>, kBuiltinPassCount> passes);
         void UseDefaultRenderNodePreset();
+        void UseToonRenderNodePreset();
         void SetRenderNodePreset(std::shared_ptr<IRenderNode> node);
 
         NodeHandle AddNode(const std::shared_ptr<IRenderNode>& renderNode);
@@ -92,3 +93,7 @@ namespace SasamiRenderer
         std::vector<RenderPassType>               m_renderPassQueueTypes;
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

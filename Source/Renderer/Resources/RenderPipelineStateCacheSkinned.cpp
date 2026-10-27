@@ -18,7 +18,7 @@
 
 #pragma comment(lib, "d3dcompiler.lib")
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     using Microsoft::WRL::ComPtr;
 
@@ -89,14 +89,18 @@ namespace SasamiRenderer
 
         // -------------------------------------------------------------------------
         // Skinned mesh root signature: same first 16 params as m_rootSignature, then
-        // [16] b3 bone CB (VS-only) and [17] the material normal map table copied from
-        // m_rootSignature[16]. The bone CB keeps index 16 so the skinned draw path's
-        // existing root-parameter indices stay valid; the normal table is appended after
-        // it because OpaqueGBuffer_PS (shared with the skinned GBuffer PSO) declares t17.
+        // [16] b3 bone CB (VS-only), [17] the material normal map table copied from
+        // m_rootSignature[16] and [18] the emissive table copied from m_rootSignature[17].
+        // The bone CB keeps index 16 so the skinned draw path's existing root-parameter
+        // indices stay valid; the material tables are appended after it because
+        // OpaqueGBuffer_PS (shared with the skinned GBuffer PSO) declares t17 and t18
+        // (and t19, the face-shadow table copied from m_rootSignature[18] into [19]).
         // -------------------------------------------------------------------------
-        D3D12_ROOT_PARAMETER skinnedRootParams[18] = {};
+        D3D12_ROOT_PARAMETER skinnedRootParams[20] = {};
         for (int i = 0; i < 16; ++i) skinnedRootParams[i] = inputs.rootParams[i];
         skinnedRootParams[17] = inputs.rootParams[16];
+        skinnedRootParams[18] = inputs.rootParams[17];
+        skinnedRootParams[19] = inputs.rootParams[18]; // t19 face-shadow map
         skinnedRootParams[16].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
         skinnedRootParams[16].Descriptor.ShaderRegister = 3; // b3
         skinnedRootParams[16].Descriptor.RegisterSpace  = 0;
@@ -156,6 +160,8 @@ namespace SasamiRenderer
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoSkinnedTransparent = psoSkinned;
         psoSkinnedTransparent.BlendState = inputs.transparentBlend;
         psoSkinnedTransparent.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+        // Colour-only PS, for the same reason as the non-skinned transparent PSO.
+        psoSkinnedTransparent.PS = { inputs.forwardColorOnlyPS->GetBufferPointer(), inputs.forwardColorOnlyPS->GetBufferSize() };
         psoSkinnedTransparent.NumRenderTargets = 1;
         for (UINT rtIndex = 1; rtIndex < 5; ++rtIndex)
             psoSkinnedTransparent.RTVFormats[rtIndex] = DXGI_FORMAT_UNKNOWN;
@@ -188,7 +194,8 @@ namespace SasamiRenderer
         psoSkinnedShadow.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
         psoSkinnedShadow.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
         psoSkinnedShadow.DepthStencilState.DepthEnable = TRUE;
-        psoSkinnedShadow.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+        // Reverse-Z: near=1.0, far=0.0, so a fragment passes when its depth is >= what's stored.
+        psoSkinnedShadow.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
         ApplyCommonPsoDefaults(psoSkinnedShadow);
         psoSkinnedShadow.NumRenderTargets = 0;
         psoSkinnedShadow.DSVFormat = DXGI_FORMAT_D32_FLOAT;
@@ -200,7 +207,17 @@ namespace SasamiRenderer
         psoSkinnedShadowD16.RasterizerState = inputs.pointSpotShadowRast;
         if (!createPipelineState("SkinnedShadowD16", psoSkinnedShadowD16, m_skinnedShadowD16PipelineState)) { return false; }
 
+        // Alpha-tested (glTF MASK) variants. SkinnedMesh_VS already outputs the UV and colour that
+        // ShadowAlphaMask_PS reads, so only the PS is added.
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoSkinnedShadowAlphaMask = psoSkinnedShadow;
+        psoSkinnedShadowAlphaMask.PS = { inputs.shadowAlphaMaskPS->GetBufferPointer(), inputs.shadowAlphaMaskPS->GetBufferSize() };
+        if (!createPipelineState("SkinnedShadowAlphaMask", psoSkinnedShadowAlphaMask, m_skinnedShadowAlphaMaskPipelineState)) { return false; }
+
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoSkinnedShadowAlphaMaskD16 = psoSkinnedShadowD16;
+        psoSkinnedShadowAlphaMaskD16.PS = psoSkinnedShadowAlphaMask.PS;
+        if (!createPipelineState("SkinnedShadowAlphaMaskD16", psoSkinnedShadowAlphaMaskD16, m_skinnedShadowAlphaMaskD16PipelineState)) { return false; }
+
         return true;
     }
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

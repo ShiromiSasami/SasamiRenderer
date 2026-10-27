@@ -14,7 +14,7 @@
 #include "Renderer/Passes/Core/RenderPassSetupContext.h"
 #include "Renderer/Profiling/GpuTimestampProfiler.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {
@@ -71,11 +71,54 @@ namespace SasamiRenderer
             if ((state & D3D12_RESOURCE_STATE_PRESENT) != 0) {
                 return RhiResourceState::Present;
             }
+            if ((state & D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT) != 0) {
+                return RhiResourceState::IndirectArgument;
+            }
             if ((state & (D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
                           D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)) != 0) {
                 return RhiResourceState::ShaderResource;
             }
+            // Reaching here with a non-zero state means the mapping does not know it, and the
+            // resource is about to be described to the RHI as Common -- which the Vulkan backend
+            // answers with conservative barrier masks, so it is safe, but the fact that a state
+            // was lost is otherwise invisible. D3D12_RESOURCE_STATE_COMMON and _PRESENT are both
+            // zero and land here legitimately, so only a non-zero state is worth reporting.
+            if (state != 0) {
+                // Render-thread only, and each distinct state is announced once: this must not
+                // turn into per-frame logging.
+                static std::vector<D3D12_RESOURCE_STATES> reportedStates;
+                if (std::find(reportedStates.begin(), reportedStates.end(), state) == reportedStates.end()) {
+                    reportedStates.push_back(state);
+                    char message[160] = {};
+                    sprintf_s(message,
+                              "RenderGraph::ToRhiResourceState: unmapped D3D12 state 0x%X treated as Common.\n",
+                              static_cast<unsigned int>(state));
+                    DebugLog(message);
+                }
+            }
             return RhiResourceState::Common;
+        }
+
+        // The inverse, and deliberately a local copy rather than the backend's ToDx12State: that
+        // one lives behind #if RHI_DIRECTX12, while this file builds for every backend. It must
+        // agree with the RHI's own mapping -- that is the whole point of calling it "realised".
+        D3D12_RESOURCE_STATES ToRealisedD3D12State(RhiResourceState state)
+        {
+            switch (state) {
+            case RhiResourceState::RenderTarget:    return D3D12_RESOURCE_STATE_RENDER_TARGET;
+            case RhiResourceState::DepthWrite:      return D3D12_RESOURCE_STATE_DEPTH_WRITE;
+            case RhiResourceState::DepthRead:       return D3D12_RESOURCE_STATE_DEPTH_READ;
+            case RhiResourceState::ShaderResource:
+                return static_cast<D3D12_RESOURCE_STATES>(
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            case RhiResourceState::UnorderedAccess: return D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            case RhiResourceState::CopySource:      return D3D12_RESOURCE_STATE_COPY_SOURCE;
+            case RhiResourceState::CopyDest:        return D3D12_RESOURCE_STATE_COPY_DEST;
+            case RhiResourceState::Present:         return D3D12_RESOURCE_STATE_PRESENT;
+            case RhiResourceState::IndirectArgument: return D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+            case RhiResourceState::Common:
+            default:                                return D3D12_RESOURCE_STATE_COMMON;
+            }
         }
     }
 
@@ -221,6 +264,26 @@ namespace SasamiRenderer
             return;
         }
         m_passes[node.index].writes.push_back(resource);
+    }
+
+    void RenderGraph::ReadAsCopySource(NodeHandle node, ResourceHandle resource)
+    {
+        if (!node.IsValid() || node.index >= m_passes.size() || !resource.IsValid()) {
+            return;
+        }
+        // Registered as a read as well, so ordering and hazard analysis treat it like any other
+        // read; copySources only redirects the state PreparePassResources asks for.
+        m_passes[node.index].reads.push_back(resource);
+        m_passes[node.index].copySources.push_back(resource);
+    }
+
+    void RenderGraph::WriteAsCopyDest(NodeHandle node, ResourceHandle resource)
+    {
+        if (!node.IsValid() || node.index >= m_passes.size() || !resource.IsValid()) {
+            return;
+        }
+        m_passes[node.index].writes.push_back(resource);
+        m_passes[node.index].copyDests.push_back(resource);
     }
 
     void RenderGraph::UseColorTarget(NodeHandle node, ResourceHandle resource)
@@ -377,8 +440,17 @@ namespace SasamiRenderer
 
         if (resource.rhiResource.IsValid()) {
             const RhiResourceState requiredRhiState = ToRhiResourceState(requiredState);
+
+            // Record what the RHI actually leaves the resource in, not what was asked for. The
+            // round trip is lossy: a request for PIXEL_SHADER_RESOURCE (0x80) maps to
+            // RhiResourceState::ShaderResource, which the RHI realises as NON_PIXEL|PIXEL (0xC0).
+            // Storing the request meant currentState claimed 0x80 for a resource genuinely in
+            // 0xC0, and any later raw D3D12 barrier built from currentState then declared a
+            // Before state the resource had never held -- the debug layer's id=527.
+            const D3D12_RESOURCE_STATES realisedState = ToRealisedD3D12State(requiredRhiState);
+
             if (resource.rhiCurrentState == requiredRhiState) {
-                resource.currentState = requiredState;
+                resource.currentState = realisedState;
                 return true;
             }
 
@@ -393,7 +465,7 @@ namespace SasamiRenderer
             transition.after = requiredRhiState;
             encoder->TransitionResources(&transition, 1);
             resource.rhiCurrentState = requiredRhiState;
-            resource.currentState = requiredState;
+            resource.currentState = realisedState;
             return true;
         }
 
@@ -419,7 +491,7 @@ namespace SasamiRenderer
 
     bool RenderGraph::PreparePassResources(const PassNode& pass)
     {
-        if (pass.reads.empty() && pass.colorTargets.empty() && !pass.depthTarget.IsValid()) {
+        if (pass.reads.empty() && pass.copyDests.empty() && pass.colorTargets.empty() && !pass.depthTarget.IsValid()) {
             return true;
         }
 
@@ -441,9 +513,25 @@ namespace SasamiRenderer
             const bool isColorTarget = std::find(
                 pass.colorTargets.begin(), pass.colorTargets.end(), handle) != pass.colorTargets.end();
             const bool isDepthTarget = (pass.depthTarget == handle);
-            if (!isColorTarget && !isDepthTarget) {
-                TransitionResource(*resource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+            if (isColorTarget || isDepthTarget) {
+                continue;
             }
+            const bool isCopySource = std::find(
+                pass.copySources.begin(), pass.copySources.end(), handle) != pass.copySources.end();
+            TransitionResource(*resource, isCopySource ? D3D12_RESOURCE_STATE_COPY_SOURCE
+                                                       : D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        }
+
+        // Copy destinations are the one kind of write the graph transitions itself. Ordinary
+        // writes are dependency-only because the state they need depends on how the pass binds
+        // them, but a CopyResource destination always needs COPY_DEST.
+        for (const ResourceHandle handle : pass.copyDests) {
+            ResourceRegistry::ResourceRecord* resource = m_resources.GetMutable(handle);
+            if (!resource || !resource->hasExternalResource ||
+                (!resource->rhiResource.IsValid() && resource->resource == nullptr)) {
+                continue;
+            }
+            TransitionResource(*resource, D3D12_RESOURCE_STATE_COPY_DEST);
         }
 
         const bool useRhiTargets = encoder != nullptr && cmdList == nullptr;
@@ -894,6 +982,13 @@ namespace SasamiRenderer
                 return false;
             }
             Profiler::ScopedCpuEvent cpuEvent(node.name.c_str());
+            // Completion nodes run outside every pass's timestamp scope, so they need their own
+            // or their GPU work (e.g. SWRT AO) is missing from render.gputime.
+            CommandList* profileCmdList = GetCommandList();
+            ScopedGpuTimestamp gpuTimestamp(
+                m_hasExecuteContext ? m_executeContext.gpuTimestampProfiler : nullptr,
+                profileCmdList ? profileCmdList->Get() : nullptr,
+                node.name);
             if (!node.execute()) {
                 DebugLog("RenderGraph::ExecutePhaseCompletionNodes: completion node execution failed.\n");
                 return false;
@@ -925,6 +1020,26 @@ namespace SasamiRenderer
     {
         const ResourceHandle handle = Import(resourceName);
         return Read(handle);
+    }
+
+    ResourceHandle RenderGraphBuilder::ReadAsCopySource(std::string_view resourceName)
+    {
+        const ResourceHandle handle = Import(resourceName);
+        if (m_renderGraph == nullptr || !m_pass.IsValid() || !handle.IsValid()) {
+            return {};
+        }
+        m_renderGraph->ReadAsCopySource(m_pass, handle);
+        return handle;
+    }
+
+    ResourceHandle RenderGraphBuilder::WriteAsCopyDest(std::string_view resourceName)
+    {
+        const ResourceHandle handle = Import(resourceName);
+        if (m_renderGraph == nullptr || !m_pass.IsValid() || !handle.IsValid()) {
+            return {};
+        }
+        m_renderGraph->WriteAsCopyDest(m_pass, handle);
+        return handle;
     }
 
     ResourceHandle RenderGraphBuilder::Read(ResourceHandle handle)

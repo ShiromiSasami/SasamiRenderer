@@ -62,8 +62,10 @@ float4 PSMain(float4 svPos : SV_POSITION) : SV_TARGET
     if (u_extra0.w > 0.5f) {
         rd = normalize(forward + right * (ndc.x * u_extra0.y) + up * (ndc.y * u_extra0.z));
     } else {
-        float4 near4  = mul(float4(ndc, 0.0f, 1.0f), u_invVP);
-        float4 far4   = mul(float4(ndc, 1.0f, 1.0f), u_invVP);
+        // Reverse-Z: near = 1.0, far = 0.0, so the NDC z literals used to reconstruct
+        // the near/far world points are swapped relative to the forward-Z convention.
+        float4 near4  = mul(float4(ndc, 1.0f, 1.0f), u_invVP);
+        float4 far4   = mul(float4(ndc, 0.0f, 1.0f), u_invVP);
         float3 nearWS = near4.xyz / near4.w;
         float3 farWS  = far4.xyz  / far4.w;
         rd = normalize(farWS - nearWS);
@@ -78,8 +80,10 @@ float4 PSMain(float4 svPos : SV_POSITION) : SV_TARGET
     if (u_extra0.w > 0.5f) {
         adjRd = normalize(forward + right * (adjNdc.x * u_extra0.y) + up * (adjNdc.y * u_extra0.z));
     } else {
-        float4 near4   = mul(float4(ndc, 0.0f, 1.0f), u_invVP);
-        float4 adjFar4 = mul(float4(adjNdc, 1.0f, 1.0f), u_invVP);
+        // Reverse-Z: near = 1.0, far = 0.0, so the NDC z literals used to reconstruct
+        // the near/far world points are swapped relative to the forward-Z convention.
+        float4 near4   = mul(float4(ndc, 1.0f, 1.0f), u_invVP);
+        float4 adjFar4 = mul(float4(adjNdc, 0.0f, 1.0f), u_invVP);
         float3 nearWS  = near4.xyz / near4.w;
         adjRd = normalize(adjFar4.xyz / adjFar4.w - nearWS);
     }
@@ -126,6 +130,17 @@ float4 PSMain(float4 svPos : SV_POSITION) : SV_TARGET
             float4 clouds = MarchClouds(rd, sunDir, u_sunColor, u_sunI,
                                         u_time, u_cloudCover, cloudDensity, jitter);
             col = lerp(col, clouds.rgb / max(clouds.a, 1e-4f), saturate(clouds.a));
+        }
+
+        // Only the sky needs this, and only on backends with no post-process pass (u_extra1.w,
+        // which the D3D12 path leaves at 0 because its PostProcess pass tone maps instead).
+        // ComputeSkyColor's own gradient constants already exceed 1.0 -- horizonColor is
+        // (0.75, 1.02, 1.32) -- so writing them straight into an 8-bit target clips green and blue
+        // and the sky reads as flat white. Surface shading below is not included: applying the
+        // same curve there only washed it out, which says those values sit at or under 1.0.
+        if (u_extra1.w > 0.5f) {
+            col = col / (col + 1.0f);
+            col = pow(saturate(col), 1.0f / 2.2f);
         }
 
         return float4(col, 1.0f);

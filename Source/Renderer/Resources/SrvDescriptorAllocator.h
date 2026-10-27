@@ -2,7 +2,7 @@
 #include "Renderer/RHI/GraphicsDevice.h"
 #include <cstdint>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     class SrvDescriptorAllocator
     {
@@ -23,3 +23,7 @@ namespace SasamiRenderer
         UINT           m_next     = 0u;
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

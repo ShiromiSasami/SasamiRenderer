@@ -17,7 +17,8 @@ SamplerState      PointClamp : register(s0);
 float4 PSMain(float4 pos : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET
 {
     float depth = DepthTex.SampleLevel(PointClamp, uv, 0).r;
-    if (depth >= 1.0f)
+    // Reverse-Z: far plane is depth == 0.0, so background/empty pixels satisfy depth <= 0.0.
+    if (depth <= 0.0f)
     {
         return float4(1.0f, 1.0f, 1.0f, 1.0f);
     }
@@ -72,7 +73,8 @@ float4 PSMain(float4 pos : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET
         }
 
         float sceneDepth = DepthTex.SampleLevel(PointClamp, sampleUv, 0).r;
-        if (sceneDepth >= 1.0f)
+        // Reverse-Z: far plane is depth == 0.0, so background/empty pixels satisfy depth <= 0.0.
+        if (sceneDepth <= 0.0f)
         {
             continue;
         }
@@ -85,8 +87,10 @@ float4 PSMain(float4 pos : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET
             continue;
         }
 
-        float projectedDistance = dot(sceneDelta, sampleDir);
-        float depthDelta = sampleRadius - projectedDistance;
+        // Occluded when the visible surface along the sample's pixel ray is nearer the camera
+        // than the sample point (Crytek / Bavoil-Sainz). The old sampleRadius - dot(sceneDelta,
+        // sampleDir) is positive for every sample above an open plane, so flat ground darkened.
+        float depthDelta = length(samplePos - u_cameraPos.xyz) - length(scenePos - u_cameraPos.xyz);
         float rangeWeight = saturate(1.0f - sceneDistance / (radius * 1.5f));
         float horizonWeight = saturate(dot(normal, sampleDir));
 

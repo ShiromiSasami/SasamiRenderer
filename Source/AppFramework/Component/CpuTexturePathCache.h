@@ -9,7 +9,7 @@
 
 #include "Renderer/Scene/RenderProxy.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     // Process-wide dedup of CPU-decoded textures keyed by resolved absolute path.
     // Same path => same CpuTextureRgba8 instance (and id), so SceneSubmitter's
@@ -32,3 +32,4 @@ namespace SasamiRenderer
         std::atomic<uint64_t> m_nextId{ 1 };
     };
 }
+namespace SasamiEngine { using namespace App; }

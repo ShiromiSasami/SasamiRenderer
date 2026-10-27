@@ -12,7 +12,7 @@
 #include <cstring>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {
@@ -375,4 +375,4 @@ namespace SasamiRenderer
                       (uint32_t)m_topLevelInstanceOrder.size());
     }
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

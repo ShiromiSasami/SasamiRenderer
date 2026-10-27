@@ -4,7 +4,7 @@
 #include "Renderer/Passes/Geometry/SkinnedOpaqueDrawUtility.h"
 #include "Renderer/RenderGraph/RenderGraph.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     void GBufferRenderPass::BuildRequirements(RenderPassRequirementBuilder& builder) const
     {
@@ -50,7 +50,6 @@ namespace SasamiRenderer
                 policy.useTessellation,
                 policy.useTessellationWireframe,
                 policy.useTessellationDebugColors,
-                policy.useMeshletDebugView,
                 services.drawOpaqueItems);
 
         if (services.drawSkinnedOpaqueItems) {
@@ -71,7 +70,6 @@ namespace SasamiRenderer
                                           bool useTessellation,
                                           bool useTessellationWireframe,
                                           bool useTessellationDebugColors,
-                                          bool useMeshletDebugView,
                                           const std::function<void()>& drawCallback) const
     {
         if (!enc) {
@@ -86,7 +84,6 @@ namespace SasamiRenderer
         // (SceneColor) PSOs. This pass writes an MRT GBuffer set, so honoring them needs
         // dedicated GBuffer-output PSO variants that do not exist yet -- tracked in
         // TODO.md. The matching GUI checkboxes therefore have no effect.
-        (void)useMeshletDebugView;
         if (useTessellation && useTessellationWireframe) {
             enc->SetGraphicsPipeline(RenderPipelineStateCache::MakePipelineHandle(pipelineStateCache.GetTessellationGBufferWireframePipelineState()));
             enc->SetPrimitiveTopology(RhiPrimitiveTopology::PatchList);

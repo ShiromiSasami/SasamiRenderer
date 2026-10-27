@@ -13,7 +13,9 @@ bool IntersectRayAabb(float3 ro, float3 rinvd,
     float3 thi = max(t1, t2);
     tEntry = max(tlo.x, max(tlo.y, tlo.z));
     float tExit  = min(thi.x, min(thi.y, min(thi.z, tMax)));
-    return tExit >= tEntry;
+    // tExit < 0 means the box lies entirely behind the ray origin; without the
+    // max(.., 0) it still passes and traversal walks the whole backward half-space.
+    return tExit >= max(tEntry, 0.0f);
 }
 
 // --------------------------------------------------------------------------

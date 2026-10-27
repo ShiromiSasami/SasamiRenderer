@@ -3,7 +3,7 @@
 #include "Foundation/Math/MathUtil.h"
 #include "Foundation/Tools/DebugOutput.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     using Math::Mul4x4;
 

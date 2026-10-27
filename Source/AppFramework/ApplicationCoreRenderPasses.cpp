@@ -4,7 +4,7 @@
 
 #include "Renderer/Runtime/Renderer.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     std::vector<ApplicationCore::RenderPassType> ApplicationCore::GetRenderPassSequence() const
     {
@@ -44,6 +44,14 @@ namespace SasamiRenderer
             return;
         }
         m_renderer->UseDefaultRenderNodePreset();
+    }
+
+    void ApplicationCore::UseToonRenderNodePreset()
+    {
+        if (!m_renderer) {
+            return;
+        }
+        m_renderer->UseToonRenderNodePreset();
     }
 
     bool ApplicationCore::AddRenderPass(const std::shared_ptr<IRenderPass>& renderPass)
@@ -86,4 +94,4 @@ namespace SasamiRenderer
         m_renderer->ClearPasses();
     }
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::App

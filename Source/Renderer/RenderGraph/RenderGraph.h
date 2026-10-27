@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     class GpuTimestampProfiler;
     class IRenderPass;
@@ -55,7 +55,7 @@ namespace SasamiRenderer
         bool clearColorOnFirstUse = false;
         float clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
         bool clearDepthOnFirstUse = false;
-        float clearDepth = 1.0f;
+        float clearDepth = 0.0f; // Reverse-Z: far plane clears to 0.0, near plane is 1.0
         UINT8 clearStencil = 0;
     };
 
@@ -131,7 +131,7 @@ namespace SasamiRenderer
             bool clearColorOnFirstUse = false;
             float clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
             bool clearDepthOnFirstUse = false;
-            float clearDepth = 1.0f;
+            float clearDepth = 0.0f; // Reverse-Z: far plane clears to 0.0, near plane is 1.0
             UINT8 clearStencil = 0;
             bool colorCleared = false;
             bool depthCleared = false;
@@ -187,6 +187,14 @@ namespace SasamiRenderer
         ResourceHandle ImportExternalResource(std::string_view resourceName, const ExternalRenderGraphResourceDesc& desc);
         void Read(NodeHandle node, ResourceHandle resource);
         void Write(NodeHandle node, ResourceHandle resource);
+        // Same dependency edges as Read/Write, but the pass copies the resource rather than
+        // sampling or rendering it, so PreparePassResources transitions it to COPY_SOURCE /
+        // COPY_DEST instead of PIXEL_SHADER_RESOURCE / a render target. Declaring the copy this
+        // way keeps the graph the single owner of the state: a pass that issues its own
+        // ResourceBarrier desynchronises the tracker and the debug layer reports a before-state
+        // mismatch on the next transition.
+        void ReadAsCopySource(NodeHandle node, ResourceHandle resource);
+        void WriteAsCopyDest(NodeHandle node, ResourceHandle resource);
         void UseColorTarget(NodeHandle node, ResourceHandle resource);
         void UseDepthTarget(NodeHandle node, ResourceHandle resource);
         void DependsOn(NodeHandle node, NodeHandle dependency);
@@ -220,6 +228,11 @@ namespace SasamiRenderer
             size_t phaseIndex = static_cast<size_t>(-1);
             std::vector<ResourceHandle> reads;
             std::vector<ResourceHandle> writes;
+            // Subsets of reads/writes above. Membership only changes which state
+            // PreparePassResources transitions the resource to; the handle stays in reads/writes
+            // so every existing hazard and ordering rule keeps seeing it.
+            std::vector<ResourceHandle> copySources;
+            std::vector<ResourceHandle> copyDests;
             std::vector<ResourceHandle> colorTargets;
             ResourceHandle depthTarget{};
             std::vector<size_t> explicitDependencies;
@@ -259,6 +272,9 @@ namespace SasamiRenderer
         ResourceHandle Read(ResourceHandle handle);
         ResourceHandle Write(std::string_view resourceName);
         ResourceHandle Write(ResourceHandle handle);
+        // For passes whose access is a CopyResource rather than a shader read or a draw.
+        ResourceHandle ReadAsCopySource(std::string_view resourceName);
+        ResourceHandle WriteAsCopyDest(std::string_view resourceName);
         ResourceHandle UseColorTarget(std::string_view resourceName);
         ResourceHandle UseColorTarget(ResourceHandle handle);
         ResourceHandle UseDepthTarget(std::string_view resourceName);
@@ -273,3 +289,7 @@ namespace SasamiRenderer
     };
 
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

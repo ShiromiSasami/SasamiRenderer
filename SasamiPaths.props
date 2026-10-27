@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- External SDK locations shared by every project. Set the BOOST_ROOT environment variable to
+       use a Boost install elsewhere; without it the historical C:\local path is used. -->
+  <PropertyGroup Label="SasamiPaths">
+    <BoostIncludeDir Condition="'$(BoostIncludeDir)' == '' and '$(BOOST_ROOT)' != ''">$(BOOST_ROOT)</BoostIncludeDir>
+    <BoostIncludeDir Condition="'$(BoostIncludeDir)' == ''">C:\local\boost_1_89_0</BoostIncludeDir>
+  </PropertyGroup>
+</Project>

@@ -6,7 +6,7 @@
 #include <vector>
 #include <wtypes.h>
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     class AssetLoader
     {
@@ -27,3 +27,4 @@ namespace SasamiRenderer
                                     UINT& outHeight);
     };
 }
+namespace SasamiEngine { using namespace App; }

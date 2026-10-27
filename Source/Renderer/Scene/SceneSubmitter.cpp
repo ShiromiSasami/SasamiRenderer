@@ -17,7 +17,7 @@
 #include "Renderer/Utilities/HashUtility.h"
 #include "Renderer/Structures/Skeleton.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {
@@ -140,12 +140,20 @@ namespace SasamiRenderer
     }
 
     Texture* SceneSubmitter::CreateTextureFromRgba8Data(const CpuTextureRgba8& src,
+                                                        TextureColorSpace colorSpace,
                                                         CommandList* cmdList,
                                                         std::vector<Resource>& uploads)
     {
         if (src.pixels.empty() || src.width == 0 || src.height == 0) {
             return nullptr;
         }
+
+        // Base colour is authored sRGB-encoded and must be hardware-decoded to linear before
+        // lighting; normal, metallic-roughness and occlusion maps store linear measurements and
+        // must be read verbatim, so only the callers resolving albedo request Srgb here.
+        const DXGI_FORMAT textureFormat = (colorSpace == TextureColorSpace::Srgb)
+            ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB
+            : DXGI_FORMAT_R8G8B8A8_UNORM;
 
         // The backend RHI creation path below blocks with a per-texture WaitForGPU inside
         // CreateRhiTexture2DFromRgba8. When the caller supplied a batch command list
@@ -158,10 +166,17 @@ namespace SasamiRenderer
         if (m_device && !preferBatchedUpload &&
             m_device->GetCapabilities().supportsRhiResourceCreation &&
             m_device->GetCapabilities().supportsRhiDescriptorCreation) {
+            // The resource itself carries the colour space: a typed texture cannot be viewed
+            // through another format, so asking for sRGB at view creation alone would not decode.
+            const RhiFormat rhiTextureFormat = (colorSpace == TextureColorSpace::Srgb)
+                ? RhiFormat::R8G8B8A8UNormSrgb
+                : RhiFormat::R8G8B8A8UNorm;
+
             RhiTextureHandle rhiTexture = m_device->CreateRhiTexture2DFromRgba8(src.width,
                                                                                 src.height,
                                                                                 src.pixels.data(),
-                                                                                src.width * 4u);
+                                                                                src.width * 4u,
+                                                                                rhiTextureFormat);
             if (rhiTexture.IsValid()) {
                 RhiCpuDescriptorHandle rhiCpu{};
                 GpuDescriptorHandle gpu{};
@@ -181,7 +196,7 @@ namespace SasamiRenderer
 
                 if (descriptorReady) {
                     RhiTextureViewDesc srvDesc{};
-                    srvDesc.format = RhiFormat::R8G8B8A8UNorm;
+                    srvDesc.format = rhiTextureFormat;
                     srvDesc.dimension = RhiTextureViewDimension::Texture2D;
                     // The RHI texture creation API cannot yet accept mip levels, so this
                     // path remains single-mip. DX12 always uses the batched upload path.
@@ -194,7 +209,11 @@ namespace SasamiRenderer
                         texObj->desc.width   = src.width;
                         texObj->desc.height  = src.height;
                         texObj->desc.mips    = 1;
-                        texObj->desc.format  = DXGI_FORMAT_R8G8B8A8_UNORM;
+                        // Matches what was actually created above. Until 2026-09-09 this path was
+                        // pinned to UNORM because RhiFormat had no sRGB enumerator, which left the
+                        // non-D3D12 backends sampling base colour without the decode and made
+                        // their images noticeably washed out.
+                        texObj->desc.format  = textureFormat;
 
                         m_sceneTextures.push_back(std::move(texObj));
                         return m_sceneTextures.back().get();
@@ -208,11 +227,13 @@ namespace SasamiRenderer
             return nullptr;
         }
 
-        // Material textures are sampled as R8G8B8A8_UNORM without an sRGB decode
-        // (OpaqueGBuffer_PS.hlsl), so the chain is filtered in stored space to match the
-        // hardware's own bilinear filtering of those values.
+        // Base colour is uploaded as R8G8B8A8_UNORM_SRGB and hardware-decoded by the sampler
+        // (OpaqueGBuffer_PS.hlsl), so its mip chain must be averaged in linear space and
+        // re-encoded to sRGB to match what the hardware would produce; linear maps (normal,
+        // metallic-roughness, occlusion) are filtered directly in their stored space.
         const TextureMipChain mipChain =
-            TextureMipChainBuilder::BuildRgba8(src.pixels.data(), src.width, src.height, false);
+            TextureMipChainBuilder::BuildRgba8(src.pixels.data(), src.width, src.height,
+                                                colorSpace == TextureColorSpace::Srgb);
 
         Resource texture;
         Resource upload;
@@ -222,7 +243,8 @@ namespace SasamiRenderer
                                                                     cmdList,
                                                                     mipChain,
                                                                     texture,
-                                                                    upload)) {
+                                                                    upload,
+                                                                    textureFormat)) {
             uploadedMipCount = mipChain.LevelCount();
         } else if (!ResourceUploadUtility::CreateTexture2DFromRgba8(*m_device,
                                                                      cmdList,
@@ -230,7 +252,8 @@ namespace SasamiRenderer
                                                                      src.width,
                                                                      src.height,
                                                                      texture,
-                                                                     upload)) {
+                                                                     upload,
+                                                                     textureFormat)) {
             return nullptr;
         }
 
@@ -242,7 +265,7 @@ namespace SasamiRenderer
 
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srvDesc.Format                  = DXGI_FORMAT_R8G8B8A8_UNORM;
+        srvDesc.Format                  = textureFormat;
         srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
         srvDesc.Texture2D.MipLevels     = uploadedMipCount;
         m_device->CreateShaderResourceView(texture, &srvDesc, cpu);
@@ -253,7 +276,7 @@ namespace SasamiRenderer
         texObj->desc.width   = src.width;
         texObj->desc.height  = src.height;
         texObj->desc.mips    = uploadedMipCount;
-        texObj->desc.format  = DXGI_FORMAT_R8G8B8A8_UNORM;
+        texObj->desc.format  = textureFormat;
 
         uploads.push_back(upload);
         m_sceneTextures.push_back(std::move(texObj));
@@ -261,6 +284,7 @@ namespace SasamiRenderer
     }
 
     Texture* SceneSubmitter::ResolveSceneTexture(const std::shared_ptr<const CpuTextureRgba8>& textureData,
+                                                 TextureColorSpace colorSpace,
                                                  TextureUploadBatch& batch)
     {
         if (!textureData) {
@@ -271,7 +295,13 @@ namespace SasamiRenderer
             return nullptr;
         }
 
-        auto cached = m_textureCache.find(textureId);
+        // The same CPU image can be resolved as both sRGB (albedo) and linear (e.g. an ORM
+        // texture reused as an occlusion map) within the same scene, and each needs its own
+        // GPU resource/format. Fold the colour space into the low bit of the cache key so the
+        // two variants of the same textureId don't collide; the key is no longer the raw id.
+        const uint64_t cacheKey = (textureId << 1) | (colorSpace == TextureColorSpace::Srgb ? 1u : 0u);
+
+        auto cached = m_textureCache.find(cacheKey);
         if (cached != m_textureCache.end()) {
             return cached->second;
         }
@@ -288,16 +318,16 @@ namespace SasamiRenderer
                 }
                 batch.open = true;
             }
-            texture = CreateTextureFromRgba8Data(*textureData, &batch.commandList, batch.uploads);
+            texture = CreateTextureFromRgba8Data(*textureData, colorSpace, &batch.commandList, batch.uploads);
         } else {
             std::vector<Resource> uploads;
-            texture = CreateTextureFromRgba8Data(*textureData, nullptr, uploads);
+            texture = CreateTextureFromRgba8Data(*textureData, colorSpace, nullptr, uploads);
         }
         if (!texture) {
             return nullptr;
         }
 
-        m_textureCache[textureId] = texture;
+        m_textureCache[cacheKey] = texture;
         return texture;
     }
 
@@ -344,34 +374,108 @@ namespace SasamiRenderer
             rayTracingMeshBuckets[meshHash].push_back(existingMeshIndex);
         }
 
+        // Proxies carrying bit-identical geometry share one m_meshes entry, so N placements of the
+        // same mesh cost one vertex buffer, one cluster DAG and one cluster range instead of N.
+        // Everything downstream (MeshBuffer, ClusterDagStore, ClusterDagGpuBuffer, the cluster
+        // instance buffer) is indexed by DrawItem::meshIndex and already handles several items
+        // pointing at one mesh. Same hash + memcmp test the ray-tracing scene uses below.
+        std::unordered_map<uint64_t, std::vector<uint32_t>> meshBuckets;
+        meshBuckets.reserve(m_meshes.size() + proxies.size());
+        for (uint32_t existingMeshIndex = 0; existingMeshIndex < static_cast<uint32_t>(m_meshes.size());
+             ++existingMeshIndex) {
+            if (m_meshDynamic[existingMeshIndex] != 0) {
+                continue;
+            }
+            meshBuckets[ComputeMeshGeometryHash(m_meshes[existingMeshIndex])].push_back(existingMeshIndex);
+        }
+
+        // Proxies built from one StaticMeshSource share a Mesh pointer. Resolving those by identity
+        // first skips re-hashing every vertex of a mesh placed many times; the hash + memcmp below
+        // still catches identical geometry that arrived through different sources.
+        std::unordered_map<const Mesh*, std::pair<uint32_t, uint64_t>> meshByPointer;
+        meshByPointer.reserve(proxies.size());
+        static const Mesh kEmptyMesh{};
+
         TextureUploadBatch textureUploadBatch;
         for (auto& proxy : proxies) {
-            const size_t meshIndex = m_meshes.size();
-            m_meshes.push_back(std::move(proxy.mesh));
+            const Mesh& proxyMesh = proxy.mesh ? *proxy.mesh : kEmptyMesh;
+            uint64_t meshHash = 0;
+            size_t meshIndex = m_meshes.size();
+            bool sharesMesh = false;
+            if (auto ptrIt = meshByPointer.find(proxy.mesh.get()); proxy.mesh && ptrIt != meshByPointer.end()) {
+                meshIndex  = ptrIt->second.first;
+                meshHash   = ptrIt->second.second;
+                sharesMesh = true;
+            } else if (!proxy.dynamicVertices) {
+                // A dynamic mesh is never matched by geometry: its vertices change after submission,
+                // so sharing would let one owner's update rewrite another item's mesh.
+                meshHash = ComputeMeshGeometryHash(proxyMesh);
+                if (auto meshBucketIt = meshBuckets.find(meshHash); meshBucketIt != meshBuckets.end()) {
+                    for (const uint32_t candidateMeshIndex : meshBucketIt->second) {
+                        if (MeshGeometryEquals(m_meshes[candidateMeshIndex], proxyMesh)) {
+                            meshIndex  = candidateMeshIndex;
+                            sharesMesh = true;
+                            break;
+                        }
+                    }
+                }
+            }
 
-            // Kept in lock-step with m_meshes (pushed once per mesh, same index) so the
-            // ray-tracing mesh bounds below can reuse it instead of recomputing.
-            MeshLocalBounds& localBounds = m_meshLocalBoundsCache.emplace_back();
-            localBounds.valid = !m_meshes.back().vertices.empty();
-            ComputeMeshBounds(m_meshes.back(), localBounds.min, localBounds.max);
+            if (!sharesMesh) {
+                // The only vertex copy left on this path: once per unique mesh, into the
+                // renderer-owned array that MeshBuffer and ClusterDagStore consume.
+                m_meshes.push_back(proxyMesh);
+                m_meshDynamic.push_back(proxy.dynamicVertices ? 1u : 0u);
+                if (!proxy.dynamicVertices) {
+                    meshBuckets[meshHash].push_back(static_cast<uint32_t>(meshIndex));
+                }
+
+                // Kept in lock-step with m_meshes (pushed once per mesh, same index) so the
+                // ray-tracing mesh bounds below can reuse it instead of recomputing.
+                MeshLocalBounds& newBounds = m_meshLocalBoundsCache.emplace_back();
+                newBounds.valid = !m_meshes.back().vertices.empty();
+                ComputeMeshBounds(m_meshes.back(), newBounds.min, newBounds.max);
+            }
+            if (proxy.mesh) {
+                meshByPointer.emplace(proxy.mesh.get(), std::make_pair(static_cast<uint32_t>(meshIndex), meshHash));
+            }
+            const Mesh& itemMesh = m_meshes[meshIndex];
+            const MeshLocalBounds& localBounds = m_meshLocalBoundsCache[meshIndex];
 
             DrawItem item;
             item.meshIndex = meshIndex;
-            Texture* resolvedAlbedoTexture = ResolveSceneTexture(proxy.albedoTexture, textureUploadBatch);
+            Texture* resolvedAlbedoTexture = ResolveSceneTexture(proxy.albedoTexture, TextureColorSpace::Srgb, textureUploadBatch);
             item.texture = resolvedAlbedoTexture;
             if (!resolvedAlbedoTexture && proxy.albedoTexture) {
                 DebugLog("SceneSubmitter::SubmitRenderProxies: failed to resolve albedo texture. White fallback is bound.\n");
             }
-            item.occlusionTexture = ResolveSceneTexture(proxy.occlusionTexture, textureUploadBatch);
-            item.normalTexture    = ResolveSceneTexture(proxy.normalTexture, textureUploadBatch);
+            item.occlusionTexture = ResolveSceneTexture(proxy.occlusionTexture, TextureColorSpace::Linear, textureUploadBatch);
+            item.normalTexture    = ResolveSceneTexture(proxy.normalTexture, TextureColorSpace::Linear, textureUploadBatch);
+            item.emissiveTexture  = ResolveSceneTexture(proxy.emissiveTexture, TextureColorSpace::Srgb, textureUploadBatch);
             item.usesMetallicRoughnessTexture = proxy.usesMetallicRoughnessTexture;
             item.material    = proxy.material;
             item.transparent = proxy.transparent;
+            item.dynamicVertices = proxy.dynamicVertices;
             item.debugLabel  = proxy.debugLabel;
             if (!item.occlusionTexture && proxy.occlusionTexture) {
                 DebugLog("SceneSubmitter::SubmitRenderProxies: failed to resolve occlusion texture. AO fallback is bound.\n");
             }
             std::memcpy(item.model, proxy.model, sizeof(item.model));
+            // Shared by every backend, so the same line appears in a D3D12 log and a native-path
+            // log. When two backends disagree about what the world looks like, comparing this
+            // tells apart "the scene is placed differently" from "the scene is drawn differently".
+            {
+                // Row-vector convention: the translation lives in the last row.
+                const float tx = item.model[12];
+                const float ty = item.model[13];
+                const float tz = item.model[14];
+                m_submittedTranslationMin[0] = std::min(m_submittedTranslationMin[0], tx);
+                m_submittedTranslationMin[1] = std::min(m_submittedTranslationMin[1], ty);
+                m_submittedTranslationMin[2] = std::min(m_submittedTranslationMin[2], tz);
+                m_submittedTranslationMax[0] = std::max(m_submittedTranslationMax[0], tx);
+                m_submittedTranslationMax[1] = std::max(m_submittedTranslationMax[1], ty);
+                m_submittedTranslationMax[2] = std::max(m_submittedTranslationMax[2], tz);
+            }
             if (localBounds.valid) {
                 TransformBounds(item.model, localBounds.min, localBounds.max,
                                 item.worldBoundsMin, item.worldBoundsMax);
@@ -379,7 +483,6 @@ namespace SasamiRenderer
             }
             m_drawItems.push_back(item);
 
-            const uint64_t meshHash = ComputeMeshGeometryHash(m_meshes.back());
             uint32_t rayTracingMeshIndex = 0u;
             bool foundSharedMesh = false;
             auto bucketIt = rayTracingMeshBuckets.find(meshHash);
@@ -388,7 +491,7 @@ namespace SasamiRenderer
                     if (candidateMeshIndex >= m_rayTracingScene->meshes.size()) {
                         continue;
                     }
-                    if (MeshGeometryEquals(m_rayTracingScene->meshes[candidateMeshIndex].mesh, m_meshes.back())) {
+                    if (MeshGeometryEquals(m_rayTracingScene->meshes[candidateMeshIndex].mesh, itemMesh)) {
                         rayTracingMeshIndex = candidateMeshIndex;
                         foundSharedMesh     = true;
                         break;
@@ -399,7 +502,7 @@ namespace SasamiRenderer
             if (!foundSharedMesh) {
                 rayTracingMeshIndex = static_cast<uint32_t>(m_rayTracingScene->meshes.size());
                 RayTracingMesh rayTracingMesh{};
-                rayTracingMesh.mesh = m_meshes.back();
+                rayTracingMesh.mesh = itemMesh;
                 // Reuse the just-computed local bounds cache entry for this same mesh
                 // (m_meshLocalBoundsCache stays in lock-step with m_meshes) instead of
                 // walking its vertices a second time.
@@ -463,10 +566,23 @@ namespace SasamiRenderer
         // above. Rebuilding here would stall scene submission (WaitForGPU + full BLAS
         // rebuild) even when the DXR path is never used.
 
-        // See EnsureMeshletsBuilt: meshlets are rebuilt lazily on first actual use of the
-        // mesh-shader path, not here. Marking the flag is free; scenes that never touch
-        // that path never pay the Build()/Upload() cost.
-        m_meshletsDirty = true;
+        // See EnsureClusterDagsBuilt: the cluster DAGs are rebuilt lazily on first actual
+        // use of the virtual-geometry path, not here, for the same reason.
+        m_clusterDagsDirty = true;
+        // See EnsureClusterDagGpuBuilt: same lazy-rebuild reasoning, one level up the chain.
+        m_clusterDagGpuDirty = true;
+
+        if (!m_drawItems.empty()) {
+            char message[256];
+            snprintf(message,
+                     sizeof(message),
+                     "SceneSubmitter: submitted %zu draw items over %zu unique meshes, translation range "
+                     "[%.2f %.2f %.2f] .. [%.2f %.2f %.2f]\n",
+                     m_drawItems.size(), m_meshes.size(),
+                     m_submittedTranslationMin[0], m_submittedTranslationMin[1], m_submittedTranslationMin[2],
+                     m_submittedTranslationMax[0], m_submittedTranslationMax[1], m_submittedTranslationMax[2]);
+            DebugLog(message);
+        }
     }
 
     void SceneSubmitter::ClearSubmittedRenderProxies()
@@ -474,34 +590,66 @@ namespace SasamiRenderer
         m_drawItems.clear();
         m_meshes.clear();
         m_meshLocalBoundsCache.clear();
+        m_meshDynamic.clear();
         m_rayTracingScene->Clear();
         // See SubmitRenderProxies: DXR AS teardown/rebuild happens lazily at dispatch
         // time. A stale TLAS is harmless while hardware RT is not being dispatched.
 
-        m_meshletBuffer.Release();
-        m_meshletsDirty = true;
+        m_clusterDagStore.Release();
+        m_clusterDagsDirty = true;
+        m_clusterDagGpuBuffer.Release();
+        m_clusterPageStore.Release();
+        m_clusterDagGpuDirty = true;
     }
 
-    const MeshletBuffer& SceneSubmitter::EnsureMeshletsBuilt()
+    const ClusterDagStore& SceneSubmitter::EnsureClusterDagsBuilt(const std::filesystem::path& cacheDirectory)
     {
-        if (!m_meshletsDirty) {
-            return m_meshletBuffer;
+        if (!m_clusterDagsDirty) {
+            return m_clusterDagStore;
         }
-        m_meshletsDirty = false;
+        m_clusterDagsDirty = false;
+
+        if (m_meshes.empty()) {
+            m_clusterDagStore.Release();
+            return m_clusterDagStore;
+        }
+
+        m_clusterDagStore.Build(m_meshes, ClusterDagBuildSettings{}, cacheDirectory, &m_meshDynamic);
+        return m_clusterDagStore;
+    }
+
+    const ClusterDagStore& SceneSubmitter::EnsureClusterDagsBuilt()
+    {
+        // An empty cache directory is not an error: ClusterDagCache treats a
+        // non-existent/empty directory as an always-miss cache, so this still builds.
+        return EnsureClusterDagsBuilt(m_clusterDagCacheDirectory);
+    }
+
+    const ClusterDagGpuBuffer& SceneSubmitter::EnsureClusterDagGpuBuilt()
+    {
+        if (!m_clusterDagGpuDirty) {
+            return m_clusterDagGpuBuffer;
+        }
+        m_clusterDagGpuDirty = false;
 
         if (!m_device || m_meshes.empty()) {
-            m_meshletBuffer.Release();
-            return m_meshletBuffer;
+            m_clusterDagGpuBuffer.Release();
+            m_clusterPageStore.Release();
+            return m_clusterDagGpuBuffer;
         }
 
-        // Build() is a linear pass over already-parsed indices/vertices (bounding-sphere
-        // math only, no triangulation/dedup), so this is expected to be cheap relative to
-        // model loading -- but it is still real work done exactly once per mesh-list
-        // change, hence the timer.
-        ScopedPerfTimer timer("SceneSubmitter::EnsureMeshletsBuilt");
-        m_meshletBuffer.Build(m_meshes);
-        m_meshletBuffer.Upload(*m_device);
-        return m_meshletBuffer;
+        ScopedPerfTimer timer("SceneSubmitter::EnsureClusterDagGpuBuilt");
+        // Upload destroys the old buffers immediately (DestroyRhiResource frees the D3D12
+        // resource now), and frames still in flight may be reading them.
+        if (m_clusterDagGpuBuffer.IsValid()) {
+            m_device->WaitForGPU();
+        }
+        const ClusterDagStore& dagStore = EnsureClusterDagsBuilt();
+        m_clusterDagGpuBuffer.Build(m_meshes, dagStore);
+        m_clusterDagGpuBuffer.Upload(*m_device);
+        // Pages are derived from the same CPU arrays: the streaming unit for the residency pool.
+        m_clusterPageStore.Build(m_clusterDagGpuBuffer);
+        return m_clusterDagGpuBuffer;
     }
 
     void SceneSubmitter::SubmitSkinnedRenderProxies(std::vector<SkinnedRenderProxy>&& proxies,
@@ -548,9 +696,10 @@ namespace SasamiRenderer
 
             SkinnedDrawItem item;
             item.meshIndex       = m_skinnedDrawItems.size();
-            item.texture         = ResolveSceneTexture(proxy.albedoTexture, textureUploadBatch);
-            item.occlusionTexture = ResolveSceneTexture(proxy.occlusionTexture, textureUploadBatch);
-            item.normalTexture   = ResolveSceneTexture(proxy.normalTexture, textureUploadBatch);
+            item.texture         = ResolveSceneTexture(proxy.albedoTexture, TextureColorSpace::Srgb, textureUploadBatch);
+            item.occlusionTexture = ResolveSceneTexture(proxy.occlusionTexture, TextureColorSpace::Linear, textureUploadBatch);
+            item.normalTexture   = ResolveSceneTexture(proxy.normalTexture, TextureColorSpace::Linear, textureUploadBatch);
+            item.emissiveTexture = ResolveSceneTexture(proxy.emissiveTexture, TextureColorSpace::Srgb, textureUploadBatch);
             item.material        = proxy.material;
             item.transparent     = proxy.transparent;
             std::memcpy(item.model, proxy.model, sizeof(item.model));

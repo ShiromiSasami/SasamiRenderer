@@ -11,7 +11,7 @@
 #include <utility>
 
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {
@@ -20,6 +20,7 @@ namespace SasamiRenderer
             switch (format) {
             case RhiFormat::R8UNorm: return DXGI_FORMAT_R8_UNORM;
             case RhiFormat::R8G8B8A8UNorm: return DXGI_FORMAT_R8G8B8A8_UNORM;
+            case RhiFormat::R8G8B8A8UNormSrgb: return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
             case RhiFormat::B8G8R8A8UNorm: return DXGI_FORMAT_B8G8R8A8_UNORM;
             case RhiFormat::R16G16B16A16Float: return DXGI_FORMAT_R16G16B16A16_FLOAT;
             case RhiFormat::R32G32B32Float: return DXGI_FORMAT_R32G32B32_FLOAT;
@@ -82,6 +83,7 @@ namespace SasamiRenderer
             switch (dimension) {
             case RhiTextureViewDimension::Texture2DArray: return D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
             case RhiTextureViewDimension::TextureCube: return D3D11_SRV_DIMENSION_TEXTURECUBE;
+            case RhiTextureViewDimension::Texture3D: return D3D11_SRV_DIMENSION_TEXTURE3D;
             case RhiTextureViewDimension::Texture2D:
             default: return D3D11_SRV_DIMENSION_TEXTURE2D;
             }
@@ -134,9 +136,14 @@ namespace SasamiRenderer
     RhiTextureHandle Dx11GraphicsDevice::CreateRhiTexture2DFromRgba8(uint32_t width,
                                                                      uint32_t height,
                                                                      const void* pixels,
-                                                                     uint32_t rowPitchBytes)
+                                                                     uint32_t rowPitchBytes,
+                                                                     RhiFormat format)
     {
         if (!m_device || width == 0 || height == 0 || !pixels || rowPitchBytes < width * 4u) {
+            return {};
+        }
+        if (format != RhiFormat::R8G8B8A8UNorm && format != RhiFormat::R8G8B8A8UNormSrgb) {
+            DebugLog("Dx11GraphicsDevice::CreateRhiTexture2DFromRgba8: unsupported format, only R8G8B8A8UNorm/Srgb are accepted.\n");
             return {};
         }
 
@@ -145,7 +152,7 @@ namespace SasamiRenderer
         textureDesc.Height = height;
         textureDesc.MipLevels = 1;
         textureDesc.ArraySize = 1;
-        textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        textureDesc.Format = ToDx11Format(format);
         textureDesc.SampleDesc.Count = 1;
         textureDesc.Usage = D3D11_USAGE_DEFAULT;
         textureDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
@@ -157,6 +164,112 @@ namespace SasamiRenderer
         Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
         if (FAILED(m_device->CreateTexture2D(&textureDesc, &initData, texture.GetAddressOf()))) {
             DebugLog("Dx11GraphicsDevice::CreateRhiTexture2DFromRgba8: CreateTexture2D failed.\n");
+            return {};
+        }
+
+        Microsoft::WRL::ComPtr<ID3D11Resource> resource;
+        if (FAILED(texture.As(&resource))) {
+            return {};
+        }
+
+        const uint64_t id = m_nextRhiResourceHandle++;
+        m_rhiResources.emplace(id, resource);
+        return RhiTextureHandle{ id };
+    }
+
+    RhiTextureHandle Dx11GraphicsDevice::CreateRhiTextureCubeFromFaces(uint32_t faceSize,
+                                                                       const void* const faces[6],
+                                                                       uint32_t rowPitchBytes,
+                                                                       RhiFormat format)
+    {
+        if (format != RhiFormat::R8G8B8A8UNorm && format != RhiFormat::R8G8B8A8UNormSrgb &&
+            format != RhiFormat::R16G16B16A16Float) {
+            DebugLog("Dx11GraphicsDevice::CreateRhiTextureCubeFromFaces: unsupported format, only "
+                     "R8G8B8A8UNorm, R8G8B8A8UNormSrgb and R16G16B16A16Float are accepted.\n");
+            return {};
+        }
+        // R16G16B16A16Float is twice as wide per texel as the 8-bit formats; a hardcoded 4 here
+        // would silently accept an under-sized HDR row pitch and corrupt the upload.
+        const uint32_t faceBytesPerPixel = format == RhiFormat::R16G16B16A16Float ? 8u : 4u;
+        if (!m_device || faceSize == 0 || !faces || rowPitchBytes < faceSize * faceBytesPerPixel) {
+            return {};
+        }
+        for (uint32_t face = 0; face < 6u; ++face) {
+            if (!faces[face]) {
+                return {};
+            }
+        }
+
+        D3D11_TEXTURE2D_DESC textureDesc{};
+        textureDesc.Width = faceSize;
+        textureDesc.Height = faceSize;
+        textureDesc.MipLevels = 1;
+        textureDesc.ArraySize = 6;
+        textureDesc.Format = ToDx11Format(format);
+        textureDesc.SampleDesc.Count = 1;
+        textureDesc.Usage = D3D11_USAGE_DEFAULT;
+        textureDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        textureDesc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
+
+        // Face order matches the +X, -X, +Y, -Y, +Z, -Z convention documented on
+        // IRhiDevice::CreateRhiTextureCubeFromFaces, which is also D3D's native array-slice order.
+        D3D11_SUBRESOURCE_DATA initData[6]{};
+        for (uint32_t face = 0; face < 6u; ++face) {
+            initData[face].pSysMem = faces[face];
+            initData[face].SysMemPitch = rowPitchBytes;
+        }
+
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+        if (FAILED(m_device->CreateTexture2D(&textureDesc, initData, texture.GetAddressOf()))) {
+            DebugLog("Dx11GraphicsDevice::CreateRhiTextureCubeFromFaces: CreateTexture2D failed.\n");
+            return {};
+        }
+
+        Microsoft::WRL::ComPtr<ID3D11Resource> resource;
+        if (FAILED(texture.As(&resource))) {
+            return {};
+        }
+
+        const uint64_t id = m_nextRhiResourceHandle++;
+        m_rhiResources.emplace(id, resource);
+        return RhiTextureHandle{ id };
+    }
+
+    RhiTextureHandle Dx11GraphicsDevice::CreateRhiTexture3DFromData(uint32_t width,
+                                                                    uint32_t height,
+                                                                    uint32_t depth,
+                                                                    const void* texels,
+                                                                    uint32_t rowPitchBytes,
+                                                                    uint32_t slicePitchBytes,
+                                                                    RhiFormat format)
+    {
+        const uint32_t texelBytes = format == RhiFormat::R32Float ? 4u : (format == RhiFormat::R16Float ? 2u : 0u);
+        if (texelBytes == 0) {
+            DebugLog("Dx11GraphicsDevice::CreateRhiTexture3DFromData: unsupported format, only R32Float/R16Float are accepted.\n");
+            return {};
+        }
+        if (!m_device || width == 0 || height == 0 || depth == 0 || !texels || rowPitchBytes < width * texelBytes ||
+            static_cast<uint64_t>(slicePitchBytes) < static_cast<uint64_t>(rowPitchBytes) * height) {
+            return {};
+        }
+
+        D3D11_TEXTURE3D_DESC textureDesc{};
+        textureDesc.Width = width;
+        textureDesc.Height = height;
+        textureDesc.Depth = depth;
+        textureDesc.MipLevels = 1;
+        textureDesc.Format = ToDx11Format(format);
+        textureDesc.Usage = D3D11_USAGE_DEFAULT;
+        textureDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+        D3D11_SUBRESOURCE_DATA initData{};
+        initData.pSysMem = texels;
+        initData.SysMemPitch = rowPitchBytes;
+        initData.SysMemSlicePitch = slicePitchBytes;
+
+        Microsoft::WRL::ComPtr<ID3D11Texture3D> texture;
+        if (FAILED(m_device->CreateTexture3D(&textureDesc, &initData, texture.GetAddressOf()))) {
+            DebugLog("Dx11GraphicsDevice::CreateRhiTexture3DFromData: CreateTexture3D failed.\n");
             return {};
         }
 
@@ -480,6 +593,9 @@ namespace SasamiRenderer
         raster.CullMode = ToDx11CullMode(desc.raster.cullMode);
         raster.FrontCounterClockwise = desc.raster.frontCounterClockwise;
         raster.DepthClipEnable = desc.raster.depthClipEnabled;
+        raster.DepthBias = desc.raster.depthBias;
+        raster.DepthBiasClamp = desc.raster.depthBiasClamp;
+        raster.SlopeScaledDepthBias = desc.raster.slopeScaledDepthBias;
         if (FAILED(m_device->CreateRasterizerState(&raster, pipeline.rasterizerState.GetAddressOf()))) {
             return {};
         }
@@ -571,6 +687,9 @@ namespace SasamiRenderer
         } else if (srvDesc.ViewDimension == D3D11_SRV_DIMENSION_TEXTURECUBE) {
             srvDesc.TextureCube.MostDetailedMip = desc.baseMipLevel;
             srvDesc.TextureCube.MipLevels = desc.mipLevelCount;
+        } else if (srvDesc.ViewDimension == D3D11_SRV_DIMENSION_TEXTURE3D) {
+            srvDesc.Texture3D.MostDetailedMip = desc.baseMipLevel;
+            srvDesc.Texture3D.MipLevels = desc.mipLevelCount;
         } else {
             srvDesc.Texture2D.MostDetailedMip = desc.baseMipLevel;
             srvDesc.Texture2D.MipLevels = desc.mipLevelCount;
@@ -748,6 +867,6 @@ namespace SasamiRenderer
         return true;
     }
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render
 
 #endif

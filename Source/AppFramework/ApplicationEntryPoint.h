@@ -10,7 +10,7 @@
 #include "Foundation/Tools/DebugOutput.h"
 #include "backends/imgui_impl_win32.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     inline wchar_t ToLowerAscii(wchar_t ch)
     {
@@ -115,5 +115,6 @@ namespace SasamiRenderer
 #define SASAMI_IMPLEMENT_APPLICATION(AppType, Width, Height, Title)  \
     int wmain(int argc, wchar_t** argv)                              \
     {                                                                \
-        return ::SasamiRenderer::RunApplication<AppType>(Width, Height, Title, argc, argv); \
+        return ::SasamiEngine::App::RunApplication<AppType>(Width, Height, Title, argc, argv); \
     }
+namespace SasamiEngine { using namespace App; }

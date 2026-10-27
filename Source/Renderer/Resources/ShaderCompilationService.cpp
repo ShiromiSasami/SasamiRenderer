@@ -360,7 +360,7 @@ namespace
 
 } // anonymous namespace
 
-namespace SasamiRenderer::ShaderCompilationService
+namespace SasamiEngine::Render::ShaderCompilationService
 {
     std::string GetConfiguredShaderModel()
     {
@@ -650,4 +650,4 @@ namespace SasamiRenderer::ShaderCompilationService
         return true;
     }
 
-} // namespace SasamiRenderer::ShaderCompilationService
+} // namespace SasamiEngine::Render::ShaderCompilationService

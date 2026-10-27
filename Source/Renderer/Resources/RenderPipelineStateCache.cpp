@@ -1,6 +1,7 @@
 #include "Renderer/Resources/RenderPipelineStateCache.h"
 #include "Renderer/Resources/RenderPipelineStateCacheLog.h"
 #include "Renderer/Resources/ShaderCompilationService.h"
+#include "Renderer/Resources/ShadowRasterizerState.h"
 
 #include <array>
 #include <d3dcompiler.h>
@@ -14,7 +15,7 @@
 
 #pragma comment(lib, "d3dcompiler.lib")
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     using Microsoft::WRL::ComPtr;
 
@@ -96,7 +97,7 @@ namespace SasamiRenderer
             .OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND
         };
 
-        D3D12_ROOT_PARAMETER rootParams[17] = {};
+        D3D12_ROOT_PARAMETER rootParams[19] = {};
         rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
         rootParams[0].DescriptorTable.NumDescriptorRanges = 1;
         rootParams[0].DescriptorTable.pDescriptorRanges = &descRangeMaterial;
@@ -236,6 +237,33 @@ namespace SasamiRenderer
         rootParams[16].DescriptorTable.pDescriptorRanges = &descRangeMaterialNormal;
         rootParams[16].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
+        // [17] t18 - material emissive map; optional, bound per draw with a white fallback.
+        D3D12_DESCRIPTOR_RANGE descRangeMaterialEmissive{
+            .RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+            .NumDescriptors = 1,
+            .BaseShaderRegister = 18,
+            .RegisterSpace = 0,
+            .OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND
+        };
+        rootParams[17].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParams[17].DescriptorTable.NumDescriptorRanges = 1;
+        rootParams[17].DescriptorTable.pDescriptorRanges = &descRangeMaterialEmissive;
+        rootParams[17].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+        // [18] t19 - SDF face-shadow threshold map; bound per draw (white fallback), read only by
+        // materials flagged toonFaceShadow (OpaqueGBuffer_PS).
+        D3D12_DESCRIPTOR_RANGE descRangeToonFaceShadow{
+            .RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+            .NumDescriptors = 1,
+            .BaseShaderRegister = 19,
+            .RegisterSpace = 0,
+            .OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND
+        };
+        rootParams[18].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParams[18].DescriptorTable.NumDescriptorRanges = 1;
+        rootParams[18].DescriptorTable.pDescriptorRanges = &descRangeToonFaceShadow;
+        rootParams[18].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
         // s0 = general linear/wrap sampling, s1 = shadow-map depth comparison (PCF).
         // Shared verbatim by the opaque, deferred and skinned root signatures below.
         const D3D12_STATIC_SAMPLER_DESC staticSamplers[] = {
@@ -272,6 +300,7 @@ namespace SasamiRenderer
         ComPtr<ID3DBlob> vertexShader;
         ComPtr<ID3DBlob> pixelShader;
         ComPtr<ID3DBlob> gbufferPixelShader;
+        ComPtr<ID3DBlob> forwardColorOnlyPS;
         ComPtr<ID3DBlob> deferredLightingPixelShader;
         ComPtr<ID3DBlob> gbufferDebugPixelShader;
         ComPtr<ID3DBlob> skyboxVS;
@@ -279,7 +308,6 @@ namespace SasamiRenderer
         ComPtr<ID3DBlob> skyboxLdrPS;
         ComPtr<ID3DBlob> tessVS, tessHS, tessDS, tessGS, tessDebugDS;
         ComPtr<ID3DBlob> tessDebugPS;
-        ComPtr<ID3DBlob> meshletDebugPS;
         ComPtr<ID3DBlob> ssaoVS;
         ComPtr<ID3DBlob> ssaoPS;
         ComPtr<ID3DBlob> ssaoBlurPS;
@@ -291,12 +319,24 @@ namespace SasamiRenderer
         ComPtr<ID3DBlob> swrtReflectionCompositePS;
         ComPtr<ID3DBlob> toneMapPS;
         ComPtr<ID3DBlob> fxaaPS;
+        ComPtr<ID3DBlob> lightShaftPS;
+        ComPtr<ID3DBlob> bloomDownsamplePS;
+        ComPtr<ID3DBlob> bloomUpsamplePS;
+        ComPtr<ID3DBlob> lensFlarePS;
+        ComPtr<ID3DBlob> lensFlareRtVS;
+        ComPtr<ID3DBlob> lensFlareRtPS;
         ComPtr<ID3DBlob> transparentBackfaceDistancePS;
         ComPtr<ID3DBlob> transparentOitPS;
         ComPtr<ID3DBlob> transparentOitCompositePS;
         ComPtr<ID3DBlob> shadowVsmPS;
+        ComPtr<ID3DBlob> shadowDepthVS;
+        ComPtr<ID3DBlob> shadowAlphaMaskPS;
         ComPtr<ID3DBlob> shadowVsmBlurHCS;
         ComPtr<ID3DBlob> shadowVsmBlurVCS;
+        ComPtr<ID3DBlob> toonOutlineVS;
+        ComPtr<ID3DBlob> toonOutlinePS;
+        ComPtr<ID3DBlob> wireframeVS;
+        ComPtr<ID3DBlob> wireframePS;
         auto loadOrCompileShader = [&](const ShaderSpec& spec) -> bool
         {
             const std::filesystem::path sourcePath = ShaderCompilationService::ResolveShaderPath(spec.sourceRelativePath);
@@ -368,10 +408,14 @@ namespace SasamiRenderer
         const std::string domainProfile = "ds_" + shaderModel;
         const std::string geometryProfile = "gs_" + shaderModel;
         const std::string computeProfile = "cs_" + shaderModel;
-        const std::array<ShaderSpec, 32> shaderSpecs{ {
+        // Size deduced from the initialiser list: a hard-coded count silently leaves a
+        // value-initialised (null path) element behind when an entry is removed, which
+        // then faults in loadOrCompileShader.
+        const auto shaderSpecs = std::to_array<ShaderSpec>({
             { L"Raster/Lighting/PBR/CookTorranceGGX_VS.hlsl", "VSMain", vertexProfile.c_str(), &vertexShader },
             { L"Raster/Lighting/PBR/CookTorranceGGX_PS.hlsl", "PSMain", pixelProfile.c_str(), &pixelShader },
             { L"Raster/Geometry/OpaqueGBuffer/OpaqueGBuffer_PS.hlsl", "PSMain", pixelProfile.c_str(), &gbufferPixelShader },
+            { L"Raster/Lighting/PBR/CookTorranceGGX_PS.hlsl", "PSMainColorOnly", pixelProfile.c_str(), &forwardColorOnlyPS },
             { L"Raster/Lighting/Deferred/DeferredLighting_PS.hlsl", "PSMain", pixelProfile.c_str(), &deferredLightingPixelShader },
             { L"Debug/GBuffer/GBufferDebug_PS.hlsl", "PSMain", pixelProfile.c_str(), &gbufferDebugPixelShader },
             { L"Effects/Sky/Skybox/Skybox_VS.hlsl", "VSMain", vertexProfile.c_str(), &skyboxVS },
@@ -383,7 +427,6 @@ namespace SasamiRenderer
             { L"Raster/Geometry/Tessellation/Tessellation_GS.hlsl", "GSMain", geometryProfile.c_str(), &tessGS },
             { L"Raster/Geometry/Tessellation/Tessellation_Debug_DS.hlsl", "DSMain", domainProfile.c_str(), &tessDebugDS },
             { L"Raster/Geometry/Tessellation/Tessellation_Debug_PS.hlsl", "PSMain", pixelProfile.c_str(), &tessDebugPS },
-            { L"Debug/Meshlet/MeshletDebug_PS.hlsl", "PSMain", pixelProfile.c_str(), &meshletDebugPS },
             { L"Effects/AmbientOcclusion/SSAO/SSAO_VS.hlsl", "VSMain", vertexProfile.c_str(), &ssaoVS },
             { L"Effects/AmbientOcclusion/SSAO/SSAO_PS.hlsl", "PSMain", pixelProfile.c_str(), &ssaoPS },
             { L"Effects/AmbientOcclusion/SSAO/SSAO_Blur_PS.hlsl", "PSMain", pixelProfile.c_str(), &ssaoBlurPS },
@@ -393,15 +436,27 @@ namespace SasamiRenderer
             { L"RayTracing/SWRT/SWRT_ReflectionComposite_PS.hlsl", "PSMain", pixelProfile.c_str(), &swrtReflectionCompositePS },
             { L"Effects/PostProcess/ToneMap_PS.hlsl", "PSMain", pixelProfile.c_str(), &toneMapPS },
             { L"Effects/PostProcess/FXAA_PS.hlsl", "PSMain", pixelProfile.c_str(), &fxaaPS },
+            { L"Effects/PostProcess/LightShaft_PS.hlsl", "PSMain", pixelProfile.c_str(), &lightShaftPS },
+            { L"Effects/PostProcess/BloomDownsample_PS.hlsl", "PSMain", pixelProfile.c_str(), &bloomDownsamplePS },
+            { L"Effects/PostProcess/BloomUpsample_PS.hlsl", "PSMain", pixelProfile.c_str(), &bloomUpsamplePS },
+            { L"Effects/PostProcess/LensFlare_PS.hlsl", "PSMain", pixelProfile.c_str(), &lensFlarePS },
+            { L"Effects/PostProcess/LensFlareRayTraced_VS.hlsl", "VSMain", vertexProfile.c_str(), &lensFlareRtVS },
+            { L"Effects/PostProcess/LensFlareRayTraced_PS.hlsl", "PSMain", pixelProfile.c_str(), &lensFlareRtPS },
             { L"Effects/RayMarch/RayMarch_VS.hlsl", "VSMain", vertexProfile.c_str(), &rayMarchVS },
             { L"Effects/RayMarch/RayMarch_PS.hlsl", "PSMain", pixelProfile.c_str(), &rayMarchPS },
             { L"Raster/Transparency/TransparentBackfaceDistance_PS.hlsl", "PSMain", pixelProfile.c_str(), &transparentBackfaceDistancePS },
             { L"Raster/Transparency/TransparentOIT_PS.hlsl", "PSMain", pixelProfile.c_str(), &transparentOitPS },
             { L"Raster/Transparency/TransparentOITComposite_PS.hlsl", "PSMain", pixelProfile.c_str(), &transparentOitCompositePS },
+            { L"Raster/Lighting/Shadow/ShadowDepth_VS.hlsl", "VSMain", vertexProfile.c_str(), &shadowDepthVS },
             { L"Raster/Lighting/Shadow/ShadowVSM_PS.hlsl", "PS_ShadowVSM", pixelProfile.c_str(), &shadowVsmPS },
+            { L"Raster/Lighting/Shadow/ShadowAlphaMask_PS.hlsl", "PSMain", pixelProfile.c_str(), &shadowAlphaMaskPS },
             { L"Raster/Lighting/Shadow/ShadowVSM_GaussBlur_CS.hlsl", "CS_BlurH", computeProfile.c_str(), &shadowVsmBlurHCS },
             { L"Raster/Lighting/Shadow/ShadowVSM_GaussBlur_CS.hlsl", "CS_BlurV", computeProfile.c_str(), &shadowVsmBlurVCS },
-        } };
+            { L"Raster/Toon/ToonOutline_VS.hlsl", "VSMain", vertexProfile.c_str(), &toonOutlineVS },
+            { L"Raster/Toon/ToonOutline_PS.hlsl", "PSMain", pixelProfile.c_str(), &toonOutlinePS },
+            { L"Raster/Debug/Wireframe_VS.hlsl", "VSMain", vertexProfile.c_str(), &wireframeVS },
+            { L"Raster/Debug/Wireframe_PS.hlsl", "PSMain", pixelProfile.c_str(), &wireframePS },
+        });
 
         for (const ShaderSpec& spec : shaderSpecs) {
             if (!loadOrCompileShader(spec)) {
@@ -427,19 +482,19 @@ namespace SasamiRenderer
         auto rast = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
         rast.CullMode = D3D12_CULL_MODE_NONE;
 
-        auto shadowRast = rast;
-        shadowRast.DepthBias = 1000;
-        shadowRast.DepthBiasClamp = 0.0f;
-        shadowRast.SlopeScaledDepthBias = 2.0f;
+        auto shadowRast = MakeDirectionalShadowRasterizerDesc();
 
-        // D16_UNORM の point/spot cube shadow 専用バイアス。D16 の DepthBias は固定NDC加算
-        // (D32_FLOAT の指数スケーリングと異なり z=0 近傍でも縮小されない)なので、
-        // 90度FOVの近距離パースペクティブでは shadowRast のカスケード向け値だと
-        // オクルーダー深度が受け手深度を追い越し、遮蔽影が消える(peter-panning)。
+        // D16_UNORM bias dedicated to point/spot cube shadows. With reverse-Z the side where
+        // D32_FLOAT's exponent scaling concentrates precision moves from z=1 to z=0, i.e. from
+        // the near plane to the far plane; D16's DepthBias, being a fixed NDC step, still does
+        // not shrink there the way D32_FLOAT's does. At close range with a 90-degree FOV, using
+        // shadowRast's cascade-tuned values would let occluder depth overtake receiver depth,
+        // making shadows disappear (peter-panning), so a separate (also re-tuned-pending) bias
+        // is kept here.
         auto pointSpotShadowRast = rast;
-        pointSpotShadowRast.DepthBias = 24;
+        pointSpotShadowRast.DepthBias = -24;
         pointSpotShadowRast.DepthBiasClamp = 0.01f;
-        pointSpotShadowRast.SlopeScaledDepthBias = 0.5f;
+        pointSpotShadowRast.SlopeScaledDepthBias = -0.5f;
 
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
         psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
@@ -450,12 +505,13 @@ namespace SasamiRenderer
         psoDesc.BlendState = blendDesc;
         psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
         psoDesc.DepthStencilState.DepthEnable = TRUE;
-        psoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+        // Reverse-Z: near=1.0, far=0.0, so a fragment passes when its depth is >= what's stored.
+        psoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
         psoDesc.DepthStencilState.StencilEnable = FALSE;
         ApplyCommonPsoDefaults(psoDesc);
         psoDesc.NumRenderTargets = 5;
         psoDesc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT; // SceneColor HDR
-        psoDesc.RTVFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM;    // GBufferAlbedo
+        psoDesc.RTVFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB; // GBufferAlbedo (PS writes linear; _SRGB view encodes on write/decodes on read to preserve dark precision in 8-bit)
         psoDesc.RTVFormats[2] = DXGI_FORMAT_R16G16B16A16_FLOAT; // GBufferNormal
         psoDesc.RTVFormats[3] = DXGI_FORMAT_R8G8B8A8_UNORM;    // GBufferMaterial
         psoDesc.RTVFormats[4] = DXGI_FORMAT_R16G16B16A16_FLOAT; // GBufferEmissive
@@ -488,7 +544,7 @@ namespace SasamiRenderer
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoGBuffer = psoDesc;
         psoGBuffer.PS = { gbufferPixelShader->GetBufferPointer(), gbufferPixelShader->GetBufferSize() };
         psoGBuffer.NumRenderTargets = 5;
-        psoGBuffer.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;     // GBufferAlbedo
+        psoGBuffer.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB; // GBufferAlbedo (PS writes linear; _SRGB view encodes on write/decodes on read to preserve dark precision in 8-bit)
         psoGBuffer.RTVFormats[1] = DXGI_FORMAT_R16G16B16A16_FLOAT; // GBufferNormal
         psoGBuffer.RTVFormats[2] = DXGI_FORMAT_R8G8B8A8_UNORM;     // GBufferMaterial
         psoGBuffer.RTVFormats[3] = DXGI_FORMAT_R16G16B16A16_FLOAT; // GBufferEmissive
@@ -497,6 +553,46 @@ namespace SasamiRenderer
             psoGBuffer.RTVFormats[rtIndex] = DXGI_FORMAT_UNKNOWN;
         }
         if (!createPipelineState("OpaqueGBuffer", psoGBuffer, m_gbufferPipelineState)) { return false; }
+
+        // Toon outline pass (inverted-hull technique): the same vertex layout and root
+        // signature as OpaqueGBuffer, but only front faces are culled so the back faces --
+        // pushed outward along the normal in the VS -- remain and draw as a silhouette rim
+        // around the model. Renders straight into SceneColor with the shared GBuffer depth
+        // test/state so the rim is properly occluded by nearer geometry.
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoToonOutline = psoDesc;
+        psoToonOutline.VS = { toonOutlineVS->GetBufferPointer(), toonOutlineVS->GetBufferSize() };
+        psoToonOutline.PS = { toonOutlinePS->GetBufferPointer(), toonOutlinePS->GetBufferSize() };
+        auto toonOutlineRast = rast;
+        toonOutlineRast.CullMode = D3D12_CULL_MODE_FRONT;
+        psoToonOutline.RasterizerState = toonOutlineRast;
+        psoToonOutline.NumRenderTargets = 1;
+        psoToonOutline.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT; // SceneColor
+        for (UINT rtIndex = 1; rtIndex < _countof(psoToonOutline.RTVFormats); ++rtIndex) {
+            psoToonOutline.RTVFormats[rtIndex] = DXGI_FORMAT_UNKNOWN;
+        }
+        if (!createPipelineState("ToonOutline", psoToonOutline, m_toonOutlinePipelineState)) { return false; }
+
+        // Editor wireframe overlay (view mode "Wireframe"): the opaque vertex layout drawn with
+        // wireframe fill into SceneColor. It tests against the scene depth without writing it; the
+        // positive bias pulls the lines toward the camera in reverse-Z (GREATER_EQUAL), so edges of
+        // the visible surface win against the surface they were rasterized from.
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoWireframe = psoDesc;
+        psoWireframe.VS = { wireframeVS->GetBufferPointer(), wireframeVS->GetBufferSize() };
+        psoWireframe.PS = { wireframePS->GetBufferPointer(), wireframePS->GetBufferSize() };
+        auto wireframeRast = rast;
+        wireframeRast.FillMode = D3D12_FILL_MODE_WIREFRAME;
+        wireframeRast.CullMode = D3D12_CULL_MODE_NONE;
+        wireframeRast.DepthBias = 64;
+        wireframeRast.DepthBiasClamp = 0.0f;
+        wireframeRast.SlopeScaledDepthBias = 1.0f;
+        psoWireframe.RasterizerState = wireframeRast;
+        psoWireframe.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+        psoWireframe.NumRenderTargets = 1;
+        psoWireframe.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT; // SceneColor
+        for (UINT rtIndex = 1; rtIndex < _countof(psoWireframe.RTVFormats); ++rtIndex) {
+            psoWireframe.RTVFormats[rtIndex] = DXGI_FORMAT_UNKNOWN;
+        }
+        if (!createPipelineState("Wireframe", psoWireframe, m_wireframePipelineState)) { return false; }
 
         {
             D3D12_DESCRIPTOR_RANGE deferredRanges[14] = {};
@@ -639,6 +735,9 @@ namespace SasamiRenderer
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoTransparent = psoDesc;
         psoTransparent.BlendState = transparentBlend;
         psoTransparent.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+        // Colour-only PS: this PSO binds SceneColor alone, so PSMain's GBuffer targets would
+        // be discarded and the runtime would warn about the four unbound RTV slots.
+        psoTransparent.PS = { forwardColorOnlyPS->GetBufferPointer(), forwardColorOnlyPS->GetBufferSize() };
         psoTransparent.NumRenderTargets = 1;
         psoTransparent.RTVFormats[1] = DXGI_FORMAT_UNKNOWN;
         psoTransparent.RTVFormats[2] = DXGI_FORMAT_UNKNOWN;
@@ -687,6 +786,7 @@ namespace SasamiRenderer
 
         // Shared base desc for the fullscreen composite/tonemap passes below Esingle RTV only
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoBasic = psoDesc;
+        psoBasic.PS = { forwardColorOnlyPS->GetBufferPointer(), forwardColorOnlyPS->GetBufferSize() };
         psoBasic.NumRenderTargets = 1;
         psoBasic.RTVFormats[1] = DXGI_FORMAT_UNKNOWN;
         psoBasic.RTVFormats[2] = DXGI_FORMAT_UNKNOWN;
@@ -752,6 +852,33 @@ namespace SasamiRenderer
         psoToneMap.DSVFormat = DXGI_FORMAT_UNKNOWN;
         if (!createPipelineState("ToneMap", psoToneMap, m_toneMapPipelineState)) { return false; }
 
+        // Same shader and state as above, only RTVFormats[0] differs: DXGI_FORMAT_R10G10B10A2_UNORM
+        // matches the swap chain's backbuffer format when Renderer::m_hdrOutputActive is true (see
+        // Dx12GraphicsDeviceInit.cpp / Renderer::ResizeViewport). A graphics PSO's declared RTV
+        // formats must exactly match the RTV actually bound at Draw, so the SDR PSO above cannot be
+        // reused for the HDR10 swap chain format.
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoToneMapHdr10 = psoToneMap;
+        psoToneMapHdr10.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM;
+        if (!createPipelineState("ToneMapHdr10", psoToneMapHdr10, m_toneMapHdr10PipelineState)) { return false; }
+
+        // Bloom mip chain (BloomRenderer): scene-linear R16G16B16A16_FLOAT targets. The downsample
+        // replaces what it covers; the upsample adds the blurred smaller mip onto the larger one
+        // (ONE/ONE), so each level accumulates every coarser level (Jimenez 2014).
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoBloomDownsample = psoToneMap;
+        psoBloomDownsample.PS = { bloomDownsamplePS->GetBufferPointer(), bloomDownsamplePS->GetBufferSize() };
+        psoBloomDownsample.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        if (!createPipelineState("BloomDownsample", psoBloomDownsample, m_bloomDownsamplePipelineState)) { return false; }
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoBloomUpsample = psoBloomDownsample;
+        psoBloomUpsample.PS = { bloomUpsamplePS->GetBufferPointer(), bloomUpsamplePS->GetBufferSize() };
+        psoBloomUpsample.BlendState.RenderTarget[0].BlendEnable = TRUE;
+        psoBloomUpsample.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
+        psoBloomUpsample.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_ONE;
+        psoBloomUpsample.BlendState.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+        psoBloomUpsample.BlendState.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+        psoBloomUpsample.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
+        psoBloomUpsample.BlendState.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+        if (!createPipelineState("BloomUpsample", psoBloomUpsample, m_bloomUpsamplePipelineState)) { return false; }
+
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoFxaa = psoBasic;
         psoFxaa.InputLayout = { nullptr, 0 };
         psoFxaa.VS = { ssaoVS->GetBufferPointer(), ssaoVS->GetBufferSize() };
@@ -767,16 +894,79 @@ namespace SasamiRenderer
         }
         psoFxaa.DSVFormat = DXGI_FORMAT_UNKNOWN;
         if (!createPipelineState("Fxaa", psoFxaa, m_fxaaPipelineState)) { return false; }
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoFxaaHdr10 = psoFxaa;
+        psoFxaaHdr10.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM;
+        if (!createPipelineState("FxaaHdr10", psoFxaaHdr10, m_fxaaHdr10PipelineState)) { return false; }
 
-        // Shadow pipeline (depth-only, reuse VS; no PS)
+        // God rays are additive: the pass outputs only the scattered contribution, so the
+        // tone-mapped image underneath has to survive the blend (ONE/ONE), unlike every other
+        // fullscreen pass here which replaces what it covers.
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoLightShaft = psoFxaa;
+        psoLightShaft.PS = { lightShaftPS->GetBufferPointer(), lightShaftPS->GetBufferSize() };
+        psoLightShaft.BlendState.RenderTarget[0].BlendEnable = TRUE;
+        psoLightShaft.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
+        psoLightShaft.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_ONE;
+        psoLightShaft.BlendState.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+        psoLightShaft.BlendState.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+        psoLightShaft.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
+        psoLightShaft.BlendState.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+        if (!createPipelineState("LightShaft", psoLightShaft, m_lightShaftPipelineState)) { return false; }
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoLightShaftHdr10 = psoLightShaft;
+        psoLightShaftHdr10.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM;
+        if (!createPipelineState("LightShaftHdr10", psoLightShaftHdr10, m_lightShaftHdr10PipelineState)) { return false; }
+
+        // Same additive blend as the shafts: the flare is light added to the image, not a
+        // replacement for it.
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoLensFlare = psoLightShaft;
+        psoLensFlare.PS = { lensFlarePS->GetBufferPointer(), lensFlarePS->GetBufferSize() };
+        if (!createPipelineState("LensFlare", psoLensFlare, m_lensFlarePipelineState)) { return false; }
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoLensFlareHdr10 = psoLensFlare;
+        psoLensFlareHdr10.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM;
+        if (!createPipelineState("LensFlareHdr10", psoLensFlareHdr10, m_lensFlareHdr10PipelineState)) { return false; }
+
+        // Ray-traced mode is a mesh draw, not a fullscreen pass: the distorted grid that arrives at
+        // the sensor IS the ghost, so the vertices have to be traced individually and the triangles
+        // between them interpolated. One instance per surface pair.
+        static const D3D12_INPUT_ELEMENT_DESC kLensFlareGridLayout[] = {
+            { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        };
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoLensFlareRt = psoLensFlare;
+        psoLensFlareRt.InputLayout = { kLensFlareGridLayout, _countof(kLensFlareGridLayout) };
+        psoLensFlareRt.VS = { lensFlareRtVS->GetBufferPointer(), lensFlareRtVS->GetBufferSize() };
+        psoLensFlareRt.PS = { lensFlareRtPS->GetBufferPointer(), lensFlareRtPS->GetBufferSize() };
+        if (!createPipelineState("LensFlareRayTraced", psoLensFlareRt, m_lensFlareRayTracedPipelineState)) { return false; }
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoLensFlareRtHdr10 = psoLensFlareRt;
+        psoLensFlareRtHdr10.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM;
+        if (!createPipelineState("LensFlareRayTracedHdr10", psoLensFlareRtHdr10, m_lensFlareRayTracedHdr10PipelineState)) { return false; }
+
+        // Shadow pipeline (depth-only, no PS).
+        //
+        // Uses a dedicated position-only VS rather than the G-Buffer vertex shader. The
+        // shadow passes have no pixel shader, so every interpolant the G-Buffer VS writes
+        // (worldN, uv, color, lightPos, worldPos -- 16 floats) was produced and discarded,
+        // on ~6.6M triangles per frame. The input layout is narrowed to match: the vertex
+        // buffer stride is unchanged, so the IA just fetches POSITION's 12 bytes out of the
+        // 48-byte vertex instead of all of it.
+        //
+        // psoShadowD16 and psoShadowVsm below are copies of this desc, so both inherit the
+        // narrowed layout and VS. That is safe for VSM because ShadowVSM_PS reads nothing
+        // but SV_POSITION.z.
+        const D3D12_INPUT_ELEMENT_DESC shadowInputElementDescs[] = {
+            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+        };
+
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoShadow = {};
-        psoShadow.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
+        psoShadow.InputLayout = { shadowInputElementDescs, _countof(shadowInputElementDescs) };
         psoShadow.pRootSignature = m_rootSignature.Get();
-        psoShadow.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
+        psoShadow.VS = { shadowDepthVS->GetBufferPointer(), shadowDepthVS->GetBufferSize() };
         psoShadow.PS = { nullptr, 0 };
         psoShadow.RasterizerState = shadowRast;
         psoShadow.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
         psoShadow.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+        // This used to rely on D3D12_DEFAULT's implicit D3D12_COMPARISON_FUNC_LESS. Reverse-Z
+        // (near=1.0, far=0.0) makes that implicit default wrong, so it is now made explicit.
+        // psoShadowD16 and psoShadowVsm below are copies of this desc and inherit it.
+        psoShadow.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER;
         ApplyCommonPsoDefaults(psoShadow);
         psoShadow.NumRenderTargets = 0;
         psoShadow.DSVFormat = DXGI_FORMAT_D32_FLOAT;
@@ -798,6 +988,20 @@ namespace SasamiRenderer
         psoShadowVsm.RTVFormats[0] = DXGI_FORMAT_R32G32_FLOAT;
         psoShadowVsm.DSVFormat = DXGI_FORMAT_D32_FLOAT;
         if (!createPipelineState("ShadowVSM", psoShadowVsm, m_shadowVsmPipelineState)) { return false; }
+
+        // Alpha-tested shadow casters (glTF alphaMode MASK). The position-only ShadowDepth_VS has no
+        // UV, so these reuse the full G-Buffer input layout and VS and add ShadowAlphaMask_PS.
+        // Only MASK draw items bind them; everything else stays on the PS-less pipelines above.
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoShadowAlphaMask = psoShadow;
+        psoShadowAlphaMask.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
+        psoShadowAlphaMask.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
+        psoShadowAlphaMask.PS = { shadowAlphaMaskPS->GetBufferPointer(), shadowAlphaMaskPS->GetBufferSize() };
+        if (!createPipelineState("ShadowAlphaMask", psoShadowAlphaMask, m_shadowAlphaMaskPipelineState)) { return false; }
+
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoShadowAlphaMaskD16 = psoShadowAlphaMask;
+        psoShadowAlphaMaskD16.DSVFormat = DXGI_FORMAT_D16_UNORM;
+        psoShadowAlphaMaskD16.RasterizerState = pointSpotShadowRast;
+        if (!createPipelineState("ShadowAlphaMaskD16", psoShadowAlphaMaskD16, m_shadowAlphaMaskD16PipelineState)) { return false; }
 
         // VSM Gaussian blur compute root signature and PSOs
         {
@@ -865,12 +1069,13 @@ namespace SasamiRenderer
         psoTess.BlendState = blendDesc;
         psoTess.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
         psoTess.DepthStencilState.DepthEnable = TRUE;
-        psoTess.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+        // Reverse-Z: near=1.0, far=0.0, so a fragment passes when its depth is >= what's stored.
+        psoTess.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
         psoTess.DepthStencilState.StencilEnable = FALSE;
         ApplyCommonPsoDefaults(psoTess, D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH);
         psoTess.NumRenderTargets = 5;
         psoTess.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT; // SceneColor HDR
-        psoTess.RTVFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM;    // GBufferAlbedo
+        psoTess.RTVFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB; // GBufferAlbedo (PS writes linear; _SRGB view encodes on write/decodes on read to preserve dark precision in 8-bit)
         psoTess.RTVFormats[2] = DXGI_FORMAT_R16G16B16A16_FLOAT; // GBufferNormal
         psoTess.RTVFormats[3] = DXGI_FORMAT_R8G8B8A8_UNORM;    // GBufferMaterial
         psoTess.RTVFormats[4] = DXGI_FORMAT_R16G16B16A16_FLOAT; // GBufferEmissive
@@ -881,7 +1086,7 @@ namespace SasamiRenderer
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoTessGBuffer = psoTess;
         psoTessGBuffer.PS = { gbufferPixelShader->GetBufferPointer(), gbufferPixelShader->GetBufferSize() };
         psoTessGBuffer.NumRenderTargets = 5;
-        psoTessGBuffer.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        psoTessGBuffer.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB; // GBufferAlbedo (PS writes linear; _SRGB view encodes on write/decodes on read to preserve dark precision in 8-bit)
         psoTessGBuffer.RTVFormats[1] = DXGI_FORMAT_R16G16B16A16_FLOAT;
         psoTessGBuffer.RTVFormats[2] = DXGI_FORMAT_R8G8B8A8_UNORM;
         psoTessGBuffer.RTVFormats[3] = DXGI_FORMAT_R16G16B16A16_FLOAT;
@@ -915,19 +1120,6 @@ namespace SasamiRenderer
             if (!createPipelineState("TessellationDebug", psoTessDbg, m_tessDebugPipelineState)) { return false; }
         }
 
-        // Meshlet debug pipeline  EVS + MeshletDebug_PS.
-        // Uses SV_PrimitiveID / kMaxTrianglesPerMeshlet to derive the meshlet index
-        // (exact for sequential meshlet builds) so each meshlet group gets a unique
-        // color.  The divisor lives in Shaders/Shared/Common/MeshletConstants.hlsli so
-        // it tracks MeshletBuffer::kMaxTrianglesPerMeshlet.  Works with the standard
-        // DrawIndexedInstanced path; no mesh shader dispatch required, which is why the
-        // PS must NOT read a per-primitive attribute here - a VS cannot supply one.
-        {
-            D3D12_GRAPHICS_PIPELINE_STATE_DESC psoMeshDbg = psoDesc;
-            psoMeshDbg.PS = { meshletDebugPS->GetBufferPointer(), meshletDebugPS->GetBufferSize() };
-            if (!createPipelineState("MeshletDebug", psoMeshDbg, m_meshletDebugPipelineState)) { return false; }
-        }
-
         // Tessellation shadow pipeline (VS+HS+DS; depth-only)
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoTessShadow = {};
         psoTessShadow.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
@@ -944,6 +1136,10 @@ namespace SasamiRenderer
         psoTessShadow.RasterizerState = shadowRastTess;
         psoTessShadow.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
         psoTessShadow.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+        // This used to rely on D3D12_DEFAULT's implicit D3D12_COMPARISON_FUNC_LESS. Reverse-Z
+        // (near=1.0, far=0.0) makes that implicit default wrong, so it is now made explicit.
+        // psoTessShadowD16 below is a copy of this desc and inherits it.
+        psoTessShadow.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER;
         ApplyCommonPsoDefaults(psoTessShadow, D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH);
         psoTessShadow.NumRenderTargets = 0;
         psoTessShadow.DSVFormat = DXGI_FORMAT_D32_FLOAT;
@@ -966,7 +1162,8 @@ namespace SasamiRenderer
         psoSkybox.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
         psoSkybox.DepthStencilState.DepthEnable = TRUE;
         psoSkybox.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-        psoSkybox.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+        // Reverse-Z: near=1.0, far=0.0, so a fragment passes when its depth is >= what's stored.
+        psoSkybox.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
         psoSkybox.DepthStencilState.StencilEnable = FALSE;
         ApplyCommonPsoDefaults(psoSkybox);
         psoSkybox.NumRenderTargets = 1;
@@ -1004,11 +1201,13 @@ namespace SasamiRenderer
             .blendDesc = blendDesc,
             .transparentBlend = transparentBlend,
             .oitBlend = oitBlend,
+            .forwardColorOnlyPS = forwardColorOnlyPS,
             .transparentOitPS = transparentOitPS,
             .transparentBackfaceDistancePS = transparentBackfaceDistancePS,
             .backfaceDistanceRast = backfaceDistanceRast,
             .shadowRast = shadowRast,
             .pointSpotShadowRast = pointSpotShadowRast,
+            .shadowAlphaMaskPS = shadowAlphaMaskPS,
         };
         if (!InitializeSkinnedPipelines(device, skinnedInputs)) {
             return false;

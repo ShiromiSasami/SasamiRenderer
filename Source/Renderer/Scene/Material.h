@@ -2,7 +2,7 @@
 #include "Renderer/RHI/GraphicsDevice.h"
 #include "Renderer/Structures/Texture.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // Minimal material matching current pipeline (t0 only)
     enum class TextureSlot { Albedo = 0 };
@@ -30,3 +30,7 @@ namespace SasamiRenderer
         Texture* albedo_ = nullptr;
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

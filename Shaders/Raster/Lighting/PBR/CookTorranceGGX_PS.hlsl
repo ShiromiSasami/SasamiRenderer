@@ -24,6 +24,7 @@ Texture2DArray SpotShadowMapTex : register(t12);
 Texture2DArray PointShadowMapTex : register(t15);
 Texture2DArray<float2> ShadowVSMTex : register(t13);
 Texture2D<float> TransparentBackfaceDistanceTex : register(t14);
+Texture2D EmissiveTex : register(t18); // sRGB view; white fallback keeps emissive = factor
 SamplerState LinearWrap : register(s0);
 
 // s1: depth comparison sampler for shadow PCF (clamped, LESS_EQUAL). See MakeShadowComparisonSampler.
@@ -55,24 +56,11 @@ struct PSOutput
     float4 color    : SV_TARGET0; // SceneColor    — final lit output
     float4 albedo   : SV_TARGET1; // GBufferAlbedo — base color RGB + alpha
     float4 normal   : SV_TARGET2; // GBufferNormal — world-space normal XYZ (encoded 0-1) + camera distance
-    float4 material : SV_TARGET3; // GBufferMaterial - roughness(R) metallic(G) iblVisibility(B) reflectionMask(A)
+    float4 material : SV_TARGET3; // GBufferMaterial - roughness(R) metallic(G) materialAo(B) reflectionMask(A)
     float4 emissive : SV_TARGET4; // GBufferEmissive — emissive color RGB + 0
 };
 
-// Split-sum specular IBL (Karis 2013, "Real Shading in Unreal Engine 4"):
-// the prefiltered radiance cube supplies the pre-integrated lighting term and the
-// 2D LUT supplies the BRDF term, so a mirror-like environment response is possible
-// where the L2 SH probes used for diffuse GI cannot represent one.
-float3 EvaluateSpecularIbl(float3 N, float3 V, float3 F0, float roughness, float specularOcclusion)
-{
-    if (u_iblParams.x <= 0.5) { return (float3)0; }
-    const float NdotV = saturate(dot(N, V));
-    const float3 R = reflect(-V, N);
-    const float mip = saturate(roughness) * max(u_iblParams.z, 0.0);
-    const float3 prefiltered = IblPrefilterTex.SampleLevel(LinearWrap, R, mip).rgb;
-    const float2 ab = IblBrdfLutTex.SampleLevel(LinearWrap, saturate(float2(NdotV, roughness)), 0).rg;
-    return prefiltered * (F0 * ab.x + ab.y) * specularOcclusion * u_iblParams.y;
-}
+#include "PBR_SpecularIbl.hlsli"
 
 PSOutput PSMain(PSInput i)
 {
@@ -87,13 +75,13 @@ PSOutput PSMain(PSInput i)
     float runtimeAo = 1.0;
 
     // Runtime-generated AO (SSAO/RTAO) is bound at slot 8, register t9.
-    // u_reflectionParams.zw = screen width/height (same dimensions as the AO/reflection textures).
-    if (u_reflectionParams.z > 0.5 && u_reflectionParams.w > 0.5)
+    // u_reflectionParams.zw is screen resolution (pixels), not a flag -- it is always
+    // > 0.5 for any real viewport, so the old check here was dead. Sample unconditionally.
     {
         float2 screenUV = i.position.xy / u_reflectionParams.zw;
         runtimeAo = RuntimeAOTex.SampleLevel(LinearWrap, screenUV, 0).r;
     }
-    const bool useSpecularGlossiness = (u_materialSpecularWorkflow.w > 0.5);
+    const bool useSpecularGlossiness = IsSpecularGlossinessWorkflow(u_materialSpecularWorkflow.w);
     float metallic = useSpecularGlossiness ? 0.0 : saturate(u_materialParams.x);
     float roughness = saturate(u_materialEmissiveRoughness.w);
     float transmission = saturate(u_materialReflectionParams.y);
@@ -120,10 +108,16 @@ PSOutput PSMain(PSInput i)
         ao = materialAo * runtimeAo;
     }
     const float rawAo = saturate(ao);
-    const float iblVisibility = saturate(materialAo * runtimeAo);
     // UE-style MinOcclusion: remap AO from [0,1] to [minOcc,1] so fully-occluded
     // areas never go completely dark.  u_shadowParams.w carries the floor value.
     // lerp(minOcc, 1.0, ao) = minOcc + (1-minOcc)*ao — equivalent to UE MinOcclusion.
+    //
+    // Indirect light is attenuated by this same value. It used to have its own unfloored
+    // term built from materialAo * runtimeAo, which was wrong twice over: it skipped the
+    // floor, so rawAo == 0 pixels lost 100% of GI/IBL while direct light stayed protected
+    // (the black-edge mismatch), and it ignored aoMode, so selecting RuntimeAOOnly still
+    // multiplied the indirect term by materialAo. One occlusion value, chosen by aoMode
+    // above, now feeds both. Specular gets its own relaxation in ComputeSpecularOcclusion.
     {
         float minOcc = saturate(u_shadowParams.w);
         ao = minOcc + (1.0 - minOcc) * rawAo;
@@ -166,11 +160,12 @@ PSOutput PSMain(PSInput i)
     float VdotH = saturate(dot(V, H));
     float a = roughness * roughness;
     float D = DistributionGGX(NdotH, a);
-    float k = (roughness + 1.0);
-    k = (k * k) / 8.0; // Schlick-GGX remapping
-    float G = GeometrySmith(NdotV, NdotL, k);
+    float Vis = V_SmithGGXCorrelated(NdotV, NdotL, roughness);
     float3 F = FresnelSchlick(VdotH, F0);
-    float3 spec = (D * G) * F / max(4.0 * NdotV * NdotL, 1e-4);
+    // Same multiple-scattering compensation as the IBL lobe (PBR_SpecularIbl.hlsli); matches
+    // the deferred path so a surface does not change brightness between the two.
+    const float3 specularEnergyCompensation = SpecularEnergyCompensation(F0, NdotV, roughness);
+    float3 spec = (D * Vis) * F * specularEnergyCompensation;
     // Energy split: specular-glossiness limits diffuse by max(F0), while
     // metallic-roughness limits diffuse by (1-metallic).
     float3 kd = (1.0 - F);
@@ -191,21 +186,43 @@ PSOutput PSMain(PSInput i)
     surf.F0 = F0;
     surf.roughness = roughness;
     surf.a = a;
-    surf.k = k;
     surf.NdotV = NdotV;
     surf.ao = ao;
+    surf.specularEnergyCompensation = specularEnergyCompensation;
     Lo += AccumulatePointLights(surf, u_debugParams.y);
     Lo += AccumulateSpotLights(surf, u_debugParams.y);
 
     float3 ambient = 0.03 * albedo * ao;
     float3 localReflection = 0.0;
     float reflectionWeight = 0.0;
-    float specularAo = 1.0;
-    if (reflectionModeEnabled && materialReflectionMask > 0.0 &&
-        u_reflectionParams.z > 0.5 && u_reflectionParams.w > 0.5) {
+    // AO-driven occlusion for indirect specular.
+    //
+    // Computed here, before the GI/IBL branches, because EvaluateSpecularIbl below is
+    // called unconditionally -- it is outside both branches. This used to be assigned
+    // only inside the `else if (u_iblParams.x > 0.5)` branch, so whenever GI was enabled
+    // the value stayed at its 1.0 initialiser and IBL specular ignored occlusion entirely,
+    // while indirect diffuse in the same pixel was still attenuated by the AO term.
+    // That asymmetry made specular highlights read as "lit" inside occluded geometry.
+    //
+    // - Diffuse IBL uses linear AO.
+    // - Specular AO is relaxed for metallic surfaces so they keep a visible
+    //   reflection response instead of disappearing under occlusion, and folds in
+    //   HorizonOcclusion so a mirror reflection vector pointing below the geometric
+    //   surface does not sample the prefiltered cube (see PBR_BRDF.hlsli).
+    float3 R = reflect(-V, N);
+    float specularAo = ComputeSpecularOcclusion(ao, NdotV, roughness, metallic, R, N);
+    // u_reflectionParams.zw is screen resolution (pixels), not a flag; it is always > 0.5
+    // for any real viewport, so reflectionModeEnabled/materialReflectionMask are the only
+    // real conditions gating this block.
+    // How much indirect specular the reflection composite will add on top of SceneColor for
+    // this pixel. The IBL specular below is faded out by it so the two do not stack.
+    float reflectionCoverage = 0.0;
+    if (reflectionModeEnabled && materialReflectionMask > 0.0) {
         float2 reflectionUv = saturate(i.position.xy / u_reflectionParams.zw);
         float4 reflectionSample = ReflectionTex.SampleLevel(LinearWrap, reflectionUv, 0);
         localReflection = reflectionSample.rgb;
+        reflectionCoverage = ReflectionCoverage(reflectionSample.a, u_reflectionParams.y,
+                                                materialReflectionMask, roughness);
         // SWRT reflections need the GBuffer produced by this lighting pass.
         // FinalLit receives them through the immediate reflection composite.
         reflectionWeight = 0.0;
@@ -224,7 +241,7 @@ PSOutput PSMain(PSInput i)
         // which reads as up-facing surfaces (floors, roofs) being blown out.
         float3 probeIrradiance = GI_SampleProbeGrid(i.worldPos, N);
         float3 diffuseGI = (probeIrradiance / 3.14159265) * diffuseReflectance;
-        indirectDiffuse = kdIbl * diffuseGI * iblVisibility;
+        indirectDiffuse = kdIbl * diffuseGI * ao;
     } else if (u_iblParams.x > 0.5) {
         // EvaluateDiffuseIrradianceFromSh returns irradiance E (same cosine-lobe
         // convolution as the probe SH) and needs the Lambert 1/PI. The prefiltered
@@ -235,20 +252,18 @@ PSOutput PSMain(PSInput i)
             : IrradianceTex.Sample(LinearWrap, N).rgb;
         float3 diffuseIBL = iblDiffuse * diffuseReflectance;
 
-        // AO-driven occlusion for indirect light:
-        // - Diffuse IBL uses linear AO.
-        // - Specular AO is relaxed for metallic surfaces so they keep a visible
-        //   reflection response instead of disappearing under occlusion.
-        specularAo = lerp(iblVisibility * iblVisibility,
-                          saturate(SpecularOcclusion(iblVisibility, NdotV, roughness)),
-                          saturate(metallic));
-        indirectDiffuse = kdIbl * diffuseIBL * iblVisibility * u_iblParams.y;
+        indirectDiffuse = kdIbl * diffuseIBL * ao * u_iblParams.y;
     }
 
     // Specular environment fallback used when SSR/SWRT has no reflection data at this
     // pixel (see reflectionWeight below). specularAo is the AO term already computed
     // above for the IBL specular response (relaxed for metals via SpecularOcclusion).
-    fallbackSpecular = EvaluateSpecularIbl(N, V, F0, roughness, specularAo);
+    // Scaled by (1 - coverage): the reflection composite pass adds the rest on top of
+    // SceneColor. Without this the same indirect specular is counted twice on every
+    // reflective surface -- the lighting pass wrote it in full and the composite added
+    // its own with an additive blend.
+    fallbackSpecular = EvaluateSpecularIbl(N, V, F0, roughness, specularAo) *
+                       (1.0 - reflectionCoverage);
 
     // Reflection hierarchy is independent from the IBL toggle:
     // - SWRT/SSR supply the reflected radiance when they have data.
@@ -266,45 +281,40 @@ PSOutput PSMain(PSInput i)
     } else {
         ambient = indirectDiffuse + fallbackSpecular;
     }
-    // Ambient floor: even in fully-occluded areas, retain a minimum bounce-light contribution
-    // so indoor surfaces never go completely black. 0.04 ≈ dark interior scatter floor.
-    static const float kAmbientFloor = 0.01;
-    ambient += kAmbientFloor * albedo * ao;
-
-    float3 emissiveColor = u_materialEmissiveRoughness.rgb;
-    float3 color = ambient + Lo + emissiveColor * ao;
+    // No constant ambient floor (it double-counted with IBL/GI), and emissive is self-lit so AO
+    // must not darken it.
+    float3 emissiveColor = u_materialEmissiveRoughness.rgb * EmissiveTex.Sample(LinearWrap, i.uv).rgb;
+    float3 color = ambient + Lo + emissiveColor;
     float outputAlpha = materialAlpha;
     if (effectiveTransmission > 0.001) {
-        const bool hasSceneColorCopy =
-            (u_reflectionParams.z > 0.5) &&
-            (u_reflectionParams.w > 0.5);
+        // u_reflectionParams.zw is screen resolution (pixels), not a flag; the old
+        // hasSceneColorCopy check built from it was always true for any real viewport,
+        // so the scene-colour refraction sample below now runs unconditionally.
         const float3 viewFresnel = FresnelSchlick(NdotV, F0);
         const float transmissionWeight =
             effectiveTransmission * (1.0 - saturate(max(max(viewFresnel.r, viewFresnel.g), viewFresnel.b)));
 
-        if (hasSceneColorCopy) {
-            float2 screenUv = saturate(i.position.xy / u_reflectionParams.zw);
-            float refractionScale = saturate(materialIor - 1.0) * 0.035 * (1.0 - roughness);
-            float2 refractionUv = saturate(screenUv + N.xy * refractionScale);
-            float3 surfaceRadiance = color;
-            float3 transmittedRadiance = ReflectionTex.SampleLevel(LinearWrap, refractionUv, 0).rgb * albedo;
-            float effectiveThickness = materialThickness;
-            float backfaceDistance = TransparentBackfaceDistanceTex.SampleLevel(LinearWrap, screenUv, 0);
-            if (backfaceDistance > vLen) {
-                effectiveThickness = max(effectiveThickness, backfaceDistance - vLen);
-            }
-            if (effectiveThickness > 0.0) {
-                float3 volumeTransmittance =
-                    pow(max(attenuationColor, float3(0.001, 0.001, 0.001)),
-                        effectiveThickness / attenuationDistance);
-                transmittedRadiance *= volumeTransmittance;
-            }
-
-            const float fresnelStrength = saturate(max(max(viewFresnel.r, viewFresnel.g), viewFresnel.b));
-            const float surfaceVisibility = lerp(0.28, 1.0, fresnelStrength);
-            const float3 visibleSurface = surfaceRadiance * surfaceVisibility;
-            color = lerp(surfaceRadiance, transmittedRadiance + visibleSurface, transmissionWeight);
+        float2 screenUv = saturate(i.position.xy / u_reflectionParams.zw);
+        float refractionScale = saturate(materialIor - 1.0) * 0.035 * (1.0 - roughness);
+        float2 refractionUv = saturate(screenUv + N.xy * refractionScale);
+        float3 surfaceRadiance = color;
+        float3 transmittedRadiance = ReflectionTex.SampleLevel(LinearWrap, refractionUv, 0).rgb * albedo;
+        float effectiveThickness = materialThickness;
+        float backfaceDistance = TransparentBackfaceDistanceTex.SampleLevel(LinearWrap, screenUv, 0);
+        if (backfaceDistance > vLen) {
+            effectiveThickness = max(effectiveThickness, backfaceDistance - vLen);
         }
+        if (effectiveThickness > 0.0) {
+            float3 volumeTransmittance =
+                pow(max(attenuationColor, float3(0.001, 0.001, 0.001)),
+                    effectiveThickness / attenuationDistance);
+            transmittedRadiance *= volumeTransmittance;
+        }
+
+        const float fresnelStrength = saturate(max(max(viewFresnel.r, viewFresnel.g), viewFresnel.b));
+        const float surfaceVisibility = lerp(0.28, 1.0, fresnelStrength);
+        const float3 visibleSurface = surfaceRadiance * surfaceVisibility;
+        color = lerp(surfaceRadiance, transmittedRadiance + visibleSurface, transmissionWeight);
 
         // Authored alpha is coverage/opacity. Transmission changes RGB by
         // sampling the scene behind the surface; it must not erase alpha again.
@@ -314,7 +324,10 @@ PSOutput PSMain(PSInput i)
     PSOutput o;
     o.albedo   = float4(saturate(albedo), materialAlpha);
     o.normal   = float4(N * 0.5 + 0.5, length(i.worldPos - u_cameraPos.xyz)); // W = linear camera distance for SWRT world-pos reconstruction
-    o.material = float4(roughness, metallic, iblVisibility, materialReflectionMask);
+    // material.b carries raw authored AO, matching OpaqueGBuffer_PS.hlsl. Not the floored
+    // `ao` and not runtimeAo: DeferredLighting_PS samples the runtime AO texture itself and
+    // applies the MinOcclusion floor itself, so baking either in here would count it twice.
+    o.material = float4(roughness, metallic, materialAo, materialReflectionMask);
     o.emissive = float4(emissiveColor, 0.0);
 
     const int debugMode = (int)(u_debugParams.x + 0.5);
@@ -362,6 +375,10 @@ PSOutput PSMain(PSInput i)
         o.color = float4(NdotL.xxx, 1.0);
         return o;
     }
+    if (debugMode == 16) { // Shadow cascade index
+        o.color = float4(ShadowCascadeDebugColor(i.worldPos), 1.0);
+        return o;
+    }
     if (debugMode == 12) { // Reflection radiance
         float2 reflectionUv = saturate(i.position.xy / max(u_reflectionParams.zw, float2(1.0, 1.0)));
         float4 reflectionSample = ReflectionTex.SampleLevel(LinearWrap, reflectionUv, 0);
@@ -387,4 +404,13 @@ PSOutput PSMain(PSInput i)
 
     o.color = float4(color, outputAlpha);
     return o;
+}
+
+// Single-target entry for the passes that bind SceneColor only (transparent, basic).
+// Those PSOs used PSMain, whose five-target signature made the runtime warn that RTV
+// slots 1-4 were unbound and silently discard those exports. Returning just the colour
+// drops the dead GBuffer writes at the source; the compiler removes the work feeding them.
+float4 PSMainColorOnly(PSInput i) : SV_TARGET0
+{
+    return PSMain(i).color;
 }

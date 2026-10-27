@@ -10,7 +10,7 @@
 #include <functional>
 #include <string_view>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     class RenderPipelineStateCache;
     class Skybox;
@@ -22,7 +22,7 @@ namespace SasamiRenderer
         bool useTessellation = false;
         bool useTessellationWireframe = false;
         bool useTessellationDebugColors = false;
-        bool useMeshletDebugView = false;
+        bool useMeshShader = false; // virtual-geometry cluster path replaces the VS OpaqueGBuffer draw for static opaque items
         bool useShadowTessellationPath = false;
         bool useSoftwareRayTracedDirectionalShadow = false;
         bool useSoftwareRayTracedReflections = false;
@@ -147,8 +147,13 @@ namespace SasamiRenderer
     {
         std::function<void()> ensureSceneTargetsPrepared;
         std::function<void()> drawOpaqueItems;
+        // Opaque items through the VS loop even when the mesh-shader cluster path owns the GBuffer
+        // (drawOpaqueItems is then empty). For passes that bind their own PSO, e.g. ToonOutline.
+        std::function<void()> drawOpaqueItemsVertexPath;
+        std::function<void()> drawClusterItems; // static opaque items through the mesh-shader cluster path; null when unsupported
         std::function<void()> drawTransparentItems;
         std::function<void(const LightSystem::ShadowPassContext&)> drawShadowItems;
+        std::function<void(const LightSystem::ShadowPassContext&)> drawClusterShadowItems; // static opaque items through the mesh-shader cluster path for one directional cascade; null when unsupported
         std::function<bool(const LightSystem::ShadowPassContext&)> executeSoftwareDirectionalShadow;
         std::function<bool()> executeSoftwareReflections;
         std::function<bool()> compositeSoftwareReflections;
@@ -179,9 +184,11 @@ namespace SasamiRenderer
         bool cameraPos = false;
         bool ensureSceneTargetsPrepared = false;
         bool drawOpaqueItems = false;
+        bool drawOpaqueItemsVertexPath = false;
         bool drawTransparentItems = false;
         bool drawShadowItems = false;
         bool executeRayTracing = false;
+        bool toneMapSceneColor = false;
     };
 
     class RenderPassRequirementBuilder
@@ -202,9 +209,11 @@ namespace SasamiRenderer
         void RequireCameraPos() { m_requirements.cameraPos = true; }
         void RequireEnsureSceneTargetsPrepared() { m_requirements.ensureSceneTargetsPrepared = true; }
         void RequireDrawOpaqueItems() { m_requirements.drawOpaqueItems = true; }
+        void RequireDrawOpaqueItemsVertexPath() { m_requirements.drawOpaqueItemsVertexPath = true; }
         void RequireDrawTransparentItems() { m_requirements.drawTransparentItems = true; }
         void RequireDrawShadowItems() { m_requirements.drawShadowItems = true; }
         void RequireExecuteRayTracing() { m_requirements.executeRayTracing = true; }
+        void RequireToneMapSceneColor() { m_requirements.toneMapSceneColor = true; }
 
         // Convenience methods for common graphics requirements.
         void RequireGraphicsBase()
@@ -294,6 +303,9 @@ namespace SasamiRenderer
             if (m_requirements.drawOpaqueItems && !m_services->drawOpaqueItems) {
                 return false;
             }
+            if (m_requirements.drawOpaqueItemsVertexPath && !m_services->drawOpaqueItemsVertexPath) {
+                return false;
+            }
             if (m_requirements.drawTransparentItems && !m_services->drawTransparentItems) {
                 return false;
             }
@@ -301,6 +313,9 @@ namespace SasamiRenderer
                 return false;
             }
             if (m_requirements.executeRayTracing && !m_services->executeRayTracing) {
+                return false;
+            }
+            if (m_requirements.toneMapSceneColor && !m_services->toneMapSceneColor) {
                 return false;
             }
             return true;
@@ -318,3 +333,7 @@ namespace SasamiRenderer
         RenderPassRequirements m_requirements{};
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

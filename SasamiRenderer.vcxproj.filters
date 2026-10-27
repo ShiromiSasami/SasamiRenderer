@@ -166,6 +166,9 @@
     <Filter Include="Header Files\Backends\DirectX12">
       <UniqueIdentifier>{96f78ed3-d89f-47f1-a3df-62be7cb04536}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\Runtime">
+      <UniqueIdentifier>{12b99c01-a6cd-48bb-a2e9-cb49bbc9b17b}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Header Files\Backends\DirectX11">
       <UniqueIdentifier>{26dedf62-b7ec-4ee2-a937-65dd6911bfda}</UniqueIdentifier>
     </Filter>
@@ -204,13 +207,40 @@
     <None Include="Shaders\RayTracing\SWRT\SWRT_Shadow_ReSTIR_CS.hlsl" />
     <None Include="Shaders\RayTracing\GI\GI_Common.hlsli" />
     <None Include="Shaders\RayTracing\GI\GI_ProbeUpdate_CS.hlsl" />
+    <None Include="Shaders\Native\Dx11\NativeDepthNormalCommon.hlsli" />
+    <None Include="Shaders\Native\Dx11\NativeDepthNormal_VS.hlsl" />
+    <None Include="Shaders\Native\Dx11\NativeDepthNormalSkinned_VS.hlsl" />
+    <None Include="Shaders\Native\Dx11\NativeDepthNormal_PS.hlsl" />
+    <None Include="Shaders\Native\Dx11\NativeAoDebug_PS.hlsl" />
     <None Include="Shaders\Shared\Common\LightCB.hlsli">
       <Filter>Shader Files\Shared\Common</Filter>
     </None>
+    <None Include="Shaders\Shared\Common\RayOffset.hlsli">
+      <Filter>Shader Files\Shared\Common</Filter>
+    </None>
+    <None Include="Shaders\Native\NativeTonemap.hlsli" />
+    <None Include="Shaders\Native\NativePbr.hlsli" />
+    <None Include="Shaders\Native\NativeShadow.hlsli" />
+    <None Include="Shaders\Native\NativeLighting.hlsli" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Renderer\Backends\DirectX11\Dx11GraphicsDevice.h">
       <Filter>Header Files\Backends\DirectX11</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Backends\DirectX11\Dx11ShadowMap.h">
+      <Filter>Header Files\Backends\DirectX11</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Backends\DirectX11\Dx11ShaderInclude.h">
+      <Filter>Header Files\Backends\DirectX11</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Backends\DirectX11\Dx11DepthNormalPrepass.h">
+      <Filter>Header Files\Backends\DirectX11</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Backends\DirectX11\Dx11SsaoGenerator.h">
+      <Filter>Header Files\Backends\DirectX11</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Runtime\NativeBackendFrame.h">
+      <Filter>Header Files\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Backends\DirectX12\Dx12GraphicsDevice.h">
       <Filter>Header Files\Backends\DirectX12</Filter>
@@ -225,6 +255,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\RHI\RhiTypes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\RHI\RhiUIOverlay.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Config\RenderFeatureSettings.h">
@@ -263,16 +296,34 @@
     <ClInclude Include="Source\Renderer\Runtime\Renderer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Renderer\Runtime\FrameRenderContext.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Runtime\D3D12CommandListRhiEncoder.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Renderer\Scene\SceneSynchronizer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Scene\EnvironmentManager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\SurfaceMaterialFactory.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Renderer\Resources\SrvDescriptorAllocator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDevice.h">
+      <Filter>Header Files\Backends\Vulkan</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Backends\Vulkan\VulkanShadowMap.h">
+      <Filter>Header Files\Backends\Vulkan</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Backends\Vulkan\VulkanAmbientOcclusion.h">
+      <Filter>Header Files\Backends\Vulkan</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Backends\Vulkan\VulkanAmbientOcclusionInternal.h">
       <Filter>Header Files\Backends\Vulkan</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Backends\DirectX12\Dx12ConversionUtils.h">
@@ -291,6 +342,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Scene\LightCBData.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\DynamicVertexRing.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Scene\MeshBuffer.h">
@@ -320,8 +374,8 @@
     <ClInclude Include="Source\Renderer\Structures\Mesh.h">
       <Filter>Header Files\Struct</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Structures\Float3.h">
-      <Filter>Header Files\Struct</Filter>
+    <ClInclude Include="Source\Foundation\Math\Float3.h">
+      <Filter>Header Files\Tool</Filter>
     </ClInclude>
     <ClInclude Include="Source\Renderer\Scene\Material.h">
       <Filter>Header Files\Struct</Filter>
@@ -518,12 +572,75 @@
     <ClInclude Include="Source\Renderer\Passes\Geometry\MeshShaderRenderPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Renderer\Scene\MeshletBuffer.h">
+    <ClInclude Include="Libraries\meshoptimizer\clusterlod.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\VirtualGeometry\ClusterDag.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\VirtualGeometry\ClusterDagBuilder.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\VirtualGeometry\ClusterDagCache.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\VirtualGeometry\ClusterDagSerializer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\VirtualGeometry\ClusterDagStore.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\VirtualGeometry\ClusterDagGpuBuffer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\VirtualGeometry\ClusterDrawSubmitter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\VirtualGeometry\ClusterFrameUpdate.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\VirtualGeometry\ClusterGpuCulling.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\VirtualGeometry\ClusterInstanceBuffer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\VirtualGeometry\ClusterMaterialTable.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Resources\PerFrameGrowableUploadBuffer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\VirtualGeometry\ClusterStreamingFeedback.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\VirtualGeometry\ClusterResidencyManager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\VirtualGeometry\ClusterPageStore.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\VirtualGeometry\ClusterPagePool.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Resources\ShadowRasterizerState.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\MaterialConstants.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Capture\PngWriter.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Source\Renderer\Scene\DynamicVertexRing.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Renderer\Scene\MeshBuffer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Capture\PngWriter.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Scene\SkinnedMeshBuffer.cpp">
@@ -587,6 +704,15 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Backends\DirectX11\Dx11GraphicsDevice.cpp">
+      <Filter>Source Files\Backends\DirectX11</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\DirectX11\Dx11ShadowMap.cpp">
+      <Filter>Source Files\Backends\DirectX11</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\DirectX11\Dx11DepthNormalPrepass.cpp">
+      <Filter>Source Files\Backends\DirectX11</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\DirectX11\Dx11SsaoGenerator.cpp">
       <Filter>Source Files\Backends\DirectX11</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Backends\DirectX11\Dx11GraphicsDeviceResource.cpp">
@@ -766,7 +892,82 @@
     <ClCompile Include="Source\Renderer\Passes\Geometry\MeshShaderRenderPass.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Renderer\Scene\MeshletBuffer.cpp">
+    <ClCompile Include="Libraries\meshoptimizer\meshletutils.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\meshoptimizer\partition.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\meshoptimizer\simplifier.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\meshoptimizer\spatialorder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\meshoptimizer\vertexcodec.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\meshoptimizer\indexcodec.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\meshoptimizer\quantization.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\meshoptimizer\indexanalyzer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\meshoptimizer\overdrawoptimizer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\meshoptimizer\rasterizer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\VirtualGeometry\ClusterDagBuilder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\VirtualGeometry\ClusterDagCache.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\VirtualGeometry\ClusterDagSerializer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\VirtualGeometry\ClusterDagStore.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\VirtualGeometry\ClusterDagGpuBuffer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\VirtualGeometry\ClusterDrawSubmitter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\VirtualGeometry\ClusterFrameUpdate.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\VirtualGeometry\ClusterGpuCulling.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\VirtualGeometry\ClusterInstanceBuffer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\VirtualGeometry\ClusterMaterialTable.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Resources\PerFrameGrowableUploadBuffer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\VirtualGeometry\ClusterStreamingFeedback.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\VirtualGeometry\ClusterResidencyManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\VirtualGeometry\ClusterPageStore.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\VirtualGeometry\ClusterPagePool.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Scene\MaterialConstants.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Scene\LightSystemShadow.cpp">
@@ -784,10 +985,40 @@
     <ClCompile Include="Source\Renderer\Runtime\RendererFrameGraph.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Renderer\Runtime\RendererCameraBudget.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Runtime\RendererFrameTargets.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Runtime\RendererPostProcessPasses.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Runtime\RendererComputeQueue.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Runtime\RendererGIBakeStep.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Runtime\RendererNativeFrame.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Runtime\RendererDrawCallbacks.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Runtime\RendererClusterFrame.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Runtime\RendererPassServices.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Renderer\Runtime\RendererInitialization.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Runtime\RendererGraphicsCommands.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Runtime\RendererToonFace.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Renderer\Resources\RenderPipelineStateCacheEffects.cpp">
@@ -809,6 +1040,9 @@
     </CustomBuild>
     <CustomBuild Include="Shaders\Raster\Geometry\OpaqueGBuffer\OpaqueGBuffer_PS.hlsl">
       <Filter>Shader Files\Raster\Geometry\OpaqueGBuffer</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Shaders\Raster\Geometry\MeshShader\MeshShaderGBuffer_PS.hlsl">
+      <Filter>Shader Files\Raster\Geometry\MeshShader</Filter>
     </CustomBuild>
     <CustomBuild Include="Shaders\Raster\Lighting\Deferred\DeferredLighting_PS.hlsl">
       <Filter>Shader Files\Raster\Lighting\Deferred</Filter>
@@ -861,6 +1095,12 @@
     <CustomBuild Include="Shaders\Effects\PostProcess\ToneMap_PS.hlsl">
       <Filter>Shader Files\Effects\PostProcess</Filter>
     </CustomBuild>
+    <CustomBuild Include="Shaders\Effects\PostProcess\BloomDownsample_PS.hlsl">
+      <Filter>Shader Files\Effects\PostProcess</Filter>
+    </CustomBuild>
+    <CustomBuild Include="Shaders\Effects\PostProcess\BloomUpsample_PS.hlsl">
+      <Filter>Shader Files\Effects\PostProcess</Filter>
+    </CustomBuild>
     <CustomBuild Include="Shaders\Effects\RayMarch\RayMarch_VS.hlsl">
       <Filter>Shader Files\Effects\RayMarch</Filter>
     </CustomBuild>
@@ -873,6 +1113,27 @@
     <CustomBuild Include="Shaders\RayTracing\SWRT\SWRT_ReflectionComposite_PS.hlsl" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Shaders\Raster\Geometry\OpaqueGBuffer\GBufferEncode.hlsli">
+      <Filter>Shader Files\Raster\Geometry\OpaqueGBuffer</Filter>
+    </None>
+    <None Include="Shaders\Raster\Geometry\MeshShader\MeshShader_Common.hlsli">
+      <Filter>Shader Files\Raster\Geometry\MeshShader</Filter>
+    </None>
+    <None Include="Shaders\Raster\Geometry\MeshShader\MeshShaderShadow_MS.hlsl">
+      <Filter>Shader Files\Raster\Geometry\MeshShader</Filter>
+    </None>
+    <None Include="Shaders\Raster\Geometry\MeshShader\ClusterSelect_CS.hlsl">
+      <Filter>Shader Files\Raster\Geometry\MeshShader</Filter>
+    </None>
+    <None Include="Shaders\Raster\Geometry\MeshShader\MeshShaderShadowIndirect_MS.hlsl">
+      <Filter>Shader Files\Raster\Geometry\MeshShader</Filter>
+    </None>
+    <None Include="Shaders\Raster\Geometry\MeshShader\MeshShaderGBufferIndirect_MS.hlsl">
+      <Filter>Shader Files\Raster\Geometry\MeshShader</Filter>
+    </None>
+    <None Include="Shaders\Raster\Geometry\MeshShader\MeshShaderGBufferIndirect_PS.hlsl">
+      <Filter>Shader Files\Raster\Geometry\MeshShader</Filter>
+    </None>
     <None Include="Shaders\Raster\Geometry\MeshShader\MeshShader_AS.hlsl">
       <Filter>Shader Files\Raster\Geometry\MeshShader</Filter>
     </None>
@@ -884,6 +1145,36 @@
     </None>
     <None Include="Shaders\Debug\ProbeGrid\DebugProbeGrid_PS.hlsl">
       <Filter>Shader Files\Debug\ProbeGrid</Filter>
+    </None>
+    <None Include="Shaders\Compute\Voxel\SdfReadback_CS.hlsl">
+      <Filter>Shader Files</Filter>
+    </None>
+    <None Include="Shaders\Compute\Voxel\WindParticleStep_CS.hlsl">
+      <Filter>Shader Files</Filter>
+    </None>
+    <None Include="Shaders\Compute\ParticleCharacter\MolecularBodyStep_CS.hlsl">
+      <Filter>Shader Files</Filter>
+    </None>
+    <None Include="Shaders\Compute\Voxel\SurfaceVoxelize_CS.hlsl">
+      <Filter>Shader Files</Filter>
+    </None>
+    <None Include="Shaders\Compute\Crowd\CrowdUpdate_CS.hlsl">
+      <Filter>Shader Files</Filter>
+    </None>
+    <None Include="Shaders\Compute\Crowd\CrowdCull_CS.hlsl">
+      <Filter>Shader Files</Filter>
+    </None>
+    <None Include="Shaders\Compute\Culling\HzbDownsample_CS.hlsl">
+      <Filter>Shader Files</Filter>
+    </None>
+    <None Include="Shaders\Raster\Geometry\Crowd\CrowdVat_VS.hlsl">
+      <Filter>Shader Files</Filter>
+    </None>
+    <None Include="Shaders\Raster\Geometry\Crowd\CrowdVat_PS.hlsl">
+      <Filter>Shader Files</Filter>
+    </None>
+    <None Include="Shaders\Compute\Voxel\SolidVoxelize_CS.hlsl">
+      <Filter>Shader Files</Filter>
     </None>
     <None Include="Shaders\Compute\Fluid\FluidHeightfield_CS.hlsl">
       <Filter>Shader Files\Fluid</Filter>
@@ -912,6 +1203,9 @@
     <None Include="Shaders\Raster\Geometry\Tessellation\Tessellation_Debug_PS.hlsl">
       <Filter>Shader Files\Raster\Geometry\Tessellation</Filter>
     </None>
+    <None Include="Shaders\Raster\Lighting\Shadow\ShadowAlphaMask_PS.hlsl">
+      <Filter>Shader Files\Raster\Lighting\Shadow</Filter>
+    </None>
     <None Include="Shaders\Raster\Lighting\Shadow\ShadowVSM_PS.hlsl">
       <Filter>Shader Files\Raster\Lighting\Shadow</Filter>
     </None>
@@ -924,11 +1218,888 @@
     <None Include="Shaders\Backend\Native\NativeMesh.hlsl">
       <Filter>Shader Files\Backend\Native</Filter>
     </None>
+    <None Include="Shaders\Backend\Native\NativeAoPrepass.hlsl">
+      <Filter>Shader Files\Backend\Native</Filter>
+    </None>
+    <None Include="Shaders\Backend\Native\NativeAoPrepassSkinned.hlsl">
+      <Filter>Shader Files\Backend\Native</Filter>
+    </None>
     <None Include="Shaders\Denoising\NRD\NRD.hlsli">
       <Filter>Shader Files\Denoising\NRD</Filter>
     </None>
     <None Include="Shaders\Denoising\NRD\NRDConfig.hlsli">
       <Filter>Shader Files\Denoising\NRD</Filter>
     </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Libraries\meshoptimizer\allocator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\meshoptimizer\clusterizer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\meshoptimizer\indexgenerator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\meshoptimizer\vcacheoptimizer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\meshoptimizer\vfetchoptimizer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\DirectX12\Dx12GraphicsDeviceRayTracing.cpp">
+      <Filter>Source Files\Backends\DirectX12</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDeviceCapture.cpp">
+      <Filter>Source Files\Backends\Vulkan</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDeviceRayTracing.cpp">
+      <Filter>Source Files\Backends\Vulkan</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDeviceSky.cpp">
+      <Filter>Source Files\Backends\Vulkan</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Capture\TextureCapture.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Config\BackendFeatureSupport.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Culling\Frustum.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Fluid\PbfSolver.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Fluid\ParticleSplatGrid.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Fluid\MarchingTetrahedra.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Fluid\IsoSurfaceRenderMesh.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Fluid\IsoSurfaceDynamicMesh.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Fluid\IsoSurfaceSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Fluid\PbfSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Fluid\PbfIsoSurface.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Fluid\AnisotropicKernels.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Fluid\GpuBufferReadbackRing.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Foundation\Math\SymmetricEigen3.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Fluid\PbfIsoSurfaceSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Toon\FaceShadowThresholdMap.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Toon\FaceShadowSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Culling\GpuHzbBuilder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Culling\GpuHzbSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Culling\HzbPyramid.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Culling\HzbSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\GpuSdfTextureReadback.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\GpuWindParticleStepper.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\GpuWindParticleStream.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\GpuSurfaceVoxelizer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\VoxelizerSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\CpuSolidVoxelizer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\SolidVoxelizerSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\GpuSolidVoxelizer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\GpuSolidVoxelizerSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\ParityLeakCount.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\BrickOccupancyGrid.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\BrickOccupancySelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\SimGridSolidMask.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\SimGridSolidMaskSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\CpuSurfaceVoxelizer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\OccupancyBitGrid.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\TriangleBoxOverlap.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\VoxelGridFit.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\WorldTriangleGather.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\VoxelChunkStreamer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\OccupancyImage.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\SceneVoxelization.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\VoxelRegion.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\DrawItemSnapshot.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\ChunkSignedDistance.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\WindowPressureShift.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\AsyncWindowProjection.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\ParticleCharacter\SurfaceSampleSet.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\ParticleCharacter\MolecularBody.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\ParticleCharacter\ParticleCharacterSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\ParticleCharacter\GpuMolecularBodyStepper.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\StreamedVoxelWindow.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\SignedDistanceGrid.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\VoxelDistanceTransform.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\VoxelSdfSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\SdfIsoSurface.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\SdfIsoSurfaceSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\SdfSphereTracer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\SdfWindField.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\WindParticleSystem.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\WindParticleImage.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\WindFieldSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\WindDrivenParticles.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\WindFireSpread.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\WindEffectsSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\FlameColor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\WindEmitterSet.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\StaggeredVelocityGrid.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\PressureProjector.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\GustedWindField.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\ProjectedWindField.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\ProjectedWindSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\NibbleGrid.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\VoxelCellAttributes.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Voxel\VoxelCellSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Crowd\VatSkinning.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Crowd\VatAnimation.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Crowd\VatSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Crowd\CrowdStore.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Crowd\CrowdSimulation.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Crowd\GpuCrowdUpdater.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Crowd\CrowdSystem.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Crowd\CrowdGpuCuller.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Crowd\CrowdVatGpuAsset.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\Geometry\CrowdRenderPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Crowd\CrowdSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    <ClCompile Include="Source\Renderer\Animation\ClipSampler.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Animation\PoseModelSpace.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Animation\PoseBlend.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Animation\BoneMask.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Animation\SpringDamper.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Animation\Inertialization.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Animation\RootMotion.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Animation\TwoBoneIk.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Animation\AimIk.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Animation\FootIk.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Animation\BlendSpace1D.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Animation\BlendSpace2D.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Animation\AnimNotifyTrack.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Animation\AnimStateMachine.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Animation\CharacterAnimator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Animation\AnimSelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Diagnostics\AdapterDiagnostics.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Fluid\SmokeVolumeSim.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\Fluid\FluidBackdropCopyRenderPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\Fluid\SmokeVolumeRenderPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\Fluid\ParticleVolumeRenderPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\Geometry\WireframeOverlayRenderPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\Geometry\ToonOutlineRenderPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\PostProcess\FxaaRenderPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\PostProcess\LensFlareRenderPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\PostProcess\LightShaftRenderPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\PostProcess\BloomRenderer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Passes\Reflections\ScreenSpaceReflectionCompositeRenderPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Profiling\GpuTimestampProfiler.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Resources\RenderPipelineStateCacheSkinned.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Runtime\RendererScreenshot.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Scene\IblSystem.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Source\Renderer\Capture\TextureCapture.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Config\BackendFeatureSupport.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Culling\Frustum.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Fluid\PbfSolver.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Fluid\ParticleSplatGrid.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Fluid\AnisotropicKernels.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Fluid\GpuBufferReadbackRing.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Foundation\Math\SymmetricEigen3.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Fluid\IsoSurfaceMesh.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Fluid\IsoSurfaceRenderMesh.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Fluid\IsoSurfaceDynamicMesh.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Fluid\IsoSurfaceSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Fluid\PbfSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Fluid\PbfIsoSurface.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Fluid\PbfIsoSurfaceSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Toon\FaceShadowThresholdMap.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Toon\FaceShadowSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Culling\GpuHzbBuilder.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Culling\GpuHzbSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Culling\HzbPyramid.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Culling\HzbSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\GpuSdfTextureReadback.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\GpuWindParticleStepper.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\GpuWindParticleStream.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\GpuSurfaceVoxelizer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\VoxelizerSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\CpuSolidVoxelizer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\SolidVoxelizerSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\GpuSolidVoxelizer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\GpuSolidVoxelizerSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\GpuVoxelBuffers.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\ParityLeakCount.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\BrickOccupancyGrid.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\BrickOccupancySelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\SimGridSolidMask.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\SimGridSolidMaskSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\CpuSurfaceVoxelizer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\OccupancyBitGrid.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\TriangleBoxOverlap.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\VoxelGridFit.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\WorldTriangleGather.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\VoxelChunkStreamer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\OccupancyImage.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\SceneVoxelization.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\VoxelRegion.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\DrawItemSnapshot.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\ChunkSignedDistance.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\WindowPressureShift.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\AsyncWindowProjection.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\ParticleCharacter\SurfaceSampleSet.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\ParticleCharacter\MolecularBody.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\ParticleCharacter\ParticleCharacterSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\ParticleCharacter\GpuMolecularBodyStepper.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\StreamedVoxelWindow.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\SignedDistanceGrid.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\VoxelDistanceTransform.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\VoxelSdfSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\SdfIsoSurface.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\SdfIsoSurfaceSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\SdfSphereTracer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\SdfWindField.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\WindParticleSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\WindParticleImage.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\WindFieldSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\WindDrivenParticles.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\WindFireSpread.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\WindEffectsSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\FlameColor.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\WindEmitterSet.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\WindVelocityField.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\StaggeredVelocityGrid.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\PressureProjector.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\GustedWindField.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\ProjectedWindField.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\ProjectedWindSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\NibbleGrid.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\VoxelCellAttributes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Voxel\VoxelCellSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Crowd\VatSkinning.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Crowd\VatAnimation.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Crowd\VatSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Crowd\CrowdStore.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Crowd\CrowdSimulation.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Crowd\GpuCrowdUpdater.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Crowd\CrowdSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Crowd\CrowdGpuCuller.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Crowd\CrowdVatGpuAsset.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\Geometry\CrowdRenderPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Crowd\CrowdSelfTest.h">
+      <Filter>Header Files</Filter>
+    <ClInclude Include="Source\Renderer\Animation\AnimMath.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Animation\AnimPose.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Animation\ClipSampler.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Animation\PoseModelSpace.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Animation\PoseBlend.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Animation\BoneMask.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Animation\SpringDamper.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Animation\Inertialization.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Animation\RootMotion.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Animation\TwoBoneIk.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Animation\AimIk.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Animation\FootIk.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Animation\BlendSpace1D.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Animation\BlendSpace2D.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Animation\AnimNotifyTrack.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Animation\AnimStateMachine.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Animation\CharacterAnimator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Animation\AnimSelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Diagnostics\AdapterDiagnostics.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Fluid\SmokeVolumeSim.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\Fluid\FluidBackdropCopyRenderPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\Fluid\SmokeVolumeRenderPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\Fluid\ParticleVolumeRenderPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\Geometry\WireframeOverlayRenderPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\Geometry\ToonOutlineRenderPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\PostProcess\FxaaRenderPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\PostProcess\LensFlareRenderPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\PostProcess\LightShaftRenderPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\PostProcess\BloomRenderer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Passes\Reflections\ScreenSpaceReflectionCompositeRenderPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Profiling\GpuTimestampProfiler.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Scene\IblSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\Renderer\Backends\OpenGL\OpenGLShaderSources.cpp">
+      <Filter>Source Files\Backends\OpenGL</Filter>
+    </ClCompile>
+    <ClInclude Include="Source\Renderer\Backends\OpenGL\OpenGLShaderSources.h">
+      <Filter>Header Files\Backends\OpenGL</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Source\Renderer\Backends\OpenGL\OpenGLProcs.h">
+      <Filter>Header Files\Backends\OpenGL</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Renderer\Backends\OpenGL\OpenGLProgramBuilder.h">
+      <Filter>Header Files\Backends\OpenGL</Filter>
+    </ClInclude>
+    <ClCompile Include="Source\Renderer\Backends\OpenGL\OpenGLProgramBuilder.cpp">
+      <Filter>Source Files\Backends\OpenGL</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\OpenGL\OpenGLGraphicsDeviceAoPrepass.cpp">
+      <Filter>Source Files\Backends\OpenGL</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\OpenGL\OpenGLGraphicsDeviceSsao.cpp">
+      <Filter>Source Files\Backends\OpenGL</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\OpenGL\OpenGLGraphicsDeviceAoDebug.cpp">
+      <Filter>Source Files\Backends\OpenGL</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\Renderer\Backends\OpenGL\OpenGLGraphicsDeviceSky.cpp">
+      <Filter>Source Files\Backends\OpenGL</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\OpenGL\OpenGLGraphicsDeviceRayMarch.cpp">
+      <Filter>Source Files\Backends\OpenGL</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\Renderer\Backends\OpenGL\OpenGLGraphicsDeviceCapture.cpp">
+      <Filter>Source Files\Backends\OpenGL</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDeviceSetup.cpp">
+      <Filter>Source Files\Backends\Vulkan</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDeviceRayMarch.cpp">
+      <Filter>Source Files\Backends\Vulkan</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDeviceNativeMesh.cpp">
+      <Filter>Source Files\Backends\Vulkan</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDeviceSkinnedMesh.cpp">
+      <Filter>Source Files\Backends\Vulkan</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanShadowMap.cpp">
+      <Filter>Source Files\Backends\Vulkan</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanAmbientOcclusion.cpp">
+      <Filter>Source Files\Backends\Vulkan</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanAmbientOcclusionPipelines.cpp">
+      <Filter>Source Files\Backends\Vulkan</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\Renderer\Backends\DirectX11\Dx11GraphicsDeviceCommandEncoder.cpp">
+      <Filter>Source Files\Backends\DirectX11</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Source\Renderer\Backends\DirectX11\Dx11ConversionUtils.h">
+      <Filter>Header Files\Backends\DirectX11</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\Renderer\Backends\DirectX11\Dx11GraphicsDeviceRayMarch.cpp">
+      <Filter>Source Files\Backends\DirectX11</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\DirectX11\Dx11GraphicsDeviceSky.cpp">
+      <Filter>Source Files\Backends\DirectX11</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\DirectX11\Dx11GraphicsDeviceMesh.cpp">
+      <Filter>Source Files\Backends\DirectX11</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Renderer\Backends\DirectX11\Dx11GraphicsDeviceSkinnedMesh.cpp">
+      <Filter>Source Files\Backends\DirectX11</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDeviceAccelerationStructure.cpp">
+      <Filter>Source Files\Backends\Vulkan</Filter>
+    </ClCompile>
+    <ClInclude Include="Source\Renderer\Backends\Vulkan\VulkanRayTracingUtils.h">
+      <Filter>Header Files\Backends\Vulkan</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\Renderer\Runtime\RendererGI.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\Renderer\Backends\Vulkan\VulkanGraphicsDeviceResource.cpp">
+      <Filter>Source Files\Backends\Vulkan</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\Renderer\Backends\OpenGL\OpenGLGraphicsDeviceMesh.cpp">
+      <Filter>Source Files\Backends\OpenGL</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\Renderer\Runtime\RendererPassSequence.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

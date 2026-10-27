@@ -2,6 +2,7 @@
 // glTF2 skinned mesh loader.
 #include "ModelLoader.h"
 #include "ModelLoaderGlb.h"
+#include "ModelLoaderEmbeddedImages.h"
 #include "ModelLoaderGltfUtility.h"
 #include <cmath>
 #include <cstring>
@@ -14,7 +15,7 @@
 #include <rapidjson/document.h>
 
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     using Math::Mul4x4;
     using Math::Clamp01;
@@ -129,15 +130,7 @@ namespace SasamiRenderer
         }
 
         // Images and textures (for texture paths)
-        std::vector<std::string> imagePaths;
-        if (doc.HasMember("images") && doc["images"].IsArray()) {
-            const auto& imgs = doc["images"];
-            imagePaths.resize(imgs.Size());
-            for (rapidjson::SizeType i = 0; i < imgs.Size(); ++i) {
-                if (imgs[i].HasMember("uri"))
-                    imagePaths[i] = (basePath / imgs[i]["uri"].GetString()).string();
-            }
-        }
+        const std::vector<std::string> imagePaths = ResolveGltfImagePaths(doc, std::filesystem::path(path), buffers, views);
         std::vector<int> textureToImage;
         if (doc.HasMember("textures") && doc["textures"].IsArray()) {
             const auto& texs = doc["textures"];
@@ -175,9 +168,15 @@ namespace SasamiRenderer
                     const auto& nrm = m["normalTexture"];
                     if (nrm.HasMember("index")) mat.normalTexture = nrm["index"].GetInt();
                 }
+                if (m.HasMember("emissiveFactor")) ReadVec(m["emissiveFactor"], mat.emissiveFactor, 3);
+                if (m.HasMember("emissiveTexture") && m["emissiveTexture"].IsObject()) {
+                    const auto& emi = m["emissiveTexture"];
+                    if (emi.HasMember("index")) mat.emissiveTexture = emi["index"].GetInt();
+                }
                 if (m.HasMember("doubleSided") && m["doubleSided"].IsBool()) {
                     mat.doubleSided = m["doubleSided"].GetBool();
                 }
+                ReadAlphaMode(m, mat.alphaBlend, mat.alphaMask, mat.alphaCutoff);
             }
         }
 
@@ -504,7 +503,7 @@ namespace SasamiRenderer
                 outData.meshes.push_back(std::move(smesh));
 
                 // Texture paths
-                std::string albedoPath, occlusionPath, normalPath;
+                std::string albedoPath, occlusionPath, normalPath, emissivePath;
                 SurfaceMaterial mat{};
                 if (matIdx >= 0 && matIdx < (int)materials.size()) {
                     const GltfMaterial& gm = materials[matIdx];
@@ -515,6 +514,12 @@ namespace SasamiRenderer
                     mat.reflectionStrength = DefaultReflectionStrength(mat.roughness, mat.metallic);
                     mat.occlusionStrength  = gm.occlusionStrength;
                     mat.doubleSided        = gm.doubleSided;
+                    if (gm.alphaBlend) {
+                        mat.alphaMode = AlphaMode::Blend;
+                    } else if (gm.alphaMask) {
+                        mat.alphaMode   = AlphaMode::Mask;
+                        mat.alphaCutoff = gm.alphaCutoff;
+                    }
                     if (gm.baseColorTexture >= 0 && gm.baseColorTexture < (int)textureToImage.size()) {
                         const int ii = textureToImage[gm.baseColorTexture];
                         if (ii >= 0 && ii < (int)imagePaths.size()) albedoPath = imagePaths[ii];
@@ -527,10 +532,18 @@ namespace SasamiRenderer
                         const int ii = textureToImage[gm.normalTexture];
                         if (ii >= 0 && ii < (int)imagePaths.size()) normalPath = imagePaths[ii];
                     }
+                    if (gm.emissiveTexture >= 0 && gm.emissiveTexture < (int)textureToImage.size()) {
+                        const int ii = textureToImage[gm.emissiveTexture];
+                        if (ii >= 0 && ii < (int)imagePaths.size()) emissivePath = imagePaths[ii];
+                    }
+                    mat.emissive[0] = gm.emissiveFactor[0];
+                    mat.emissive[1] = gm.emissiveFactor[1];
+                    mat.emissive[2] = gm.emissiveFactor[2];
                 }
                 outData.albedoTexturePaths.push_back(std::move(albedoPath));
                 outData.occlusionTexturePaths.push_back(std::move(occlusionPath));
                 outData.normalTexturePaths.push_back(std::move(normalPath));
+                outData.emissiveTexturePaths.push_back(std::move(emissivePath));
                 outData.materials.push_back(mat);
             }
         }
@@ -539,4 +552,4 @@ namespace SasamiRenderer
     }
 
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::App

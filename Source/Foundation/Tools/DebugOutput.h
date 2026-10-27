@@ -7,7 +7,7 @@
 
 #include "Foundation/Tools/DebugLogSystem.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Foundation
 {
     inline std::wstring NarrowToWideBestEffort(const char* text)
     {
@@ -55,7 +55,7 @@ namespace SasamiRenderer
     }
 
     inline int DebugLogDialog(const wchar_t* message,
-                              const wchar_t* title = L"SasamiRenderer Debug",
+                              const wchar_t* title = L"Sasami Engine Debug",
                               UINT flags = MB_OK | MB_ICONINFORMATION)
     {
         if (!message) {
@@ -63,12 +63,12 @@ namespace SasamiRenderer
         }
 
         DebugLog(message);
-        const wchar_t* dialogTitle = (title && *title) ? title : L"SasamiRenderer Debug";
+        const wchar_t* dialogTitle = (title && *title) ? title : L"Sasami Engine Debug";
         return ::MessageBoxW(nullptr, message, dialogTitle, flags);
     }
 
     inline int DebugLogDialog(const char* message,
-                              const wchar_t* title = L"SasamiRenderer Debug",
+                              const wchar_t* title = L"Sasami Engine Debug",
                               UINT flags = MB_OK | MB_ICONINFORMATION)
     {
         if (!message) {
@@ -77,7 +77,7 @@ namespace SasamiRenderer
 
         DebugLog(message);
         const std::wstring wideMessage = NarrowToWideBestEffort(message);
-        const wchar_t* dialogTitle = (title && *title) ? title : L"SasamiRenderer Debug";
+        const wchar_t* dialogTitle = (title && *title) ? title : L"Sasami Engine Debug";
         return ::MessageBoxW(nullptr, wideMessage.c_str(), dialogTitle, flags);
     }
 
@@ -94,7 +94,7 @@ namespace SasamiRenderer
         DebugLog(fullMessage.c_str());
 
         if (showDialog) {
-            ::MessageBoxW(nullptr, fullMessage.c_str(), L"SasamiRenderer Exception", MB_OK | MB_ICONERROR);
+            ::MessageBoxW(nullptr, fullMessage.c_str(), L"Sasami Engine Exception", MB_OK | MB_ICONERROR);
         }
     }
 
@@ -110,7 +110,7 @@ namespace SasamiRenderer
         DebugLog(fullMessage.c_str());
 
         if (showDialog) {
-            ::MessageBoxW(nullptr, fullMessage.c_str(), L"SasamiRenderer Exception", MB_OK | MB_ICONERROR);
+            ::MessageBoxW(nullptr, fullMessage.c_str(), L"Sasami Engine Exception", MB_OK | MB_ICONERROR);
         }
     }
 
@@ -148,3 +148,12 @@ namespace SasamiRenderer
     inline unsigned int DebugGetDispatchCount() { return Internal::GetDebugDispatchCounter(); }
 #endif
 }
+
+// Lets the other layers name Foundation types unqualified. The directive sits on SasamiEngine rather
+// than on a layer, so anything nested under it -- SasamiEngine::Render, SasamiEngine::App -- finds these
+// names by enclosing-namespace lookup.
+//
+// The SasamiRenderer -> SasamiEngine::<layer> namespace migration it was written for is finished; what
+// is left is deciding whether the layers should qualify Foundation:: explicitly instead. That is not a
+// mechanical change (roughly 76 files name these types unqualified), so the directive stays until then.
+namespace SasamiEngine { using namespace Foundation; }

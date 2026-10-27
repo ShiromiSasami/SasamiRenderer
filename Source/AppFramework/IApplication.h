@@ -2,7 +2,7 @@
 
 #include <wtypes.h>
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     class ApplicationCore;
 
@@ -17,3 +17,4 @@ namespace SasamiRenderer
         virtual void OnResize(ApplicationCore& app, UINT width, UINT height) { (void)app; (void)width; (void)height; }
     };
 }
+namespace SasamiEngine { using namespace App; }

@@ -1,10 +1,12 @@
 #include "Renderer/Passes/PostProcess/PostProcessRenderPass.h"
 #include "Renderer/RenderGraph/RenderGraph.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     void PostProcessRenderPass::BuildRequirements(RenderPassRequirementBuilder& builder) const
     {
+        builder.RequireGraphicsBase();
+        builder.RequireToneMapSceneColor();
     }
 
     void PostProcessRenderPass::Setup(RenderGraphBuilder& builder) const
@@ -21,8 +23,7 @@ namespace SasamiRenderer
             return false;
         }
         const RenderPassExecutionServices& services = context.Services();
-        if (services.toneMapSceneColor &&
-            !services.toneMapSceneColor()) {
+        if (!services.toneMapSceneColor()) {
             return false;
         }
         return true;

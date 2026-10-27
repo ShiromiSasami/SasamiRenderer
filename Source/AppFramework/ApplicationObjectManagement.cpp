@@ -17,7 +17,7 @@
 #include "Object/StaticModel.h"
 #include "Renderer/Runtime/Renderer.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     namespace
     {
@@ -121,6 +121,36 @@ namespace SasamiRenderer
         return out;
     }
 
+    std::vector<SkinnedModel*> ApplicationCore::GetSkinnedModels() const
+    {
+        std::vector<SkinnedModel*> out;
+        const auto entities = m_ecsRegistry.ViewPreset(EcsRegistry::EntityPreset::SkinnedModel);
+        out.reserve(entities.size());
+        for (const EntityId entity : entities) {
+            const auto* objectRef = m_ecsRegistry.GetComponent<ObjectRefComponent>(entity);
+            if (!objectRef || !objectRef->object) {
+                continue;
+            }
+            out.push_back(static_cast<SkinnedModel*>(objectRef->object));
+        }
+        return out;
+    }
+
+    std::vector<Camera*> ApplicationCore::GetCameraObjects() const
+    {
+        std::vector<Camera*> out;
+        const auto entities = m_ecsRegistry.ViewPreset(EcsRegistry::EntityPreset::Camera);
+        out.reserve(entities.size());
+        for (const EntityId entity : entities) {
+            const auto* objectRef = m_ecsRegistry.GetComponent<ObjectRefComponent>(entity);
+            if (!objectRef || !objectRef->object) {
+                continue;
+            }
+            out.push_back(static_cast<Camera*>(objectRef->object));
+        }
+        return out;
+    }
+
     bool ApplicationCore::SetMainCamera(Camera* camera)
     {
         if (!camera) {
@@ -176,11 +206,22 @@ namespace SasamiRenderer
                 }
             }
         }
+        // The objects about to be destroyed own GPU buffers that frames already submitted are
+        // still reading, and the renderer still holds proxies pointing at them. Dropping them
+        // without waiting is what took the process down a few frames after a runtime scene.load:
+        // no exception, no shutdown, the log simply stopped. Shutdown already waits here for the
+        // same reason (ApplicationCore::ShutdownRenderer); this path had been missed.
+        if (m_renderer) {
+            m_renderer->WaitForGPU();
+            m_renderer->ClearRenderObjects();
+        }
+
         m_objects.clear();
         m_activeCamera = nullptr;
         m_ecsRegistry.Clear();
         m_objectEntityMap.clear();
         m_objectsDirty = true;
+        ++m_sceneGeneration;
     }
 
     void ApplicationCore::SyncModelsToRenderer(Renderer& renderer)
@@ -267,4 +308,4 @@ namespace SasamiRenderer
     }
 
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::App

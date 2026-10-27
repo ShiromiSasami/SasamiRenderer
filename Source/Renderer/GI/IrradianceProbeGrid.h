@@ -9,7 +9,7 @@
 #include <vector>
 #include <wrl.h>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // =========================================================================
     // IrradianceProbeGrid
@@ -78,7 +78,7 @@ namespace SasamiRenderer
             // Punctual lights (point + spot) contributing to probe-ray hit shading.
             uint32_t pointLightCount;
             uint32_t spotLightCount;
-            uint32_t pad2;
+            uint32_t punctualLightFalloff; // RendererEnums::PunctualLightFalloff
             uint32_t pad3;
         };
         static_assert(sizeof(GIUpdateCBData) == 256u); // alignas(256) pads to 256; raw data is 128 bytes
@@ -93,12 +93,17 @@ namespace SasamiRenderer
             float ambientIntensity = 1.0f;
             float shadowBias       = 0.005f;
             uint32_t frameIndex    = 0;
+            // Continuous mode: blend each refresh pass into the previous full pass with
+            // m_emaAlpha instead of overwriting it. Only meaningful once a full pass has
+            // produced valid data (HasEverBaked), since the buffer starts zeroed.
+            bool blendWithHistory  = false;
 
             // Punctual lights contributing to probe-ray hit shading, reusing the same
             // scene light descriptors the SWRT reflection/ReSTIR paths consume.
             // Null/empty = no punctual-light contribution (directional light + sky only).
             const std::vector<RenderPointLight>* pointLights = nullptr;
             const std::vector<RenderSpotLight>*  spotLights  = nullptr;
+            uint32_t punctualLightFalloff = 2u; // RendererEnums::PunctualLightFalloff
         };
 
         IrradianceProbeGrid();
@@ -111,8 +116,9 @@ namespace SasamiRenderer
         bool Initialize(IRHIDevice& device);
 
         // Configure probe grid extents.  Safe to call before Initialize().
-        void SetGridOrigin(float x, float y, float z)  { m_originX=x; m_originY=y; m_originZ=z; }
-        void SetGridSpacing(float x, float y, float z) { m_spacingX=x; m_spacingY=y; m_spacingZ=z; }
+        // Flush for the same reason as SetGiIntensity below: these feed the probe grid CB.
+        void SetGridOrigin(float x, float y, float z)  { m_originX=x; m_originY=y; m_originZ=z; FlushGridCB(); }
+        void SetGridSpacing(float x, float y, float z) { m_spacingX=x; m_spacingY=y; m_spacingZ=z; FlushGridCB(); }
         void SetGridCount(uint32_t cx, uint32_t cy, uint32_t cz);
 
         // Auto-fit the grid to cover the given world AABB with a margin.
@@ -129,10 +135,18 @@ namespace SasamiRenderer
                                         float margin,
                                         std::uint32_t probeBudget);
 
+        // Setters that change what FillProbeGridCB writes must flush, or the new value never
+        // reaches the GPU: the only other flush points are Initialize(), AllocateProbeBuffer()
+        // and UpdateProbes(), and UpdateProbes() is never called in Raster mode. Without this,
+        // the GI intensity slider, `render.gi` and the value loaded from a scene all silently
+        // did nothing once the bake had finished. SetGridCount and FitToSceneBounds* are not in
+        // this list on purpose -- they reallocate, and AllocateProbeBuffer() already flushes.
+        // FlushGridCB() is a no-op until the CB is mapped, so calling these before Initialize()
+        // is safe.
         float GetGiIntensity()     const { return m_giIntensity; }
-        void  SetGiIntensity(float v)   { m_giIntensity = (v >= 0.0f) ? v : 0.0f; }
+        void  SetGiIntensity(float v)   { m_giIntensity = (v >= 0.0f) ? v : 0.0f; FlushGridCB(); }
         bool  GetEnabled()         const { return m_enabled; }
-        void  SetEnabled(bool e)         { m_enabled = e; }
+        void  SetEnabled(bool e)         { m_enabled = e; FlushGridCB(); }
         float GetEmaAlpha()        const { return m_emaAlpha; }
         void  SetEmaAlpha(float a)       { m_emaAlpha = (a > 0.0f && a <= 1.0f) ? a : 0.1f; }
         float GetMaxTraceDistance()const { return m_maxTraceDistance; }
@@ -238,7 +252,12 @@ namespace SasamiRenderer
 
         // Round-robin update state
         uint32_t m_nextProbeIdx = 0u;
-        static constexpr uint32_t kProbesPerFrame = 32u;
+        // Rays per bake frame = kProbesPerFrame * kRaysPerProbe (64, in GI_ProbeUpdate_CS.hlsl).
+        // 32 meant 2,048 rays/frame, which took minutes to bake a scene-sized grid for no good
+        // reason -- that is nothing for the GPU. 512 gives 32,768 rays/frame and turns a ~2.6
+        // minute bake into ~10 seconds. Baking is a transient state with a progress readout, so
+        // the heavier frames while it runs are acceptable.
+        static constexpr uint32_t kProbesPerFrame = 512u;
 
         bool     m_initialized           = false;
         uint32_t m_totalProbesDispatched = 0u;
@@ -250,4 +269,8 @@ namespace SasamiRenderer
         std::string m_lastPipelineError;
     };
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

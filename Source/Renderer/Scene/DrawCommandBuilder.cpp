@@ -1,7 +1,7 @@
 #include "Renderer/Scene/DrawCommandBuilder.h"
 #include "Renderer/Scene/Material.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     void DrawCommandBuilder::RecordAll(IRhiCommandEncoder* enc, MeshBuffer& buffer) const
     {

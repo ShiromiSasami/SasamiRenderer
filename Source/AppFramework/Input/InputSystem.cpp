@@ -7,25 +7,21 @@
 #include <cmath>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     namespace
     {
+        // Single source of truth: the focus-loss handler releases exactly these keys.
+        constexpr WPARAM kCameraMovementKeys[] = { 'W', 'A', 'S', 'D', VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT };
+
         bool IsCameraMovementKey(WPARAM key)
         {
-            switch (key) {
-            case 'W':
-            case 'A':
-            case 'S':
-            case 'D':
-            case VK_UP:
-            case VK_DOWN:
-            case VK_LEFT:
-            case VK_RIGHT:
-                return true;
-            default:
-                return false;
+            for (const WPARAM movementKey : kCameraMovementKeys) {
+                if (key == movementKey) {
+                    return true;
+                }
             }
+            return false;
         }
 
         float NormalizeTrigger(BYTE value)
@@ -83,11 +79,48 @@ namespace SasamiRenderer
         rid[1].hwndTarget = hWnd;
 
         m_rawRegistered = RegisterRawInputDevices(rid, 2, sizeof(RAWINPUTDEVICE)) == TRUE;
+        m_hWnd = hWnd;
+        m_focused = (GetForegroundWindow() == hWnd);
     }
 
     void InputSystem::Update()
     {
+        UpdateFocusState();
         UpdateGamepads();
+    }
+
+    // RIDEV_INPUTSINK keeps raw keyboard and mouse input flowing while another application is
+    // in the foreground. Acting on it let stray keystrokes and wheel notches drive the fly
+    // camera: during headless CLI runs the camera dollied backwards on its own, which made
+    // screenshot A/B comparisons useless. Track the foreground window and release whatever was
+    // held at the moment focus was lost, since the matching key-up goes to the other window.
+    void InputSystem::UpdateFocusState()
+    {
+        if (!m_hWnd) {
+            return;
+        }
+        const bool focused = (GetForegroundWindow() == m_hWnd);
+        if (focused == m_focused) {
+            return;
+        }
+        m_focused = focused;
+
+        if (ImGui::GetCurrentContext() != nullptr) {
+            // ImGui clears its own held keys and buttons on a focus-loss event.
+            ImGui::GetIO().AddFocusEvent(focused);
+        }
+        if (focused) {
+            return;
+        }
+
+        for (const WPARAM movementKey : kCameraMovementKeys) {
+            OnKeyUp(movementKey);
+        }
+        if (m_mouseButtons[ImGuiMouseButton_Right]) {
+            OnMouseUp();
+        }
+        m_mouseButtons[0] = m_mouseButtons[1] = m_mouseButtons[2] = false;
+        m_rightButtonDown = false;
     }
 
     const InputSystem::GamepadState& InputSystem::GetGamepadState(int index) const
@@ -203,6 +236,12 @@ namespace SasamiRenderer
             RAWINPUT* raw = reinterpret_cast<RAWINPUT*>(buffer.data());
             ImGuiIO* io = hasImGuiContext() ? &ImGui::GetIO() : nullptr;
 
+            // Unfocused raw input belongs to whatever application the user is actually using.
+            // Consume it here so neither ImGui nor the camera reacts (see UpdateFocusState).
+            if (!m_focused) {
+                return true;
+            }
+
             if (raw->header.dwType == RIM_TYPEKEYBOARD)
             {
                 const RAWKEYBOARD& kb = raw->data.keyboard;
@@ -212,8 +251,8 @@ namespace SasamiRenderer
                     io->AddKeyEvent(key, down);
                 }
                 const bool movementKey = IsCameraMovementKey(kb.VKey);
-                const bool allowMovementThroughUi = movementKey && (!io || !io->WantTextInput);
-                if (!io || !io->WantCaptureKeyboard || allowMovementThroughUi) {
+                const bool allowMovementThroughUI = movementKey && (!io || !io->WantTextInput);
+                if (!io || !io->WantCaptureKeyboard || allowMovementThroughUI) {
                     if (down) OnKeyDown(kb.VKey);
                     else OnKeyUp(kb.VKey);
                 }
@@ -296,8 +335,8 @@ namespace SasamiRenderer
         {
             const bool movementKey = IsCameraMovementKey(wParam);
             const ImGuiIO* io = hasImGuiContext() ? &ImGui::GetIO() : nullptr;
-            const bool allowMovementThroughUi = movementKey && (!io || !io->WantTextInput);
-            if (!ImGuiCoordinator::Instance().WantsKeyboardCapture() || allowMovementThroughUi)
+            const bool allowMovementThroughUI = movementKey && (!io || !io->WantTextInput);
+            if (!ImGuiCoordinator::Instance().WantsKeyboardCapture() || allowMovementThroughUI)
                 OnKeyDown(wParam);
             return true;
         }
@@ -306,8 +345,8 @@ namespace SasamiRenderer
         {
             const bool movementKey = IsCameraMovementKey(wParam);
             const ImGuiIO* io = hasImGuiContext() ? &ImGui::GetIO() : nullptr;
-            const bool allowMovementThroughUi = movementKey && (!io || !io->WantTextInput);
-            if (!ImGuiCoordinator::Instance().WantsKeyboardCapture() || allowMovementThroughUi)
+            const bool allowMovementThroughUI = movementKey && (!io || !io->WantTextInput);
+            if (!ImGuiCoordinator::Instance().WantsKeyboardCapture() || allowMovementThroughUI)
                 OnKeyUp(wParam);
             return true;
         }

@@ -5,7 +5,10 @@
 #include "Foundation/Math/MathUtil.h"
 #include "Loader/ModelLoader.h"
 
-namespace SasamiRenderer
+#include <algorithm>
+#include <cstring>
+
+namespace SasamiEngine::App
 {
     using Math::Mul4x4;
 
@@ -37,10 +40,11 @@ namespace SasamiRenderer
         outMeshes.reserve(outMeshes.size() + loadedMeshes.size());
         for (auto& loaded : loadedMeshes) {
             StaticMeshSource src;
-            src.mesh = std::move(loaded.mesh);
+            src.mesh = std::make_shared<const Mesh>(std::move(loaded.mesh));
             src.albedoTexture = LoadCpuTextureFromPath(loaded.texturePath);
             src.occlusionTexture = LoadCpuTextureFromPath(loaded.occlusionTexturePath);
             src.normalTexture = LoadCpuTextureFromPath(loaded.normalTexturePath);
+            src.emissiveTexture = LoadCpuTextureFromPath(loaded.emissiveTexturePath);
             src.material = loaded.material;
             if (!loaded.metallicRoughnessTexturePath.empty()) {
                 src.usesMetallicRoughnessTexture = true;
@@ -100,7 +104,7 @@ namespace SasamiRenderer
                                       const std::string& normalTexturePath)
     {
         StaticMeshSource src;
-        src.mesh = std::move(mesh);
+        src.mesh = std::make_shared<const Mesh>(std::move(mesh));
         src.albedoTexture = LoadCpuTextureFromPath(albedoTexturePath);
         src.occlusionTexture = LoadCpuTextureFromPath(occlusionTexturePath);
         src.normalTexture = LoadCpuTextureFromPath(normalTexturePath);
@@ -111,23 +115,35 @@ namespace SasamiRenderer
 
     std::vector<RenderProxy> MeshComponent::BuildRenderProxies() const
     {
-
         std::vector<RenderProxy> proxies;
-        proxies.reserve(m_staticMeshes.size());
+        const size_t instanceCount = m_instanceTransforms.empty() ? 1 : m_instanceTransforms.size();
+        proxies.reserve(m_staticMeshes.size() * instanceCount);
 
-        for (const auto& src : m_staticMeshes) {
-            RenderProxy proxy;
-            proxy.mesh = src.mesh;
-            proxy.albedoTexture = src.albedoTexture;
-            proxy.occlusionTexture = src.occlusionTexture;
-            proxy.normalTexture = src.normalTexture;
-            proxy.usesMetallicRoughnessTexture = src.usesMetallicRoughnessTexture;
-            proxy.material = src.material;
-            proxy.transparent = IsTransparentMaterial(src.material);
-            proxy.debugLabel = m_debugAssetPath;
-            // Final model matrix for draw = local mesh transform * component transform.
-            Mul4x4(src.localTransform, m_model, proxy.model);
-            proxies.push_back(std::move(proxy));
+        for (size_t instanceIndex = 0; instanceIndex < instanceCount; ++instanceIndex) {
+            // Instance placement folded into the component transform once per instance, not per source.
+            float placement[16];
+            if (m_instanceTransforms.empty()) {
+                std::memcpy(placement, m_model, sizeof(placement));
+            } else {
+                Mul4x4(m_instanceTransforms[instanceIndex].data(), m_model, placement);
+            }
+
+            for (const auto& src : m_staticMeshes) {
+                RenderProxy proxy;
+                proxy.mesh = src.mesh;
+                proxy.albedoTexture = src.albedoTexture;
+                proxy.occlusionTexture = src.occlusionTexture;
+                proxy.normalTexture = src.normalTexture;
+                proxy.emissiveTexture = src.emissiveTexture;
+                proxy.usesMetallicRoughnessTexture = src.usesMetallicRoughnessTexture;
+                proxy.material = src.material;
+                proxy.transparent = IsTransparentMaterial(src.material);
+                proxy.dynamicVertices = src.dynamicVertices;
+                proxy.debugLabel = m_debugAssetPath;
+                // Final model matrix for draw = local mesh transform * instance * component transform.
+                Mul4x4(src.localTransform, placement, proxy.model);
+                proxies.push_back(std::move(proxy));
+            }
         }
 
         return proxies;
@@ -143,6 +159,16 @@ namespace SasamiRenderer
         return true;
     }
 
+    bool MeshComponent::SetDynamicVertices(size_t meshIndex, bool dynamic)
+    {
+        if (meshIndex >= m_staticMeshes.size()) {
+            return false;
+        }
+
+        m_staticMeshes[meshIndex].dynamicVertices = dynamic;
+        return true;
+    }
+
     const SurfaceMaterial* MeshComponent::GetMaterial(size_t meshIndex) const
     {
         if (meshIndex >= m_staticMeshes.size()) {
@@ -155,6 +181,7 @@ namespace SasamiRenderer
     void MeshComponent::Clear()
     {
         m_staticMeshes.clear();
+        m_instanceTransforms.clear();
         m_debugAssetPath.clear();
         Math::Identity4x4(m_model);
         m_loadState = MeshLoadState::Empty;
@@ -166,5 +193,36 @@ namespace SasamiRenderer
         m_model[12] = x;
         m_model[13] = y;
         m_model[14] = z;
+    }
+
+    bool MeshComponent::ComputeLocalBounds(float outMin[3], float outMax[3]) const
+    {
+        bool any = false;
+        const size_t instanceCount = m_instanceTransforms.empty() ? 1 : m_instanceTransforms.size();
+        for (size_t instanceIndex = 0; instanceIndex < instanceCount; ++instanceIndex) {
+            for (const auto& src : m_staticMeshes) {
+                if (!src.mesh) {
+                    continue;
+                }
+                // Same order as BuildRenderProxies, without the component transform: local * instance.
+                float local[16];
+                if (m_instanceTransforms.empty()) {
+                    std::memcpy(local, src.localTransform, sizeof(local));
+                } else {
+                    Mul4x4(src.localTransform, m_instanceTransforms[instanceIndex].data(), local);
+                }
+                for (const auto& vertex : src.mesh->vertices) {
+                    const float* p = vertex.position;
+                    for (int axis = 0; axis < 3; ++axis) {
+                        // Row vectors: p' = p * M.
+                        const float value = p[0] * local[axis] + p[1] * local[4 + axis] + p[2] * local[8 + axis] + local[12 + axis];
+                        outMin[axis] = any ? (std::min)(outMin[axis], value) : value;
+                        outMax[axis] = any ? (std::max)(outMax[axis], value) : value;
+                    }
+                    any = true;
+                }
+            }
+        }
+        return any;
     }
 }

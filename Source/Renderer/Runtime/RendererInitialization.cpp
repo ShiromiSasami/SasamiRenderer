@@ -7,6 +7,7 @@
 // remains the synchronous composite of all four for callers that don't need progressive
 // boot (runtime backend switching, tools).
 #define NOMINMAX
+#include "Renderer/Runtime/NativeBackendFrame.h"
 #include "Renderer/Runtime/Renderer.h"
 #include "Renderer/Scene/SceneSynchronizer.h"
 #include "Renderer/Scene/EnvironmentManager.h"
@@ -40,18 +41,39 @@
 #include "Foundation/Math/MathUtil.h"
 #include "Renderer/Utilities/ResourceUploadUtility.h"
 #include "Renderer/Passes/Core/RenderPassSetupContext.h"
+#include "Renderer/Passes/Geometry/ToonOutlineRenderPass.h"
 #include "d3dx12.h"
+
+#include <cstdio>
+#include <cstdlib>
 
 using namespace std;
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {
-        bool UsesNativeBackendFrame(const IRHIDevice& device)
+        // GetEnvironmentVariableA rather than std::getenv, matching SASAMI_GPU_VALIDATION.
+        uint64_t ClusterPagePoolBytes()
         {
-            return !device.GetCapabilities().supportsFeatureRenderPasses &&
-                   device.GetCapabilities().supportsNativeFrame;
+            constexpr uint64_t kDefaultMegabytes = 96ull;
+
+            char megabytesEnv[16] = {};
+            GetEnvironmentVariableA("SASAMI_PAGE_POOL_MB", megabytesEnv, sizeof(megabytesEnv));
+
+            uint64_t megabytes = kDefaultMegabytes;
+            if (megabytesEnv[0] != '\0') {
+                const uint64_t parsed = std::strtoull(megabytesEnv, nullptr, 10);
+                if (parsed > 0ull) {
+                    megabytes = parsed;
+                    char message[128];
+                    std::snprintf(message, sizeof(message),
+                                  "Renderer::Initialize: ClusterPagePool size overridden to %llu MB by SASAMI_PAGE_POOL_MB.\n",
+                                  static_cast<unsigned long long>(megabytes));
+                    DebugLog(message);
+                }
+            }
+            return megabytes << 20;
         }
     }
 
@@ -59,7 +81,7 @@ namespace SasamiRenderer
     {
         ScopedPerfTimer perfTimer("Renderer::InitializeCore");
         auto failInit = [](const char* message) -> bool {
-            DebugLogDialog(message, L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog(message, L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         };
 
@@ -98,6 +120,22 @@ namespace SasamiRenderer
             if (!m_device->Initialize(hWnd, clientW, clientH)) {
                 return failInit("Renderer::Initialize: IRHIDevice::Initialize failed.\n");
             }
+
+            // Resolve once here: the device exists now, so its reported capabilities are real.
+            m_featureSupport.Resolve(m_device->GetCapabilities());
+
+            // Same reason the constructor could not: HardwareRayTracingPassBuilder gates on
+            // supportsHardwareRayTracing, and only the device knows it. Build returns null when the
+            // builder reports unavailable, which leaves m_rayTracingRenderPass null on a device
+            // without DXR -- the honest answer, where the constructor's placeholder would have
+            // produced a pass that cannot run.
+            RenderPassBuildContext rayTracingContext{};
+            rayTracingContext.capabilities = m_device->GetCapabilities();
+            m_rayTracingRenderPass = std::dynamic_pointer_cast<RayTracingRenderPass>(
+                m_renderPassBuilderCatalog.Build(RenderPassBuilderId::RayTracing, rayTracingContext));
+            if (!m_rayTracingRenderPass) {
+                DebugLog("Renderer::InitializeCore: hardware ray tracing unsupported; the ray tracing pass was not built.\n");
+            }
             if (UsesNativeBackendFrame(*m_device)) {
                 m_viewport = { 0.0f, 0.0f, static_cast<float>(clientW), static_cast<float>(clientH), 0.0f, 1.0f };
                 m_scissorRect = { 0, 0, static_cast<LONG>(clientW), static_cast<LONG>(clientH) };
@@ -114,6 +152,10 @@ namespace SasamiRenderer
                     return 0u;
                 };
                 m_sceneSubmitter.Initialize(submitterParams);
+                // The full Skybox::Initialize below is never reached on this path, but the native
+                // sky still needs the device to build its own environment cubemap from the HDR
+                // source (Skybox::EnsureNativeEnvironmentCubemap).
+                m_skybox.InitializeNativeOnly(*m_device);
                 DebugLog("Renderer::Initialize: native backend initialized. RayMarch and static mesh samples use backend native paths; D3D12 feature render passes are not used on this backend yet.\n");
                 return true;
             }
@@ -145,8 +187,39 @@ namespace SasamiRenderer
             // ~14.6s instead of the GPU path's dispatches. A shader-visible CBV/SRV/UAV heap
             // costs 32 bytes per descriptor, so 4096 slots is 128KB -- cheap insurance
             // against a scene one texture larger silently costing 14 seconds again.
-            if (!m_srvAllocator.Initialize(*m_device, 4096)) {
+            // Raised to 16384: bindless mesh vertex-buffer SRVs for the cluster path need one
+            // per mesh (Bistro ~1700), on top of the existing scene/skybox allocations.
+            if (!m_srvAllocator.Initialize(*m_device, 16384)) {
                 return failInit("Renderer::Initialize: SRV descriptor heap creation failed.\n");
+            }
+        }
+
+        {
+            ScopedPerfTimer stepTimer("Renderer::Initialize.ClusterGpuCulling");
+            // Non-fatal: the GPU-driven cluster path falls back to the CPU-driven one
+            // (ClusterDrawSubmitter::DrawShadow) when either subsystem fails to initialize.
+            if (!m_clusterGpuCulling.Initialize(*m_device, GetBackBufferCount())) {
+                DebugLog("Renderer::Initialize: ClusterGpuCulling initialization failed; falling back to the CPU-driven cluster shadow path.\n");
+            }
+            // 8192 is the initial per-frame-slot capacity, not a ceiling: ClusterInstanceBuffer
+            // reallocates the slot it is about to write when the draw list outgrows it. Kept at the
+            // value the fixed-size buffer used so the shipped scenes allocate exactly what they did
+            // before (Bistro draws ~1697 instances, so 768 KB x 3 slots is never reallocated), while
+            // a 100k-instance procedural scene grows to 131072 (12 MB per slot) on its first frame
+            // instead of silently dropping 11 of every 12 instances.
+            if (!m_clusterInstanceBuffer.Initialize(*m_device, GetBackBufferCount(), 8192)) {
+                DebugLog("Renderer::Initialize: ClusterInstanceBuffer initialization failed; falling back to the CPU-driven cluster shadow path.\n");
+            }
+            // Same initial capacity as the instance list it parallels (8192 x 128 B = 1 MB per slot).
+            if (!m_clusterMaterialTable.Initialize(*m_device, GetBackBufferCount(), 8192)) {
+                DebugLog("Renderer::Initialize: ClusterMaterialTable initialization failed; the GPU-driven main view will have no material table.\n");
+            }
+            // 96 MB by default: Bistro's full page set is 52 MB, so nothing is ever deferred there.
+            // SASAMI_PAGE_POOL_MB shrinks it so the exhaustion and fragmentation paths can actually be
+            // exercised -- render.poolstats splits deferrals by cause, and a counter that never fires
+            // is a counter nobody has tested.
+            if (!m_clusterPagePool.Initialize(*m_device, GetBackBufferCount(), ClusterPagePoolBytes(), 16ull << 20 /* 16 MB ring per frame */)) {
+                DebugLog("Renderer::Initialize: ClusterPagePool initialization failed; falling back to the CPU-driven cluster shadow path.\n");
             }
         }
 
@@ -276,12 +349,22 @@ namespace SasamiRenderer
             m_softwareReflectionRenderPass,
             m_softwareReflectionCompositeRenderPass,
             m_opaqueGBufferRenderPass,
-            m_screenSpaceReflectionCompositeRenderPass
+            m_screenSpaceReflectionCompositeRenderPass,
+            // 18 ToonOutline. This list must cover every slot up to kBuiltinPassCount: it
+            // overwrites the catalog-built array from the Renderer constructor, so a short list
+            // silently leaves the tail nullptr. It used to stop at 17, which made
+            // UseToonRenderNodePreset() drop the outline pass with only a log line -- ToonApp
+            // rendered without outlines. The pass is stateless (see ToonOutlineRenderPass), so
+            // constructing it here matches what StatelessRenderPassBuilder would have produced.
+            std::make_shared<ToonOutlineRenderPass>()
         });
 
         // VolumetricCloud's pipelines are built by RenderPipelineStateCache::Initialize
         // above, so the pass can be inserted here without waiting for any deferred task.
         EnsureVolumetricCloudPassInserted();
+        // Same reasoning: the mesh-shader pipeline (if the hardware supports it) is also
+        // built by RenderPipelineStateCache::Initialize above.
+        EnsureMeshShaderPassInserted();
 
         return true;
     }
@@ -290,6 +373,15 @@ namespace SasamiRenderer
     {
         ScopedPerfTimer perfTimer("Renderer::InitializeFrameInfrastructure");
         ScopedPerfTimer stepTimer("Renderer::Initialize.FrameCoordinator");
+        // Both things set up below are D3D12-only: the frame coordinator allocates D3D12 command
+        // allocators and lists, and the timestamp profiler needs an ID3D12QueryHeap. A native
+        // backend frame never touches either -- it goes through ExecuteBackendFrame -- so on those
+        // backends this whole step is skipped rather than failing boot on E_NOTIMPL.
+        if (UsesNativeBackendFrame(*m_device)) {
+            DebugLog("Renderer::InitializeFrameInfrastructure: skipped, backend uses its own frame path.\n");
+            return true;
+        }
+
         auto allocateSrv = [this](UINT count, CpuDescriptorHandle& outCpu, GpuDescriptorHandle& outGpu) -> bool {
             return m_srvAllocator.Allocate(count, outCpu, outGpu);
         };
@@ -312,11 +404,36 @@ namespace SasamiRenderer
         return true;
     }
 
+    // Publishes the "this subsystem finished initialising" flags that gate boot progress.
+    void Renderer::MarkRasterSubsystemsReady()
+    {
+        m_readyState.coreReady.store(true, std::memory_order_release);
+        m_readyState.rasterReady.store(true, std::memory_order_release);
+        m_readyState.shadowReady.store(true, std::memory_order_release);
+        m_readyState.ssaoReady.store(true, std::memory_order_release);
+        m_readyState.ssrReady.store(true, std::memory_order_release);
+        m_readyState.transparencyReady.store(true, std::memory_order_release);
+        m_readyState.tessellationReady.store(true, std::memory_order_release);
+        m_readyState.meshShaderReady.store(true, std::memory_order_release);
+        m_readyState.cloudReady.store(true, std::memory_order_release);
+    }
+
     bool Renderer::FinalizeCoreInitialization()
     {
         ScopedPerfTimer perfTimer("Renderer::FinalizeCoreInitialization");
+        // Everything finalised here -- render target pool, PSO cache, GI, ray tracing -- is built
+        // on the D3D12 compatibility surface and is unused when the backend renders its own frame.
+        if (UsesNativeBackendFrame(*m_device)) {
+            // The ready flags gate boot progress, and every subsystem they name is one this path
+            // never builds. Leaving them false stalls startup forever waiting for a raster path
+            // that is not coming, so publish them here: nothing is pending.
+            MarkRasterSubsystemsReady();
+            DebugLog("Renderer::FinalizeCoreInitialization: skipped, backend uses its own frame path.\n");
+            return true;
+        }
+
         auto failInit = [](const char* message) -> bool {
-            DebugLogDialog(message, L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog(message, L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         };
 
@@ -382,6 +499,16 @@ namespace SasamiRenderer
             m_defaultNormalTexture = CreateTextureFromRgba8Data(normalFallback, &batch.commandList, batch.uploadResources);
             if (!m_defaultNormalTexture) {
                 return failInit("Renderer::Initialize: normal fallback texture creation failed.\n");
+            }
+
+            CpuTextureRgba8 emissiveFallback;
+            emissiveFallback.pixels = { 255u, 255u, 255u, 255u };
+            emissiveFallback.width = 1;
+            emissiveFallback.height = 1;
+
+            m_defaultEmissiveTexture = CreateTextureFromRgba8Data(emissiveFallback, &batch.commandList, batch.uploadResources);
+            if (!m_defaultEmissiveTexture) {
+                return failInit("Renderer::Initialize: emissive fallback texture creation failed.\n");
             }
 
             batch.commandList.Close();
@@ -486,21 +613,22 @@ namespace SasamiRenderer
 
         // Raster PSOs (shadow, SSAO, SSR, transparency, tessellation, mesh shader, cloud)
         // were all built by RenderPipelineStateCache::Initialize in InitializeCore.
-        m_readyState.coreReady.store(true, std::memory_order_release);
-        m_readyState.rasterReady.store(true, std::memory_order_release);
-        m_readyState.shadowReady.store(true, std::memory_order_release);
-        m_readyState.ssaoReady.store(true, std::memory_order_release);
-        m_readyState.ssrReady.store(true, std::memory_order_release);
-        m_readyState.transparencyReady.store(true, std::memory_order_release);
-        m_readyState.tessellationReady.store(true, std::memory_order_release);
-        m_readyState.meshShaderReady.store(true, std::memory_order_release);
-        m_readyState.cloudReady.store(true, std::memory_order_release);
+        MarkRasterSubsystemsReady();
 
         return true;
     }
 
     void Renderer::RegisterDeferredInitTasks(InitTaskScheduler& scheduler)
     {
+        // Every task registered here builds on the D3D12 compatibility surface (SWRT, GI probe
+        // grid, fluid, particles, DXR). On a backend that renders its own frame they each fail
+        // and report themselves non-fatal, which costs a shader compile per pass and buries the
+        // real log lines. Nothing consumes their results on that path, so do not register them.
+        if (m_device && UsesNativeBackendFrame(*m_device)) {
+            DebugLog("Renderer::RegisterDeferredInitTasks: skipped, backend uses its own frame path.\n");
+            return;
+        }
+
         scheduler.AddMainThreadTask("SWRT.RayTracer", [this]() -> bool {
             ScopedPerfTimer stepTimer("Renderer::Initialize.RayTracing.SWRT");
             if (!m_gpuSoftwareRayTracer.Initialize(*m_device)) {
@@ -555,6 +683,40 @@ namespace SasamiRenderer
             return true;
         }, { fluidSimTask });
 
+        // Smoke gets its own task rather than riding on Fluid.Sim: the two share nothing but a
+        // directory, and a failure in one should not stop the other from coming up.
+        const auto smokeSimTask = scheduler.AddMainThreadTask("Smoke.Sim", [this]() -> bool {
+            ScopedPerfTimer stepTimer("Renderer::Initialize.RayTracing.SmokeSim");
+            if (!m_smokeSim.Initialize(*m_device)) {
+                DebugLog("Renderer::Initialize: SmokeVolumeSim initialization failed (non-fatal).\n");
+            }
+            return true;
+        });
+
+        scheduler.AddMainThreadTask("Smoke.VolumePass", [this]() -> bool {
+            ScopedPerfTimer stepTimer("Renderer::Initialize.RayTracing.SmokeVolumePass");
+            if (!m_smokeVolumeRenderPass) {
+                m_smokeVolumeRenderPass = std::make_shared<SmokeVolumeRenderPass>();
+            }
+            if (!m_smokeVolumeRenderPass->Initialize(*m_device)) {
+                DebugLog("Renderer::Initialize: SmokeVolumeRenderPass initialization failed (non-fatal).\n");
+            } else {
+                m_smokeVolumeRenderPass->SetSmokeSim(&m_smokeSim);
+            }
+            // Disabled by default, so inserting it here costs nothing until the caller opts in.
+            EnsureSmokeVolumePassInserted();
+            // The wind fire/smoke particle volume sits right after it (also disabled by default).
+            if (!m_particleVolumeRenderPass) {
+                m_particleVolumeRenderPass = std::make_shared<ParticleVolumeRenderPass>();
+            }
+            if (!m_particleVolumeRenderPass->Initialize(*m_device)) {
+                DebugLog("Renderer::Initialize: ParticleVolumeRenderPass initialization failed (non-fatal).\n");
+            }
+            EnsureParticleVolumePassInserted();
+            m_readyState.smokeReady.store(true, std::memory_order_release);
+            return true;
+        }, { smokeSimTask });
+
         const auto particleSystemTask = scheduler.AddMainThreadTask("Particles.System", [this]() -> bool {
             ScopedPerfTimer stepTimer("Renderer::Initialize.RayTracing.ParticleSystem");
             if (!m_particleSystem.Initialize(*m_device)) {
@@ -577,6 +739,19 @@ namespace SasamiRenderer
             return true;
         }, { particleSystemTask });
 
+        scheduler.AddMainThreadTask("Crowd.System", [this]() -> bool {
+            ScopedPerfTimer stepTimer("Renderer::Initialize.RayTracing.CrowdSystem");
+            std::string crowdError;
+            if (!m_crowdSystem.Initialize(*m_device, crowdError)) {
+                DebugLog(("Renderer::Initialize: CrowdSystem initialization failed (non-fatal): " + crowdError + "\n").c_str());
+            }
+            if (m_crowdRenderPass && !m_crowdRenderPass->Initialize(*m_device)) {
+                DebugLog("Renderer::Initialize: CrowdRenderPass initialization failed (non-fatal).\n");
+            }
+            EnsureCrowdPassInserted();
+            return true;
+        });
+
         scheduler.AddMainThreadTask("DXR.RayTracer", [this]() -> bool {
             ScopedPerfTimer stepTimer("Renderer::Initialize.RayTracing.DXR");
             if (m_rayTracingStats.hardwareSupported) {
@@ -593,7 +768,7 @@ namespace SasamiRenderer
     {
         ScopedPerfTimer perfTimer("Renderer::Initialize");
         auto failInit = [](const char* message) -> bool {
-            DebugLogDialog(message, L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog(message, L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         };
 
@@ -623,4 +798,4 @@ namespace SasamiRenderer
     }
 
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

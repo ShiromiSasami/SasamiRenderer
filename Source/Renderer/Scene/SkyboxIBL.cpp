@@ -2,7 +2,7 @@
 // IBL texture upload entry point — delegates to IblSystem.
 #include "Renderer/Scene/Skybox.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     void Skybox::EnsureIblTexturesUploaded(CommandList* cmdList)
     {
@@ -13,4 +13,4 @@ namespace SasamiRenderer
                                            m_hdrEquirectHeight);
     }
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

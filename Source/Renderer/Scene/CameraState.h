@@ -3,7 +3,7 @@
 #include "Foundation/Math/MathUtil.h"
 #include <cstring>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     class CameraState
     {
@@ -79,3 +79,7 @@ namespace SasamiRenderer
         float m_invPV[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

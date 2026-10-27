@@ -11,7 +11,7 @@
 
 using Microsoft::WRL::ComPtr;
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace AdHocShaderCompileUtility
     {

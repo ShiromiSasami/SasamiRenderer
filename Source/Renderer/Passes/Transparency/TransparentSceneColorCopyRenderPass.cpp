@@ -3,7 +3,7 @@
 #include "Foundation/Tools/DebugOutput.h"
 #include "Renderer/RenderGraph/RenderGraph.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     void TransparentSceneColorCopyRenderPass::BuildRequirements(RenderPassRequirementBuilder& builder) const
     {
@@ -11,13 +11,21 @@ namespace SasamiRenderer
 
     void TransparentSceneColorCopyRenderPass::Setup(RenderGraphBuilder& builder) const
     {
-        builder.Read("SceneColor");
-        // TransmissionSceneColor is imported into the graph (RendererFrameGraph.cpp), but it is
-        // written here via CopySceneColorForTransmission's own CopyResource barriers (not
-        // UseColorTarget), and those barriers already restore PIXEL_SHADER_RESOURCE afterward.
-        // This Write() only records the dependency edge for TransparentCompositeRenderPass's
-        // Read("TransmissionSceneColor"); the graph never needs to transition it here.
-        builder.Write("TransmissionSceneColor");
+        // This pass is a CopyResource, not a draw, so both resources are declared as copy
+        // endpoints and the graph transitions them to COPY_SOURCE / COPY_DEST itself.
+        //
+        // Read("SceneColor") used to be the declaration here, which left the graph believing
+        // SceneColor was PIXEL_SHADER_RESOURCE while CopySceneColorForTransmission issued its own
+        // barrier claiming a before-state of RENDER_TARGET. The debug layer reported that
+        // mismatch on every launch. Patching the manual barrier's states to agree only moved the
+        // error, because the pass then changed SceneColor's end state behind the graph's back and
+        // later passes tripped over it -- the fix has to be that the graph owns the transition.
+        //
+        // Both resources are imported with transitionToFinalState = true (RendererFrameGraph.cpp),
+        // so leaving them in a copy state here is safe: the graph restores PIXEL_SHADER_RESOURCE
+        // at frame end, and any pass in between gets a correct transition from the tracker.
+        builder.ReadAsCopySource("SceneColor");
+        builder.WriteAsCopyDest("TransmissionSceneColor");
         builder.DependsOnPrevious();
     }
 

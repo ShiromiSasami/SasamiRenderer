@@ -5,7 +5,7 @@
 
 #include "Renderer/Scene/RenderProxy.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     // Shared WIC texture loading used by MeshComponent/SkinnedMeshComponent.
     // Backed by CpuTexturePathCache: the same resolved path always returns the same
@@ -13,3 +13,4 @@ namespace SasamiRenderer
     // GPU-side id-based dedup actually deduplicates shared textures.
     std::shared_ptr<const CpuTextureRgba8> LoadCpuTextureFromPath(const std::string& path);
 }
+namespace SasamiEngine { using namespace App; }

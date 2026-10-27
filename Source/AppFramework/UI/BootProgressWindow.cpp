@@ -4,7 +4,7 @@
 
 #include <cstdio>
 
-namespace SasamiRenderer::BootProgressWindow
+namespace SasamiEngine::App::BootProgressWindow
 {
     namespace
     {

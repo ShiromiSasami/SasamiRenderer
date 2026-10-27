@@ -35,6 +35,6 @@ PSOutput PSMain(PSInput input)
     o.albedo   = float4(patchColor, 1.0f);
     o.normal   = float4(N * 0.5f + 0.5f, 1.0f);
     o.material = float4(0.5f, 0.0f, 1.0f, 1.0f);
-    o.emissive = float4(0.0f, 0.0f, 0.0f, 1.0f);
+    o.emissive = float4(0.0f, 0.0f, 0.0f, 0.0f); // alpha: horizon occlusion, 0 = none
     return o;
 }

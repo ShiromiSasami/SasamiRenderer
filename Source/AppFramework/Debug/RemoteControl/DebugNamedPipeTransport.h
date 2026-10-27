@@ -6,7 +6,7 @@
 
 #include "AppFramework/Debug/RemoteControl/IDebugTransport.h"
 
-namespace SasamiRenderer::Debug
+namespace SasamiEngine::App::Debug
 {
     // Windows named-pipe implementation of IDebugTransport. Runs a dedicated
     // worker thread that accepts one client connection at a time, reads
@@ -36,3 +36,4 @@ namespace SasamiRenderer::Debug
         void* m_stopEvent = nullptr;
     };
 }
+namespace SasamiEngine { using namespace App; }

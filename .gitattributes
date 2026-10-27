@@ -1,2 +1,19 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# --- Git LFS: large binary assets -------------------------------------------
+# Scoped to the newly added asset packs ON PURPOSE. 80 binaries (Sponza, the sky
+# HDR) are already committed as ordinary blobs; a repo-wide pattern would mark all
+# of them for pointer conversion, and converting what is already in history needs
+# `git lfs migrate`, which rewrites history. Keep new bulk assets in LFS and leave
+# the existing blobs alone.
+Assets/Models/Bistro/**/*.dds  filter=lfs diff=lfs merge=lfs -text
+Assets/Models/Bistro/**/*.DDS  filter=lfs diff=lfs merge=lfs -text
+Assets/Models/Bistro/*.fbx     filter=lfs diff=lfs merge=lfs -text
+Assets/Models/Bistro/**/*.tga  filter=lfs diff=lfs merge=lfs -text
+Assets/Models/Bistro/**/*.TGA  filter=lfs diff=lfs merge=lfs -text
+Assets/Models/Bistro/**/*.png  filter=lfs diff=lfs merge=lfs -text
+Assets/Models/Bistro/**/*.jpg  filter=lfs diff=lfs merge=lfs -text
+Assets/Models/Fox/*.bin        filter=lfs diff=lfs merge=lfs -text
+Assets/Models/Fox/*.png        filter=lfs diff=lfs merge=lfs -text
+Assets/Models/VRoidAvatarSampleD/*.glb filter=lfs diff=lfs merge=lfs -text

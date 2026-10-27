@@ -46,6 +46,7 @@ cbuffer ReSTIRFrameConstants : register(b0)
     uint   g_spotLightCount;
     uint   g_cbPad0;
     uint   g_cbPad1;
+    uint   g_punctualLightFalloff; // RendererEnums::PunctualLightFalloff (offset 256)
 };
 
 Texture2D<float4> g_gbuffer : register(t6);  // scratch SRV[0]
@@ -64,7 +65,8 @@ float3 ReconstructWorldPos(uint2 pixel, float linearDepth)
 {
     float ndcX =  ((float(pixel.x) + 0.5f) / float(g_renderWidth))  * 2.0f - 1.0f;
     float ndcY = -((float(pixel.y) + 0.5f) / float(g_renderHeight)) * 2.0f + 1.0f;
-    float4 viewRayH = mul(float4(ndcX, ndcY, 1.0f, 1.0f), g_invVP);
+    // Reverse-Z: far plane is NDC z = 0 (see SWRT_Reflection_Shading.hlsli).
+    float4 viewRayH = mul(float4(ndcX, ndcY, 0.0f, 1.0f), g_invVP);
     float3 viewRay  = normalize(viewRayH.xyz / viewRayH.w - g_cameraPos);
     return g_cameraPos + viewRay * linearDepth;
 }
@@ -78,7 +80,7 @@ float EvalPhatShadow(uint i, float3 pos, float3 N)
     if (i < g_pointLightCount)
     {
         GpuPointLightRT pl = g_pointLights[i];
-        return PhatPoint(pos, N, pl.pos, pl.colorIntensity, pl.range);
+        return PhatPoint(pos, N, pl.pos, pl.colorIntensity, pl.range, g_punctualLightFalloff);
     }
     uint si = i - g_pointLightCount;
     GpuSpotLightRT sl = g_spotLights[si];
@@ -89,7 +91,7 @@ float EvalPhatShadow(uint i, float3 pos, float3 N)
     float  cosA = dot(-L, normalize(sl.dir));
     if (cosA < sl.cosOuter) return 0.0f;
     float spotA = smoothstep(sl.cosOuter, sl.cosInner, cosA);
-    return PhatPoint(pos, N, sl.pos, sl.colorIntensity * spotA, sl.range);
+    return PhatPoint(pos, N, sl.pos, sl.colorIntensity * spotA, sl.range, g_punctualLightFalloff);
 }
 
 [numthreads(16, 16, 1)]
@@ -175,8 +177,7 @@ void CS_Shadow_ReSTIR(uint3 id : SV_DispatchThreadID)
                 bool   inShadow = TraceAnyHit(OffsetRay(worldPos, N), L, 0.0f, dist - 0.001f);
                 if (!inShadow && NdotL > 0.0f)
                 {
-                    float t     = dist / max(lightRange, 1e-4f);
-                    float atten = saturate(1.0f - t * t) * (1.0f - t * t);
+                    float atten = PunctualLightFalloff(dist, lightRange, g_punctualLightFalloff);
                     lightContrib = lightRad * atten * NdotL * r.W;
                 }
             }

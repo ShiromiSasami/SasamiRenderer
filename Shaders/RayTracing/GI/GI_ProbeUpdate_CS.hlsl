@@ -50,7 +50,7 @@ cbuffer GIUpdateCB : register(b0)
     // Punctual lights (point + spot) contributing to probe-ray hit shading.
     uint   g_pointLightCount;
     uint   g_spotLightCount;
-    uint   g_giCbPad2;
+    uint   g_punctualLightFalloff; // RendererEnums::PunctualLightFalloff
     uint   g_giCbPad3;
 }
 
@@ -126,6 +126,7 @@ void CS_ProbeUpdate(
     float3 radiance = (float3)0;
     bool hasSceneBvh = (g_tlasNodes[0].leftChild != 0 || g_tlasNodes[0].rightOrCount != 0);
     HitResult hit = (HitResult)0;
+    bool backFaceHit = false;
     if (hasSceneBvh)
     {
         hit = TraceClosestHit(probePos, dir, 0.01f, g_maxTraceDistance);
@@ -145,15 +146,20 @@ void CS_ProbeUpdate(
         GpuMaterial     mat  = g_materials[inst.materialIndex];
         float3 hitPos   = probePos + dir * hit.t;
         float3 hitNorm  = GetWorldNormal(hit);
-        if (dot(hitNorm, -dir) < 0.0f) hitNorm = -hitNorm;
-        radiance = ShadePBRAtHit(hitPos, hitNorm, -dir, mat);
+        // DDGI (Majercik 2019; RTXGI DDGIProbeTraceRays): a back-face hit means the probe
+        // sits inside geometry, so it contributes no lit radiance.
+        backFaceHit = dot(hitNorm, dir) > 0.0f;
+        if (!backFaceHit)
+            radiance = ShadePBRAtHit(hitPos, hitNorm, -dir, mat);
     }
 
     // Directional visibility signal: how far this probe can see along `dir`
     // before hitting a surface. Misses read as "open" (g_maxTraceDistance),
     // so the resulting SH-fit distance field naturally rejects blend
     // contributions across occluders (floors/ceilings/walls) at sample time.
-    float dist = hit.hit ? hit.t : g_maxTraceDistance;
+    // DDGI scales back-face distance by 0.2 (RTXGI stores -hitT * 0.2). The SH field has no
+    // sign channel, so keep it positive and short: it reads as occluded, never as open.
+    float dist = hit.hit ? (backFaceHit ? hit.t * 0.2f : hit.t) : g_maxTraceDistance;
 
     // Project onto SH (weight = 4*pi / N for uniform sphere sampling)
     const float kWeight = 4.0f * 3.14159265f / float(kRaysPerProbe);

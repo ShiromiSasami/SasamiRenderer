@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // =========================================================================
     // IRenderPass interface
@@ -178,7 +178,10 @@ namespace SasamiRenderer
         pipelineDesc.raster.cullMode = RhiCullMode::None;
         pipelineDesc.depthStencil.depthTestEnabled = true;
         pipelineDesc.depthStencil.depthWriteEnabled = false;
-        pipelineDesc.depthStencil.depthCompare = RhiCompareOp::Less;
+        // Reverse-Z: near is 1.0, so a nearer fragment has the LARGER depth. Less rejected every
+        // particle in front of the scene instead of behind it. Same defect the fluid surface had,
+        // confirmed there on hardware; RhiDepthStencilStateDesc already defaults to GreaterEqual.
+        pipelineDesc.depthStencil.depthCompare = RhiCompareOp::GreaterEqual;
         pipelineDesc.depthStencil.stencilEnabled = false;
         pipelineDesc.blend.alphaBlendEnabled = true;
         pipelineDesc.colorFormats = &colorFormat;
@@ -203,4 +206,4 @@ namespace SasamiRenderer
         return true;
     }
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

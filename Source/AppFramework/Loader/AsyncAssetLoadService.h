@@ -12,7 +12,7 @@
 #include "Foundation/Jobs/JobCounter.h"
 #include "Renderer/Scene/IblSystem.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     // Runs CPU-side asset loading (glTF/OBJ parse, texture decode, HDR skybox decode,
     // IBL pregeneration) on JobSystem workers and applies the results on the main thread
@@ -92,3 +92,4 @@ namespace SasamiRenderer
         std::deque<SkyboxRecord> m_skyboxLoads;
     };
 }
+namespace SasamiEngine { using namespace App; }

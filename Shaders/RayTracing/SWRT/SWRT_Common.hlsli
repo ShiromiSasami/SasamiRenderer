@@ -26,7 +26,8 @@ float3 TangentToWorld(float3 v, float3 N)
 // GGX normal distribution function.
 float GGX_D(float NdotH, float roughness)
 {
-    float a  = roughness * roughness;
+    // Floor alpha (Filament MIN_PERCEPTUAL_ROUGHNESS 0.045): roughness 0 gave 0/0 at NdotH = 1.
+    float a  = max(roughness * roughness, 0.002025f);
     float a2 = a * a;
     float d  = (NdotH * NdotH) * (a2 - 1.0f) + 1.0f;
     return a2 / (3.14159265f * d * d);

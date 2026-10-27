@@ -3,7 +3,7 @@
 #include "Renderer/Passes/Core/IRenderPass.h"
 #include "Renderer/Passes/Core/RenderPassSetupContext.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     class TransparentSceneColorCopyRenderPass : public IRenderPass
     {
@@ -15,3 +15,7 @@ namespace SasamiRenderer
         bool Execute(const RenderPassContextView& context) const override;
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

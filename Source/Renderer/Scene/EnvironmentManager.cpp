@@ -1,6 +1,6 @@
 #include "Renderer/Scene/EnvironmentManager.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     EnvironmentManager::EnvironmentManager(Skybox& skybox, SWRTExecutor& swrtExecutor)
         : m_skybox(skybox)

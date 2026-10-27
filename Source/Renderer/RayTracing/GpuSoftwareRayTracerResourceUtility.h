@@ -2,7 +2,7 @@
 
 #include "Renderer/RHI/GraphicsDevice.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace GpuSoftwareRayTracerResourceUtility
     {
@@ -35,3 +35,7 @@ namespace SasamiRenderer
                                 D3D12_CPU_DESCRIPTOR_HANDLE dest);
     }
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

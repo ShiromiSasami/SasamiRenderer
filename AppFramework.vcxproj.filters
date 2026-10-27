@@ -34,6 +34,12 @@
     <Filter Include="Header Files\Tool">
       <UniqueIdentifier>{b684eb6f-c312-4374-8067-e5c9b28277e6}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\Config">
+      <UniqueIdentifier>{94e631b2-68ba-489a-8bf3-41328ab6062d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Config">
+      <UniqueIdentifier>{b27a79e1-0ba1-4c83-8e9d-9994a39a63ae}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source Files\Input">
       <UniqueIdentifier>{a8ef5c5c-2ec3-4159-a303-c7cf96b3f4e2}</UniqueIdentifier>
     </Filter>
@@ -51,6 +57,9 @@
     </Filter>
     <Filter Include="Source Files\Debug\RemoteControl">
       <UniqueIdentifier>{a1b2c3d4-0002-4a00-9000-5a5a4d493002}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Editor">
+      <UniqueIdentifier>{a1b2c3d4-0003-4a00-9000-5a5a4d493003}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -72,6 +81,9 @@
     <ClInclude Include="Source\AppFramework\Light\DirectionalLight.h">
       <Filter>Header Files\Light</Filter>
     </ClInclude>
+    <ClInclude Include="Source\AppFramework\Light\DefaultSunLight.h">
+      <Filter>Header Files\Light</Filter>
+    </ClInclude>
     <ClInclude Include="Source\AppFramework\Object\Camera.h">
       <Filter>Header Files\Object</Filter>
     </ClInclude>
@@ -88,6 +100,9 @@
       <Filter>Header Files\Object</Filter>
     </ClInclude>
     <ClInclude Include="Source\AppFramework\Object\StaticModel.h">
+      <Filter>Header Files\Object</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Object\SampleFloorBox.h">
       <Filter>Header Files\Object</Filter>
     </ClInclude>
     <ClInclude Include="Source\AppFramework\Object\SkinnedModel.h">
@@ -159,17 +174,62 @@
     <ClInclude Include="Source\AppFramework\Loader\ModelLoaderGlb.h">
       <Filter>Header Files\Tool</Filter>
     </ClInclude>
+    <ClInclude Include="Source\AppFramework\Loader\ModelLoaderEmbeddedImages.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
     <ClInclude Include="Source\AppFramework\Loader\ModelLoaderGltfUtility.h">
       <Filter>Header Files\Tool</Filter>
     </ClInclude>
     <ClInclude Include="Source\AppFramework\Loader\AssetLoader.h">
       <Filter>Header Files\Tool</Filter>
     </ClInclude>
+    <ClInclude Include="Source\AppFramework\Placement\InstanceScatter.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Placement\PlacementRandom.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Placement\PlacementTransform.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Placement\SplinePlacement.h">
+      <Filter>Header Files\Tool</Filter>
+    </ClInclude>
     <ClInclude Include="Source\AppFramework\UI\ImGuiCoordinator.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\Backend\IUIRenderBackend.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\Backend\UIFrameOverlay.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\Backend\UIRenderBackendDx12.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\Backend\UIRenderBackendDx11.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\Backend\UIRenderBackendOpenGL.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\Backend\UIRenderBackendVulkan.h">
       <Filter>Header Files\Input</Filter>
     </ClInclude>
     <ClInclude Include="Source\AppFramework\Input\InputSystem.h">
       <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Input\CameraInputBinding.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Config\IniStreamParser.h">
+      <Filter>Header Files\Config</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Config\IniDocument.h">
+      <Filter>Header Files\Config</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Config\IniWriter.h">
+      <Filter>Header Files\Config</Filter>
     </ClInclude>
     <ClInclude Include="Source\Foundation\Math\Color.h">
       <Filter>Header Files\Tool</Filter>
@@ -194,6 +254,141 @@
     </ClInclude>
     <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugRemoteControlServer.h">
       <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugLightCommands.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugVoxelCommands.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugCrowdCommands.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugAnimCommands.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugParticleCharacterCommands.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugToonCommands.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugFluidCommands.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugSmokeMeshCommands.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugCullingCommands.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Gameplay\CharacterMovement.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Gameplay\FollowCamera.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Gameplay\CameraShake.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Gameplay\GameplaySelfTest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\VoxelOccupancyViewer.h">
+      <Filter>Source Files\Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\FrameRecorder.h">
+      <Filter>Source Files\Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\VoxelStreamOverlay.h">
+      <Filter>Source Files\Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\ParticleCharacterModel.h">
+      <Filter>Source Files\Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\ParticleCharacterOverlay.h">
+      <Filter>Source Files\Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\SmokeSurfaceOverlay.h">
+      <Filter>Source Files\Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Editor\EditorSelection.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Editor\EditorTransformMath.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Editor\SceneHierarchyPanel.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Editor\ObjectInspectorPanel.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Editor\EditorWindows.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Editor\EditorViewMode.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Editor\ContentAssetCatalog.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Editor\EditorModelSpawner.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Editor\ContentBrowserPanel.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Editor\EditorPlaySession.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Editor\EditorDockLayout.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Editor\EditorPlayToolbar.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Editor\EditorGizmo.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Libraries\ImGuizmo\ImGuizmo.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Editor\EditorSceneSnapshot.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Editor\EditorMainMenu.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Editor\EditorPicking.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Editor\EditorSelectionOverlay.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugEditorCommands.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\WindFlowOverlay.h">
+      <Filter>Source Files\Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\WindOverlayProjection.h">
+      <Filter>Source Files\Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\IsoSurfaceOverlayDraw.h">
+      <Filter>Source Files\Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\IsoSurfaceSceneMeshes.h">
+      <Filter>Source Files\Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\WindEffectsOverlay.h">
+      <Filter>Source Files\Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\WindParticleGpuCheck.h">
+      <Filter>Source Files\Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\MolecularBodyGpuCheck.h">
+      <Filter>Source Files\Debug</Filter>
     </ClInclude>
     <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugSceneCommands.h">
       <Filter>Source Files\Debug\RemoteControl</Filter>
@@ -221,7 +416,19 @@
     <ClCompile Include="Libraries\imgui-master\imgui_draw.cpp">
       <Filter>Source Files\Input\Imgui</Filter>
     </ClCompile>
+    <ClCompile Include="Libraries\ImGuizmo\ImGuizmo.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
     <ClCompile Include="Libraries\imgui-master\backends\imgui_impl_dx12.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\imgui-master\backends\imgui_impl_dx11.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\imgui-master\backends\imgui_impl_opengl3.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Libraries\imgui-master\backends\imgui_impl_vulkan.cpp">
       <Filter>Source Files\Input\Imgui</Filter>
     </ClCompile>
     <ClCompile Include="Libraries\imgui-master\backends\imgui_impl_win32.cpp">
@@ -234,6 +441,24 @@
       <Filter>Source Files\Input\Imgui</Filter>
     </ClCompile>
     <ClCompile Include="Source\AppFramework\UI\ImGuiCoordinator.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\Backend\UIFrameOverlay.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\Backend\UIRenderBackendFactory.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\Backend\UIRenderBackendDx12.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\Backend\UIRenderBackendDx11.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\Backend\UIRenderBackendOpenGL.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\Backend\UIRenderBackendVulkan.cpp">
       <Filter>Source Files\Input\Imgui</Filter>
     </ClCompile>
     <ClCompile Include="Source\AppFramework\Component\MeshComponent.cpp">
@@ -272,16 +497,37 @@
     <ClCompile Include="Source\AppFramework\Input\InputSystem.cpp">
       <Filter>Source Files\Input</Filter>
     </ClCompile>
+    <ClCompile Include="Source\AppFramework\Input\CameraInputBinding.cpp">
+      <Filter>Source Files\Input</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Config\IniStreamParser.cpp">
+      <Filter>Source Files\Config</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Config\IniDocument.cpp">
+      <Filter>Source Files\Config</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Config\IniWriter.cpp">
+      <Filter>Source Files\Config</Filter>
+    </ClCompile>
     <ClCompile Include="Source\AppFramework\Loader\ModelLoader.cpp">
       <Filter>Source Files\Tool</Filter>
     </ClCompile>
     <ClCompile Include="Source\AppFramework\Loader\ModelLoaderGlb.cpp">
       <Filter>Source Files\Tool</Filter>
     </ClCompile>
+    <ClCompile Include="Source\AppFramework\Loader\ModelLoaderEmbeddedImages.cpp">
+      <Filter>Source Files\Tool</Filter>
+    </ClCompile>
     <ClCompile Include="Source\AppFramework\Loader\ModelLoaderGltfUtility.cpp">
       <Filter>Source Files\Tool</Filter>
     </ClCompile>
     <ClCompile Include="Source\AppFramework\Loader\AssetLoader.cpp">
+      <Filter>Source Files\Tool</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Placement\InstanceScatter.cpp">
+      <Filter>Source Files\Tool</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Placement\SplinePlacement.cpp">
       <Filter>Source Files\Tool</Filter>
     </ClCompile>
     <ClCompile Include="Source\AppFramework\Object\SkinnedModel.cpp">
@@ -299,8 +545,279 @@
     <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugRemoteControlServer.cpp">
       <Filter>Source Files\Debug\RemoteControl</Filter>
     </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugLightCommands.cpp">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugVoxelCommands.cpp">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugCrowdCommands.cpp">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugAnimCommands.cpp">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugParticleCharacterCommands.cpp">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugToonCommands.cpp">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugFluidCommands.cpp">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugSmokeMeshCommands.cpp">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugCullingCommands.cpp">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Gameplay\CharacterMovement.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Gameplay\FollowCamera.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Gameplay\CameraShake.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Gameplay\GameplaySelfTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\VoxelOccupancyViewer.cpp">
+      <Filter>Source Files\Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\FrameRecorder.cpp">
+      <Filter>Source Files\Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\VoxelStreamOverlay.cpp">
+      <Filter>Source Files\Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\ParticleCharacterModel.cpp">
+      <Filter>Source Files\Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\ParticleCharacterOverlay.cpp">
+      <Filter>Source Files\Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\SmokeSurfaceOverlay.cpp">
+      <Filter>Source Files\Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Editor\EditorSelection.cpp">
+      <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Editor\EditorTransformMath.cpp">
+      <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Editor\SceneHierarchyPanel.cpp">
+      <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Editor\ObjectInspectorPanel.cpp">
+      <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Editor\EditorWindows.cpp">
+      <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Editor\EditorViewMode.cpp">
+      <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Editor\ContentAssetCatalog.cpp">
+      <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Editor\EditorModelSpawner.cpp">
+      <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Editor\ContentBrowserPanel.cpp">
+      <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Editor\EditorPlaySession.cpp">
+      <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Editor\EditorDockLayout.cpp">
+      <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Editor\EditorPlayToolbar.cpp">
+      <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Editor\EditorGizmo.cpp">
+      <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Editor\EditorSceneSnapshot.cpp">
+      <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Editor\EditorMainMenu.cpp">
+      <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Editor\EditorPicking.cpp">
+      <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Editor\EditorSelectionOverlay.cpp">
+      <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugEditorCommands.cpp">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\WindFlowOverlay.cpp">
+      <Filter>Source Files\Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\WindOverlayProjection.cpp">
+      <Filter>Source Files\Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\IsoSurfaceOverlayDraw.cpp">
+      <Filter>Source Files\Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\IsoSurfaceSceneMeshes.cpp">
+      <Filter>Source Files\Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\WindEffectsOverlay.cpp">
+      <Filter>Source Files\Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\WindParticleGpuCheck.cpp">
+      <Filter>Source Files\Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\MolecularBodyGpuCheck.cpp">
+      <Filter>Source Files\Debug</Filter>
+    </ClCompile>
     <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugSceneCommands.cpp">
       <Filter>Source Files\Debug\RemoteControl</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\AppFramework\ApplicationCoreProperties.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\ApplicationCoreRenderPasses.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\ApplicationCoreScene.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\ApplicationObjectManagement.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugAppCommands.cpp">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugCaptureCommands.cpp">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugRenderCommands.cpp">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Loader\ModelLoaderOBJ.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\Loader\ModelLoaderSkinned.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\UIAngle.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\UIButton.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\UIColor.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\UICommitPolicy.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\UIEditBuffer.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\UIGate.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\UIIntVolume.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\UILayout.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\UITab.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\UITabBar.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\UITabbedPanel.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\UIPanelRegistry.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\UIText.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\UIVector3.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\UIVolume.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\AppFramework\UI\UIWindow.cpp">
+      <Filter>Source Files\Input\Imgui</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugAppCommands.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugCommandArgs.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugCaptureCommands.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugRenderCommands.h">
+      <Filter>Source Files\Debug\RemoteControl</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\UIAngle.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\UIButton.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\UIColor.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\UICommitPolicy.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\UIEditBuffer.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\UIGate.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\UIIntVolume.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\UILayout.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\UITab.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\UITabBar.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\UITabbedPanel.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\UIPanelRegistry.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\UIText.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\UIVector3.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\UIVolume.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\AppFramework\UI\UIWindow.h">
+      <Filter>Header Files\Input</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

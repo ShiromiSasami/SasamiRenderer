@@ -9,7 +9,7 @@
 
 #include "Foundation/Tools/DebugOutput.h"
 
-namespace SasamiRenderer::Debug
+namespace SasamiEngine::App::Debug
 {
     namespace
     {
@@ -161,7 +161,7 @@ namespace SasamiRenderer::Debug
                 0,
                 nullptr));
             if (!pipe) {
-                SasamiRenderer::DebugLog("[DebugNamedPipeTransport] Failed to create named pipe instance.");
+                SasamiEngine::Foundation::DebugLog("[DebugNamedPipeTransport] Failed to create named pipe instance.");
                 break;
             }
 

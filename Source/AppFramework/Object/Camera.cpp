@@ -3,7 +3,7 @@
 #include <cmath>
 #include "Foundation/Math/MathUtil.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     using Math::Cross;
     using Math::Deg;
@@ -24,16 +24,19 @@ namespace SasamiRenderer
 
         static void BuildPerspectiveProjection(float aspect, float fovRadians, float zn, float zf, float outProj[16])
         {
-            // Perspective projection (row-major, LH).
+            // Perspective projection (row-major, LH, reversed depth: NDC z = 1 at near, 0 at far).
             // yScale = 1 / tan(fov/2)
             // xScale = yScale / aspect
-            // z mapping: z' = zf/(zf-zn) * z + (-zn*zf)/(zf-zn)
+            // z mapping: z' = zn/(zn-zf) * z + (zf*zn)/(zf-zn)
+            // Reversed so that the hyperbolic 1/z falloff of NDC depth and the exponential
+            // spacing of float mantissa precision both concentrate near z=0 instead of
+            // fighting each other, giving much more usable precision at the far plane.
             const float yScale = 1.0f / std::tan(fovRadians * 0.5f);
             const float xScale = yScale / aspect;
-            outProj[0] = xScale; outProj[1] = 0;      outProj[2] = 0;                      outProj[3] = 0;
-            outProj[4] = 0;      outProj[5] = yScale; outProj[6] = 0;                      outProj[7] = 0;
-            outProj[8] = 0;      outProj[9] = 0;      outProj[10] = zf / (zf - zn);        outProj[11] = 1;
-            outProj[12] = 0;     outProj[13] = 0;     outProj[14] = (-zn * zf) / (zf - zn); outProj[15] = 0;
+            outProj[0] = xScale; outProj[1] = 0;      outProj[2] = 0;                     outProj[3] = 0;
+            outProj[4] = 0;      outProj[5] = yScale; outProj[6] = 0;                     outProj[7] = 0;
+            outProj[8] = 0;      outProj[9] = 0;      outProj[10] = zn / (zn - zf);       outProj[11] = 1;
+            outProj[12] = 0;     outProj[13] = 0;     outProj[14] = (zf * zn) / (zf - zn); outProj[15] = 0;
         }
     }
 

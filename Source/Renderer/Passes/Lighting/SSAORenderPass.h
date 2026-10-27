@@ -5,7 +5,7 @@
 #include "Renderer/Passes/Core/IRenderPass.h"
 #include "Renderer/Passes/Core/RenderPassSetupContext.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     class SSAORenderPass : public IRenderPass
     {
@@ -48,3 +48,7 @@ namespace SasamiRenderer
                          D3D12_GPU_VIRTUAL_ADDRESS ssaoCbGpu) const;
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

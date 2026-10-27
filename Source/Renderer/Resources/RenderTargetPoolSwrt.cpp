@@ -6,7 +6,7 @@
 #include "Foundation/Tools/DebugOutput.h"
 #include "Renderer/Scene/LightSystem.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     void RenderTargetPool::ReleaseCompatibleRhiTexture(IRHIDevice& device, Resource& texture, RhiTextureHandle& textureHandle)
     {

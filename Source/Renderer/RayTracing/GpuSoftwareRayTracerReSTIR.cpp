@@ -42,7 +42,7 @@
 using Microsoft::WRL::ComPtr;
 
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {
@@ -142,10 +142,10 @@ namespace SasamiRenderer
                 FillReSTIRConstants(desc, kSteps[i], ac);
                 ac.pointLightCount = nPt;
                 ac.spotLightCount  = nSp;
-                memcpy(m_restirConstantsMapped + (UINT64)(i + 1) * 256, &ac, sizeof(ac));
+                memcpy(m_restirConstantsMapped + (UINT64)(i + 1) * kReSTIRCbufSlotSize, &ac, sizeof(ac));
             }
             // Slot 6: shadow ReSTIR (same as base)
-            memcpy(m_restirConstantsMapped + 6u * 256,
+            memcpy(m_restirConstantsMapped + 6u * kReSTIRCbufSlotSize,
                    m_restirConstantsMapped, sizeof(ReSTIRFrameConstants));
         }
 
@@ -228,8 +228,10 @@ namespace SasamiRenderer
             WritePassSRVRaw(0, 0u, desc.gbufferNormalTex, DXGI_FORMAT_R16G16B16A16_FLOAT);
         if (desc.gbufferMaterialTex)
             WritePassSRVRaw(0, 1u, desc.gbufferMaterialTex, DXGI_FORMAT_R8G8B8A8_UNORM);
+        // GBuffer PS writes linear albedo; the _SRGB view encodes on write and decodes on read
+        // so the 8-bit store keeps its precision in the darks.
         if (desc.gbufferAlbedoTex)
-            WritePassSRVRaw(0, 2u, desc.gbufferAlbedoTex, DXGI_FORMAT_R8G8B8A8_UNORM);
+            WritePassSRVRaw(0, 2u, desc.gbufferAlbedoTex, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB);
         WritePassUAV(0, 0u, m_gBufferTexture, DXGI_FORMAT_R16G16B16A16_FLOAT);
         WritePassUAV(0, 1u, m_hitPositionTexture, DXGI_FORMAT_R16G16B16A16_FLOAT);
         WritePassUAV(0, 2u, m_hitMaterialTexture, DXGI_FORMAT_R16G16B16A16_FLOAT);
@@ -249,14 +251,17 @@ namespace SasamiRenderer
         // Pass 4 (Shade temporal accumulate into prevColor): SRV[0]=shadedColor, SRV[1]=prevColor
         WritePassSRV(4, 0u, m_shadedColorTexture, DXGI_FORMAT_R16G16B16A16_FLOAT);
         WritePassSRV(4, 1u, m_prevColorTexture,   DXGI_FORMAT_R16G16B16A16_FLOAT);
-        // Pass 5 (NRD Pack): SRV[0]=shadedColor, SRV[1]=gBuffer, SRV[2]=material
-        //                     UAV[0]=nrdDiffIn, UAV[1]=nrdViewZ, UAV[2]=nrdNormalRoughness
+        // Pass 5 (NRD Pack): SRV[0]=shadedColor, SRV[1]=secondary gBuffer, SRV[2]=raster material,
+        //                     SRV[3]=raster normal; UAV[0]=nrdDiffIn, UAV[1]=nrdViewZ, UAV[2]=nrdNormalRoughness
         WritePassSRV(5, 0u, m_shadedColorTexture,  DXGI_FORMAT_R16G16B16A16_FLOAT);
         WritePassSRV(5, 1u, m_gBufferTexture,       DXGI_FORMAT_R16G16B16A16_FLOAT);
-        WritePassSRV(5, 2u, m_hitMaterialTexture, DXGI_FORMAT_R16G16B16A16_FLOAT);
+        if (desc.gbufferMaterialTex)
+            WritePassSRVRaw(5, 2u, desc.gbufferMaterialTex, DXGI_FORMAT_R8G8B8A8_UNORM);
+        if (desc.gbufferNormalTex)
+            WritePassSRVRaw(5, 3u, desc.gbufferNormalTex, DXGI_FORMAT_R16G16B16A16_FLOAT);
         WritePassUAV(5, 0u, m_nrdDiffIn,           DXGI_FORMAT_R16G16B16A16_FLOAT);
         WritePassUAV(5, 1u, m_nrdViewZ,             DXGI_FORMAT_R16_FLOAT);
-        WritePassUAV(5, 2u, m_nrdNormalRoughness,   DXGI_FORMAT_R8G8B8A8_UNORM);
+        WritePassUAV(5, 2u, m_nrdNormalRoughness,   DXGI_FORMAT_R10G10B10A2_UNORM);
         // Pass 6 (A-Trous ping→pong): SRV[0]=nrdDiffOut, SRV[1]=gBuffer; UAV[0]=atrousPingPong
         if (m_atrousReady)
         {
@@ -521,7 +526,7 @@ namespace SasamiRenderer
                 m_nrdViewZ.Get(), DXGI_FORMAT_R16_FLOAT,
                 kSrvAccess, kSrvLayout, kCompStage);
             nrd::Resource resNormRough = MakeNrdResource(
-                m_nrdNormalRoughness.Get(), DXGI_FORMAT_R8G8B8A8_UNORM,
+                m_nrdNormalRoughness.Get(), DXGI_FORMAT_R10G10B10A2_UNORM,
                 kSrvAccess, kSrvLayout, kCompStage);
             nrd::Resource resMV = MakeNrdResource(
                 m_nrdMotionVec.Get(), DXGI_FORMAT_R16G16_FLOAT,
@@ -530,11 +535,11 @@ namespace SasamiRenderer
                 m_nrdDiffOut.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT,
                 kUavAccess, kUavLayout, kCompStage);
 
-            resourceSnapshot.SetResource(nrd::ResourceType::IN_DIFF_RADIANCE_HITDIST, resDiffIn);
+            resourceSnapshot.SetResource(nrd::ResourceType::IN_SPEC_RADIANCE_HITDIST, resDiffIn);
             resourceSnapshot.SetResource(nrd::ResourceType::IN_VIEWZ,                 resViewZ);
             resourceSnapshot.SetResource(nrd::ResourceType::IN_NORMAL_ROUGHNESS,      resNormRough);
             resourceSnapshot.SetResource(nrd::ResourceType::IN_MV,                    resMV);
-            resourceSnapshot.SetResource(nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST, resDiffOut);
+            resourceSnapshot.SetResource(nrd::ResourceType::OUT_SPEC_RADIANCE_HITDIST, resDiffOut);
 
             nri::CommandBufferD3D12Desc cmdBufDesc = {};
             cmdBufDesc.d3d12CommandList      = cl;
@@ -565,7 +570,8 @@ namespace SasamiRenderer
         // Pass 7: atrousPingPong(SRV) → nrdDiffOut(UAV)
         // Pass 6: nrdDiffOut(SRV) → atrousPingPong(UAV)  ← final result in atrousPingPong
         // =========================================================================
-        if (m_atrousReady && m_restirATrousPso && m_nrdReady)
+        const bool runATrous = m_atrousReady && m_restirATrousPso && m_nrdReady && !m_nrdIntegration;
+        if (runATrous)
         {
             // nrdDiffOut is already in SRV state after NRD. Run 5 A-Trous passes (step=1,2,4,8,16)
             // ping-ponging between nrdDiffOut and atrousPingPong (SVGF: Schied et al. 2017).
@@ -574,7 +580,7 @@ namespace SasamiRenderer
                 for (int ai = 0; ai < 5; ++ai)
                 {
                     const bool pingPass = (ai % 2 == 0); // true = Pass6 (nrdDiffOut→pong), false = Pass7 (pong→nrdDiffOut)
-                    const D3D12_GPU_VIRTUAL_ADDRESS cbATrous = cbBase + (UINT64)(ai + 1) * 256u;
+                    const D3D12_GPU_VIRTUAL_ADDRESS cbATrous = cbBase + (UINT64)(ai + 1) * kReSTIRCbufSlotSize;
                     ID3D12Resource* readTex  = pingPass ? m_nrdDiffOut.Get()     : m_atrousPingPong.Get();
                     ID3D12Resource* writeTex = pingPass ? m_atrousPingPong.Get() : m_nrdDiffOut.Get();
                     int passIdx = pingPass ? 6 : 7;
@@ -604,7 +610,7 @@ namespace SasamiRenderer
         {
             // After A-Trous: use atrousPingPong if available, else nrdDiffOut or shadedColor
             ID3D12Resource* srcTex;
-            if (m_nrdReady && m_atrousReady)
+            if (runATrous)
                 srcTex = m_atrousPingPong.Get();
             else if (m_nrdReady)
                 srcTex = m_nrdDiffOut.Get();
@@ -705,7 +711,7 @@ namespace SasamiRenderer
         scratchUavGpu.ptr += kScratchUavBase * m_descIncrementSize;
 
         const D3D12_GPU_VIRTUAL_ADDRESS cbSlot6 =
-            m_restirConstantsBuffer.GetGPUVirtualAddress() + 6u * 256u;
+            m_restirConstantsBuffer.GetGPUVirtualAddress() + 6u * kReSTIRCbufSlotSize;
         const D3D12_GPU_VIRTUAL_ADDRESS ptLightsVA =
             m_lightDataBuffer.GetGPUVirtualAddress();
         const D3D12_GPU_VIRTUAL_ADDRESS spLightsVA =
@@ -778,4 +784,4 @@ namespace SasamiRenderer
         return RenderReflectionTextureReSTIR(desc, device, cmdList, scratchTexture, outStats);
     }
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

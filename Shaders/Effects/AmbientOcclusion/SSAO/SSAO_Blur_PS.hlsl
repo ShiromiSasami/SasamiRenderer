@@ -31,7 +31,8 @@ float4 PSMain(PSInput input) : SV_Target
     const float2 texelSize = u_screenSize.zw;
     const float centerDepth = t_depth.SampleLevel(s_point, uv, 0).r;
 
-    if (centerDepth >= 1.0f)
+    // Reverse-Z: far plane is depth == 0.0, so background/empty pixels satisfy depth <= 0.0.
+    if (centerDepth <= 0.0f)
     {
         return float4(1.0f, 1.0f, 1.0f, 1.0f);
     }

@@ -5,7 +5,7 @@
 #include "ApplicationCore.h"
 #include "Loader/AsyncAssetLoadService.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     namespace
     {
@@ -190,6 +190,11 @@ namespace SasamiRenderer
     const SurfaceMaterial* StaticModel::GetMaterial(size_t meshIndex) const
     {
         return MeshComponentRef().GetMaterial(meshIndex);
+    }
+
+    bool StaticModel::SetDynamicVertices(size_t meshIndex, bool dynamic)
+    {
+        return MeshComponentRef().SetDynamicVertices(meshIndex, dynamic);
     }
 
     void StaticModel::ClearModel()

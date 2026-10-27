@@ -4,7 +4,7 @@
 #include "Renderer/RenderGraph/RenderGraph.h"
 #include "Renderer/Passes/Core/RenderPassSetupContext.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     void RayTracingRenderPass::BuildRequirements(RenderPassRequirementBuilder& builder) const
     {

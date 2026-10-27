@@ -13,13 +13,14 @@
 
 #if RHI_DIRECTX12
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     inline DXGI_FORMAT ToDxgiFormat(RhiFormat format)
     {
         switch (format) {
         case RhiFormat::R8UNorm: return DXGI_FORMAT_R8_UNORM;
         case RhiFormat::R8G8B8A8UNorm: return DXGI_FORMAT_R8G8B8A8_UNORM;
+        case RhiFormat::R8G8B8A8UNormSrgb: return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
         case RhiFormat::B8G8R8A8UNorm: return DXGI_FORMAT_B8G8R8A8_UNORM;
         case RhiFormat::R16G16B16A16Float: return DXGI_FORMAT_R16G16B16A16_FLOAT;
         case RhiFormat::R32G32B32Float: return DXGI_FORMAT_R32G32B32_FLOAT;
@@ -33,6 +34,14 @@ namespace SasamiRenderer
         case RhiFormat::D16UNorm: return DXGI_FORMAT_D16_UNORM;
         case RhiFormat::D32Float: return DXGI_FORMAT_D32_FLOAT;
         case RhiFormat::D24UNormS8UInt: return DXGI_FORMAT_D24_UNORM_S8_UINT;
+        case RhiFormat::BC1UNorm: return DXGI_FORMAT_BC1_UNORM;
+        case RhiFormat::BC1UNormSrgb: return DXGI_FORMAT_BC1_UNORM_SRGB;
+        case RhiFormat::BC3UNorm: return DXGI_FORMAT_BC3_UNORM;
+        case RhiFormat::BC3UNormSrgb: return DXGI_FORMAT_BC3_UNORM_SRGB;
+        case RhiFormat::BC4UNorm: return DXGI_FORMAT_BC4_UNORM;
+        case RhiFormat::BC5UNorm: return DXGI_FORMAT_BC5_UNORM;
+        case RhiFormat::BC7UNorm: return DXGI_FORMAT_BC7_UNORM;
+        case RhiFormat::BC7UNormSrgb: return DXGI_FORMAT_BC7_UNORM_SRGB;
         default: return DXGI_FORMAT_UNKNOWN;
         }
     }
@@ -50,6 +59,7 @@ namespace SasamiRenderer
         case RhiResourceState::CopySource: return D3D12_RESOURCE_STATE_COPY_SOURCE;
         case RhiResourceState::CopyDest: return D3D12_RESOURCE_STATE_COPY_DEST;
         case RhiResourceState::Present: return D3D12_RESOURCE_STATE_PRESENT;
+        case RhiResourceState::IndirectArgument: return D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
         case RhiResourceState::Common:
         default: return D3D12_RESOURCE_STATE_COMMON;
         }
@@ -216,3 +226,7 @@ namespace SasamiRenderer
 }
 
 #endif // RHI_DIRECTX12
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

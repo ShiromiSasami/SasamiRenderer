@@ -46,6 +46,13 @@ uint GI_ProbeLinearIndex(uint3 coord)
     return coord.x + coord.y * g_probeCountX + coord.z * g_probeCountX * g_probeCountY;
 }
 
+// Hanning window per SH band to suppress ringing (negative lobes) of the L2 fit:
+// w_l = 0.5 * (1 + cos(pi * l / (L + 1))), L = 2 -> w0 = 1, w1 = 0.75, w2 = 0.25.
+// Peter-Pike Sloan, "Stupid Spherical Harmonics (SH) Tricks", GDC 2008, "Windowing".
+// Irradiance only; the distance SH (visibility) is not windowed.
+static const float GI_SH_WINDOW_L1 = 0.75;
+static const float GI_SH_WINDOW_L2 = 0.25;
+
 // Evaluate probe irradiance for a given world-space normal.
 // Uses the same cosine-lobe convolution factors as EvaluateDiffuseIrradianceFromSh in PBR_PS.
 float3 GI_EvaluateProbeSH(uint probeIdx, float3 n)
@@ -54,14 +61,14 @@ float3 GI_EvaluateProbeSH(uint probeIdx, float3 n)
     float x = n.x, y = n.y, z = n.z;
 
     const float b0 = 0.282095 * 3.14159265;
-    const float b1 = (0.488603 * y) * 2.09439510;
-    const float b2 = (0.488603 * z) * 2.09439510;
-    const float b3 = (0.488603 * x) * 2.09439510;
-    const float b4 = (1.092548 * x * y) * 0.78539816;
-    const float b5 = (1.092548 * y * z) * 0.78539816;
-    const float b6 = (0.315392 * (3.0 * z * z - 1.0)) * 0.78539816;
-    const float b7 = (1.092548 * x * z) * 0.78539816;
-    const float b8 = (0.546274 * (x * x - y * y)) * 0.78539816;
+    const float b1 = (0.488603 * y) * 2.09439510 * GI_SH_WINDOW_L1;
+    const float b2 = (0.488603 * z) * 2.09439510 * GI_SH_WINDOW_L1;
+    const float b3 = (0.488603 * x) * 2.09439510 * GI_SH_WINDOW_L1;
+    const float b4 = (1.092548 * x * y) * 0.78539816 * GI_SH_WINDOW_L2;
+    const float b5 = (1.092548 * y * z) * 0.78539816 * GI_SH_WINDOW_L2;
+    const float b6 = (0.315392 * (3.0 * z * z - 1.0)) * 0.78539816 * GI_SH_WINDOW_L2;
+    const float b7 = (1.092548 * x * z) * 0.78539816 * GI_SH_WINDOW_L2;
+    const float b8 = (0.546274 * (x * x - y * y)) * 0.78539816 * GI_SH_WINDOW_L2;
 
     float3 irr =
         g_probeSHData[base + 0].rgb * b0 +

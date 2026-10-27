@@ -6,7 +6,7 @@
 #include <string_view>
 #include <vector>
 
-namespace SasamiRenderer::Debug
+namespace SasamiEngine::App::Debug
 {
     // Handles the arguments of a single command (command name already stripped)
     // and returns the line to send back.
@@ -37,3 +37,4 @@ namespace SasamiRenderer::Debug
         std::map<std::string, Entry, std::less<>> m_commands;
     };
 }
+namespace SasamiEngine { using namespace App; }

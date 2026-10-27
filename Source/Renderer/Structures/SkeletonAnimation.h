@@ -2,7 +2,7 @@
 #include <string>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // Single keyframe for one component (translation xyz, rotation xyzw, or scale xyz)
     struct AnimKeyframe
@@ -25,3 +25,7 @@ namespace SasamiRenderer
         std::vector<BoneTrack> boneTracks; // one entry per bone (indexed by bone index)
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

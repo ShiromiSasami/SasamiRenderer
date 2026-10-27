@@ -1,0 +1,5 @@
+AvatarSample_D (VRoid Studio sample avatar, VRM 0.x)
+License: CC0 (released by pixiv / VRoid Project)
+Source: https://opengameart.org/content/vroid-studio-cc0-models (avatarsample_d.zip)
+VRoid CC0 statement: https://vroid.pixiv.help/hc/en-us/articles/4402614652569
+The .vrm file is a binary glTF 2.0 container; it was renamed to .glb unchanged.

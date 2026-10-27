@@ -1,6 +1,6 @@
 #pragma once
 
-namespace SasamiRenderer::Culling
+namespace SasamiEngine::Render::Culling
 {
     // Row-major, row-vector view-projection matrices (clip = p * VP, D3D 0..1 depth).
     // Plane extraction follows Gribb-Hartmann against VP's columns.
@@ -25,3 +25,7 @@ namespace SasamiRenderer::Culling
     // plane is intentionally left unchecked here.
     bool IsAabbVisibleIgnoringNearPlane(const FrustumPlanes& frustum, const float boundsMin[3], const float boundsMax[3]);
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

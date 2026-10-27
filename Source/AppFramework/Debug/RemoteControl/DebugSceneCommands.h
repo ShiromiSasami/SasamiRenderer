@@ -1,6 +1,6 @@
 #pragma once
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     class ApplicationCore;
 
@@ -18,3 +18,4 @@ namespace SasamiRenderer
         void RegisterSceneCommands(DebugCommandRegistry& registry, ApplicationCore& app);
     }
 }
+namespace SasamiEngine { using namespace App; }

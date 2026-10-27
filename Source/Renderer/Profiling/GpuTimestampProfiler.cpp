@@ -2,7 +2,7 @@
 
 #include "Renderer/Resources/RenderPipelineStateCacheLog.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     bool GpuTimestampProfiler::Initialize(ID3D12Device* device, ID3D12CommandQueue* queue)
     {

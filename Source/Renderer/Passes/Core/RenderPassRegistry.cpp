@@ -2,7 +2,9 @@
 #include "Renderer/Passes/Core/RenderPassRegistry.h"
 #include "Foundation/Tools/DebugOutput.h"
 
-namespace SasamiRenderer
+#include <algorithm>
+
+namespace SasamiEngine::Render
 {
     void RenderPassRegistry::SetBuiltinPasses(std::array<std::shared_ptr<IRenderPass>, kBuiltinPassCount> passes)
     {
@@ -59,6 +61,21 @@ namespace SasamiRenderer
         if (!m_renderPasses.empty()) {
             m_renderNodes.clear();
             m_renderNodes.push_back(std::make_shared<RenderPassSequenceNode>("DefaultRenderNode", m_renderPasses));
+            RebuildPassCache();
+        }
+    }
+
+    void RenderPassRegistry::UseToonRenderNodePreset()
+    {
+        std::vector<RenderPassType> sequence(RenderPassConstants::kDefaultRenderPathSequence.begin(),
+                                             RenderPassConstants::kDefaultRenderPathSequence.end());
+        const auto lightingIt = std::find(sequence.begin(), sequence.end(), RenderPassType::Lighting);
+        sequence.insert(lightingIt != sequence.end() ? lightingIt + 1 : sequence.end(), RenderPassType::ToonOutline);
+
+        SetRenderPassSequence(sequence);
+        if (!m_renderPasses.empty()) {
+            m_renderNodes.clear();
+            m_renderNodes.push_back(std::make_shared<RenderPassSequenceNode>("ToonRenderNode", m_renderPasses));
             RebuildPassCache();
         }
     }

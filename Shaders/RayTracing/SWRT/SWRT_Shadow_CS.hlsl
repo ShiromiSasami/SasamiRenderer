@@ -35,12 +35,15 @@ void CS_Shadow(uint3 id : SV_DispatchThreadID)
     float ndcX =  ((float(id.x) + 0.5f) / float(g_width))  * 2.0f - 1.0f;
     float ndcY = -((float(id.y) + 0.5f) / float(g_height)) * 2.0f + 1.0f;
 
-    // Reconstruct near/far world points from inverse light VP
-    float4 nearH = mul(float4(ndcX, ndcY, 0.0f, 1.0f), g_invLightVP);
-    float4 farH  = mul(float4(ndcX, ndcY, 1.0f, 1.0f), g_invLightVP);
+    // Reconstruct near/far world points from inverse light VP.
+    // Reverse-Z: near = 1.0, far = 0.0, so the NDC z literals are swapped relative
+    // to the forward-Z convention.
+    float4 nearH = mul(float4(ndcX, ndcY, 1.0f, 1.0f), g_invLightVP);
+    float4 farH  = mul(float4(ndcX, ndcY, 0.0f, 1.0f), g_invLightVP);
     if (abs(nearH.w) < 1e-7f || abs(farH.w) < 1e-7f)
     {
-        g_output[uint3(id.xy, g_arraySlice)] = 1.0f;
+        // Reverse-Z: miss/degenerate rays are unshadowed and resolve to the far plane (0.0).
+        g_output[uint3(id.xy, g_arraySlice)] = 0.0f;
         return;
     }
     float3 nearPt = nearH.xyz / nearH.w;
@@ -50,7 +53,8 @@ void CS_Shadow(uint3 id : SV_DispatchThreadID)
     float  rayLen = length(delta);
     if (rayLen < 1e-6f)
     {
-        g_output[uint3(id.xy, g_arraySlice)] = 1.0f;
+        // Reverse-Z: miss/degenerate rays are unshadowed and resolve to the far plane (0.0).
+        g_output[uint3(id.xy, g_arraySlice)] = 0.0f;
         return;
     }
 
@@ -66,13 +70,18 @@ void CS_Shadow(uint3 id : SV_DispatchThreadID)
 
     if (!hit.hit)
     {
-        g_output[uint3(id.xy, g_arraySlice)] = 1.0f;
+        // Reverse-Z: a BVH miss means nothing occludes this texel, so it resolves to the
+        // far plane (0.0) instead of the near plane (1.0).
+        g_output[uint3(id.xy, g_arraySlice)] = 0.0f;
         return;
     }
 
     float3 hitWorld = nearPt + rayDir * hit.t;
     float4 hitClip  = mul(float4(hitWorld, 1.0f), g_lightVP);
     float  depth    = hitClip.z / hitClip.w;
-    depth += g_depthBias;
+    // Reverse-Z: depth decreases with distance from the light, so biasing the shadow
+    // caster *toward* the light (reducing peter-panning) now means subtracting the bias
+    // instead of adding it.
+    depth -= g_depthBias;
     g_output[uint3(id.xy, g_arraySlice)] = saturate(depth);
 }

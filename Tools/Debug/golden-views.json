@@ -1,0 +1,16 @@
+{
+  "views": [
+    {
+      "name": "bistro_street",
+      "setup": "camera.setTarget 19.648001 2.73451 -30.540899;;camera.setYawPitch 0.493399 -0.2261;;render.ibl 0",
+      "settleFrames": 120
+    },
+    {
+      "name": "bistro_street_ibl",
+      "setup": "camera.setTarget 19.648001 2.73451 -30.540899;;camera.setYawPitch 0.493399 -0.2261;;render.ibl 1",
+      "settleFrames": 120
+    }
+  ],
+  "defaultMaxChangedOver8Pct": 0.5,
+  "defaultMaxAbs": -1
+}

@@ -5,7 +5,7 @@
 
 #include "Foundation/Tools/DebugOutput.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Foundation
 {
     class ScopedPerfTimer
     {
@@ -70,4 +70,19 @@ namespace SasamiRenderer
         Timestamp m_startTime{};
         bool m_stopped = false;
     };
+
+    // Milliseconds from `start` until now, the usual "how long did this take" one-liner.
+    inline double MillisecondsSince(ScopedPerfTimer::Timestamp start)
+    {
+        return ScopedPerfTimer::ElapsedMilliseconds(start, ScopedPerfTimer::Now());
+    }
 }
+
+// Lets the other layers name Foundation types unqualified. The directive sits on SasamiEngine rather
+// than on a layer, so anything nested under it -- SasamiEngine::Render, SasamiEngine::App -- finds these
+// names by enclosing-namespace lookup.
+//
+// The SasamiRenderer -> SasamiEngine::<layer> namespace migration it was written for is finished; what
+// is left is deciding whether the layers should qualify Foundation:: explicitly instead. That is not a
+// mechanical change (roughly 76 files name these types unqualified), so the directive stays until then.
+namespace SasamiEngine { using namespace Foundation; }

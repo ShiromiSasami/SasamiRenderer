@@ -110,6 +110,15 @@ float PhaseHG(float cosTheta, float g)
     return (1.0f - g2) / (4.0f * 3.14159265f * pow(denom, 1.5f));
 }
 
+// Extinction coefficient sigma_t in 1/m per unit density, shared by the view and sun marches.
+// The light ray must attenuate with the same sigma_t (Hillaire 2016, "Physically Based Sky, Atmosphere and Cloud Rendering in Frostbite").
+static const float CLOUD_EXTINCTION_PER_M = 0.015f;
+
+float CloudExtinction(float d)
+{
+    return d * CLOUD_EXTINCTION_PER_M;
+}
+
 // Beer-Lambert shadow march toward sun: returns transmittance [0,1].
 float SunTransmittance(float3 pos, float3 sunDir, float time, float cloudCover,
                        float density, float windSpeed, float baseAlt, float topAlt)
@@ -122,8 +131,8 @@ float SunTransmittance(float3 pos, float3 sunDir, float time, float cloudCover,
     [unroll] for (int i = 0; i < kShadowSteps; ++i)
     {
         float3 sp = pos + sunDir * (float(i) + 0.5f) * kStep;
-        tau += SampleDensity(sp, time, cloudCover, density,
-                             windSpeed, baseAlt, topAlt) * kStep * 0.0004f;
+        tau += CloudExtinction(SampleDensity(sp, time, cloudCover, density,
+                                             windSpeed, baseAlt, topAlt)) * kStep;
     }
     return exp(-tau);
 }

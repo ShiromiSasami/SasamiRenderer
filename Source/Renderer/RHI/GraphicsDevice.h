@@ -9,6 +9,7 @@
 #include "d3dx12.h"
 #include "Renderer/RHI/RhiDevice.h"
 #include "Renderer/RHI/RhiTypes.h"
+#include "Renderer/RHI/RhiUIOverlay.h"
 
 #ifndef PLATFORM_WINDOWS
 #if defined(_WIN32)
@@ -73,7 +74,7 @@
 #error "At least one RHI_* backend macro must be enabled."
 #endif
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     using Microsoft::WRL::ComPtr;
     enum class GraphicsRuntime;
@@ -354,15 +355,46 @@ namespace SasamiRenderer
             (void)height;
             return false;
         }
+        // HDR10 (PQ / Rec.2020) swap chain output is scoped to the DX12 raster path only (see
+        // RenderSettings::enableHdrOutput). These default bodies report "unsupported" / "stayed
+        // off" so the three native backends -- which never override them -- need no changes here
+        // or in their own sources to correctly refuse HDR10.
+        virtual bool SupportsHdr10Output() const
+        {
+            return false;
+        }
+        // Attempts to switch the swap chain's DXGI colour space to HDR10 (enable) or back to sRGB
+        // (disable). Returns whether HDR10 is active after the call. Recreating the swap chain
+        // itself at DXGI_FORMAT_R10G10B10A2_UNORM is the caller's responsibility -- only the
+        // caller (Renderer::ResizeViewport) knows the target width/height at that point.
+        virtual bool SetHdr10ColorSpaceEnabled(bool enable)
+        {
+            (void)enable;
+            return false;
+        }
+        // Fills in what an ImGui renderer backend needs to attach to this device. False means the
+        // backend has no UI overlay support, which is the answer for anything that renders its
+        // frames through the D3D12 compatibility surface instead of ExecuteBackendFrame.
+        virtual bool GetOverlayDeviceContext(RhiOverlayDeviceContext& context)
+        {
+            (void)context;
+            return false;
+        }
+        // `format` selects how the sampler reads the 8-bit data back: R8G8B8A8UNormSrgb decodes to
+        // linear, which base-colour textures need. It has to be decided here rather than at view
+        // creation because a fully typed resource cannot be viewed through another format.
+        // Only R8G8B8A8UNorm and R8G8B8A8UNormSrgb are accepted; anything else fails the call.
         virtual RhiTextureHandle CreateRhiTexture2DFromRgba8(uint32_t width,
                                                              uint32_t height,
                                                              const void* pixels,
-                                                             uint32_t rowPitchBytes)
+                                                             uint32_t rowPitchBytes,
+                                                             RhiFormat format = RhiFormat::R8G8B8A8UNorm)
         {
             (void)width;
             (void)height;
             (void)pixels;
             (void)rowPitchBytes;
+            (void)format;
             return {};
         }
         bool ExecuteBackendFrame(const RhiBackendFrameDesc& frameDesc) override
@@ -498,6 +530,12 @@ namespace SasamiRenderer
             (void)handle;
             return nullptr;
         }
+        // Shared DrawIndexed command signature (stride 20, no root arguments) for
+        // DrawIndexedIndirect. Created lazily; nullptr when the backend is not DX12.
+        virtual ID3D12CommandSignature* GetDx12DrawIndexedCommandSignature()
+        {
+            return nullptr;
+        }
         virtual PipelineState* GetD3D12CompatibilityPipelineState(RhiPipelineHandle handle)
         {
             (void)handle;
@@ -601,3 +639,7 @@ namespace SasamiRenderer
         return CD3DX12_RESOURCE_BARRIER::Transition(resource.Get(), before, after);
     }
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

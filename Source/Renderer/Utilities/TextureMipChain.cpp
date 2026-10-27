@@ -5,7 +5,7 @@
 #include <cmath>
 #include <cstring>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {

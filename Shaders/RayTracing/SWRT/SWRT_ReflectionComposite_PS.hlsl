@@ -1,4 +1,5 @@
 #include "Shared/Common/LightCB.hlsli"
+#include "Raster/Lighting/PBR/PBR_BRDF.hlsli"
 
 // GBuffer inputs
 Texture2D<float4> GBufferAlbedoTex   : register(t0);
@@ -60,7 +61,9 @@ float4 PSMain(PSInput input) : SV_TARGET
     // Match SWRT_Reflection_CS.hlsl: reconstruct the camera ray from the same
     // pixel center, then use GBufferNormal.w as camera-to-surface distance.
     float2 ndc = uv * float2(2.0, -2.0) + float2(-1.0, 1.0);
-    float4 viewRayH = mul(float4(ndc, 1.0, 1.0), u_invCameraPV);
+    // Reverse-Z: far plane is NDC z == 0.0 (not 1.0), so the far point used to build
+    // the camera ray direction must use z=0 here.
+    float4 viewRayH = mul(float4(ndc, 0.0, 1.0), u_invCameraPV);
     float3 rayDir = normalize(viewRayH.xyz / viewRayH.w - u_cameraPos.xyz);
     float3 worldPos = u_cameraPos.xyz + rayDir * cameraDistance;
     float3 V = normalize(u_cameraPos.xyz - worldPos);
@@ -77,10 +80,8 @@ float4 PSMain(PSInput input) : SV_TARGET
         reflectionFresnel,
         saturate(metallic));
 
-    // Shared visibility for this explicit reflection-composite pass. Non-reflective
-    // or very rough surfaces should not receive traced reflection.
-    float roughnessVisibility = 1.0 - smoothstep(0.65, 1.0, roughness);
-    float reflectionVisibility = materialReflectionMask * roughnessVisibility;
+    // Coverage is computed by the shared helper so the lighting pass fades its IBL specular
+    // out by exactly the amount added back here (PBR_BRDF.hlsli: ReflectionCoverage).
 
     // SWRT radiance is scene-hit radiance only. Skybox/IBL is not used as a
     // reflection fallback; misses carry alpha=0 and add nothing.
@@ -89,9 +90,8 @@ float4 PSMain(PSInput input) : SV_TARGET
     // CookTorranceGGX_PS.hlsl). Applying it here would double-count occlusion.
     float3 swrtSpecular = reflSamp.rgb * reflectionFresnel;
 
-    // Blend SWRT confidence into the reflection alpha, suppressing SWRT on
-    // non-reflective or very rough surfaces.
-    float swrtAlpha = saturate(reflSamp.a * u_reflectionParams.y) * reflectionVisibility;
+    float swrtAlpha = ReflectionCoverage(reflSamp.a, u_reflectionParams.y,
+                                        materialReflectionMask, roughness);
 
     // The PSO adds this RGB contribution to the current SceneColor.
     float3 output = swrtSpecular * swrtAlpha;

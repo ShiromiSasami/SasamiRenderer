@@ -8,7 +8,7 @@
 
 #include "Foundation/Tools/DebugOutput.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     inline std::string FmtHr(HRESULT hr)
     {
@@ -69,3 +69,7 @@ namespace SasamiRenderer
         DrainD3D12InfoQueue(device);
     }
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

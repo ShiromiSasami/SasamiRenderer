@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace RendererMathUtility
     {
@@ -40,3 +40,7 @@ namespace SasamiRenderer
                              std::vector<float>& outPixels);
     }
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

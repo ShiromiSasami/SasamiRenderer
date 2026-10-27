@@ -33,7 +33,7 @@
 using Microsoft::WRL::ComPtr;
 
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {
@@ -113,6 +113,7 @@ namespace SasamiRenderer
         out.gbufferHeight = (desc.gbufferHeight > 0) ? desc.gbufferHeight : desc.height;
         out.maxBounces    = std::max(1u, desc.maxBounces);
         out.debugView     = desc.debugView;
+        out.punctualLightFalloff = desc.frameDesc.punctualLightFalloff;
     }
 
     void GpuSoftwareRayTracer::FillAmbientOcclusionConstants(const AmbientOcclusionTextureDesc& desc,
@@ -243,7 +244,9 @@ namespace SasamiRenderer
         };
         setRawSrv(desc.gbufferNormalTex, DXGI_FORMAT_R16G16B16A16_FLOAT, kGBufferSrvBase + 0u);
         setRawSrv(desc.gbufferMaterialTex, DXGI_FORMAT_R8G8B8A8_UNORM, kGBufferSrvBase + 1u);
-        setRawSrv(desc.gbufferAlbedoTex, DXGI_FORMAT_R8G8B8A8_UNORM, kGBufferSrvBase + 2u);
+        // GBuffer PS writes linear albedo; the _SRGB view encodes on write and decodes on read
+        // so the 8-bit store keeps its precision in the darks.
+        setRawSrv(desc.gbufferAlbedoTex, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, kGBufferSrvBase + 2u);
 
         cl->SetPipelineState(m_aoPso.Get());
         cl->SetComputeRootSignature(m_rootSignature.Get());
@@ -378,7 +381,9 @@ namespace SasamiRenderer
             };
             writeGBufSrv(desc.gbufferNormalTex,   DXGI_FORMAT_R16G16B16A16_FLOAT, 0u);
             writeGBufSrv(desc.gbufferMaterialTex, DXGI_FORMAT_R8G8B8A8_UNORM,     1u);
-            writeGBufSrv(desc.gbufferAlbedoTex,   DXGI_FORMAT_R8G8B8A8_UNORM,     2u);
+            // GBuffer PS writes linear albedo; the _SRGB view encodes on write and decodes on read
+            // so the 8-bit store keeps its precision in the darks.
+            writeGBufSrv(desc.gbufferAlbedoTex,   DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, 2u);
             writeCubeSrv(desc.iblPrefilterTex,    DXGI_FORMAT_R16G16B16A16_FLOAT, 3u,
                          std::max(1u, static_cast<UINT>(desc.iblPrefilterMaxMip) + 1u));
         }
@@ -810,4 +815,4 @@ namespace SasamiRenderer
     }
 
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

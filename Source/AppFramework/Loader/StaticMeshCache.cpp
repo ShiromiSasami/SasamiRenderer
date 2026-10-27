@@ -11,7 +11,7 @@
 
 #include "Foundation/Tools/DebugOutput.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     namespace StaticMeshCache
     {
@@ -27,8 +27,11 @@ namespace SasamiRenderer
             constexpr char kMagic[4] = { 'S', 'M', 'S', 'H' };
             // Bump the leading constant whenever the serialized field list changes:
             // v2 appends LoadedStaticMesh::normalTexturePath after the other texture paths.
+            // v3 appends LoadedStaticMesh::emissiveTexturePath after normalTexturePath.
+            // v4: SurfaceMaterial gained toonFaceShadow/toonHair inside existing tail padding, so
+            //     sizeof() did not change and v3 files read stale padding bytes as toonHair=1.
             constexpr uint32_t kFormatVersion =
-                2u ^ (static_cast<uint32_t>(sizeof(Vertex)) << 8) ^
+                4u ^ (static_cast<uint32_t>(sizeof(Vertex)) << 8) ^
                 (static_cast<uint32_t>(sizeof(SurfaceMaterial)) << 16) ^
                 (static_cast<uint32_t>(sizeof(uint32_t)) << 24);
 
@@ -117,6 +120,11 @@ namespace SasamiRenderer
             }
         }
 
+        std::filesystem::path GetCacheDirectory()
+        {
+            return GetExeDirectory() / L"AssetCache";
+        }
+
         std::filesystem::path ResolveCachePath(const std::string& sourcePath, float uniformScale)
         {
             char scaleText[32]{};
@@ -124,7 +132,7 @@ namespace SasamiRenderer
 
             const std::string name = SanitizeForFilename(sourcePath) + "." +
                                      SanitizeForFilename(scaleText) + ".smesh";
-            return GetExeDirectory() / L"AssetCache" / std::filesystem::path(name);
+            return GetCacheDirectory() / std::filesystem::path(name);
         }
 
         bool IsUpToDate(const std::filesystem::path& cachePath,
@@ -228,7 +236,8 @@ namespace SasamiRenderer
                 if (!ReadString(file, remaining(), mesh.texturePath) ||
                     !ReadString(file, remaining(), mesh.occlusionTexturePath) ||
                     !ReadString(file, remaining(), mesh.metallicRoughnessTexturePath) ||
-                    !ReadString(file, remaining(), mesh.normalTexturePath)) {
+                    !ReadString(file, remaining(), mesh.normalTexturePath) ||
+                    !ReadString(file, remaining(), mesh.emissiveTexturePath)) {
                     DebugLog(("StaticMeshCache: truncated texture paths \"" + cachePath.string() + "\"\n").c_str());
                     outMeshes.clear();
                     return false;
@@ -303,6 +312,7 @@ namespace SasamiRenderer
                     WriteString(file, mesh.occlusionTexturePath);
                     WriteString(file, mesh.metallicRoughnessTexturePath);
                     WriteString(file, mesh.normalTexturePath);
+                    WriteString(file, mesh.emissiveTexturePath);
                 }
 
                 if (!file) {

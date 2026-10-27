@@ -7,7 +7,7 @@
 #include "DebugCommandRegistry.h"
 #include "IDebugTransport.h"
 
-namespace SasamiRenderer::Debug
+namespace SasamiEngine::App::Debug
 {
     // Top-level façade that owns the transport, the hand-off queue and the
     // command registry for the debug remote control feature. This is the only
@@ -50,3 +50,4 @@ namespace SasamiRenderer::Debug
         bool m_running = false;
     };
 }
+namespace SasamiEngine { using namespace App; }

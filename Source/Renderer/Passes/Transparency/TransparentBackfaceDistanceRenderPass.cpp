@@ -3,7 +3,7 @@
 #include "Foundation/Tools/DebugOutput.h"
 #include "Renderer/RenderGraph/RenderGraph.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     void TransparentBackfaceDistanceRenderPass::BuildRequirements(RenderPassRequirementBuilder& builder) const
     {

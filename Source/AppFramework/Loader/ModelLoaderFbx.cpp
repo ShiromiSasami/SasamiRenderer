@@ -19,7 +19,7 @@
 
 #include "ufbx/ufbx.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     using Math::Mul4x4;
     using Math::Clamp01;
@@ -129,6 +129,7 @@ namespace SasamiRenderer
             SurfaceMaterial material;
             std::string texturePath;
             std::string normalTexturePath;
+            std::string emissiveTexturePath;
             std::string metallicRoughnessTexturePath;
         };
 
@@ -201,6 +202,14 @@ namespace SasamiRenderer
             }
             if (normalMapTexture) {
                 result.normalTexturePath = ResolveTexturePath(fbxDir, normalMapTexture, warnedMissingTextures);
+            }
+
+            const ufbx_texture* emissiveTexture = mat->pbr.emission_color.texture;
+            if (!emissiveTexture) {
+                emissiveTexture = mat->fbx.emission_color.texture;
+            }
+            if (emissiveTexture) {
+                result.emissiveTexturePath = ResolveTexturePath(fbxDir, emissiveTexture, warnedMissingTextures);
             }
 
             if (!warnedNormalMap) {
@@ -375,6 +384,7 @@ namespace SasamiRenderer
                     out.material = resolved.material;
                     out.texturePath = resolved.texturePath;
                     out.normalTexturePath = resolved.normalTexturePath;
+                    out.emissiveTexturePath = resolved.emissiveTexturePath;
                     out.metallicRoughnessTexturePath = resolved.metallicRoughnessTexturePath;
 
                     float nodeMatrix[16];

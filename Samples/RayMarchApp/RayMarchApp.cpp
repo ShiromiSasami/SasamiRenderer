@@ -1,10 +1,13 @@
 #include "RayMarchApp.h"
 #include "ApplicationCore.h"
+#include "Light/DefaultSunLight.h"
 #include "ApplicationEntryPoint.h"
+#include "Input/CameraInputBinding.h"
 #include "Input/InputSystem.h"
 #include "Renderer/Passes/Core/RenderNode.h"
 #include "Renderer/Passes/PostProcess/PostProcessRenderPass.h"
 #include "UI/ImGuiCoordinator.h"
+#include "UI/UIVolume.h"
 #include "Foundation/Tools/DebugOutput.h"
 #include "Foundation/Math/MathUtil.h"
 #include "imgui.h"
@@ -15,7 +18,7 @@
 #include <algorithm>
 #include <boost/signals2/connection.hpp>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Sample::RayMarch
 {
     void RayMarchApp::OnInit(ApplicationCore& app)
     {
@@ -46,38 +49,10 @@ namespace SasamiRenderer
         app.SetRenderNodePreset(std::make_shared<RenderPassSequenceNode>("RayMarchRenderNode",
                                                                          std::move(rayMarchPasses)));
         // Set up directional light (sun)
-        DirectionalLight sun{};
-        sun.yaw       = 45.0f;
-        sun.pitch     = 40.0f;
-        sun.intensity = 2.5f;
-        sun.color.r = 1.00f;
-        sun.color.g = 0.95f;
-        sun.color.b = 0.85f;
-        app.SetDirectionalLight(sun);
+        app.SetDirectionalLight(MakeDefaultSunLight());
 
         // Input bindings
-        auto& input = InputSystem::Instance();
-        static std::vector<boost::signals2::scoped_connection> s_connections;
-        s_connections.clear();
-
-        s_connections.emplace_back(input.ConnectOnKeyDown([this](WPARAM k) {
-            if (m_camera) m_camera->OnKeyDown(k);
-        }));
-        s_connections.emplace_back(input.ConnectOnKeyUp([this](WPARAM k) {
-            if (m_camera) m_camera->OnKeyUp(k);
-        }));
-        s_connections.emplace_back(input.ConnectOnMouseDown([this](int x, int y) {
-            if (m_camera) m_camera->OnMouseDown(x, y);
-        }));
-        s_connections.emplace_back(input.ConnectOnMouseUp([this]() {
-            if (m_camera) m_camera->OnMouseUp();
-        }));
-        s_connections.emplace_back(input.ConnectOnMouseMove([this](int x, int y, bool held) {
-            if (m_camera) m_camera->OnMouseMove(x, y, held);
-        }));
-        s_connections.emplace_back(input.ConnectOnMouseWheel([this](int d) {
-            if (m_camera) m_camera->OnMouseWheel(d);
-        }));
+        m_inputConnections = ConnectCameraInput([this]() { return m_camera; });
 
         // UI window
         ImGuiCoordinator::Instance().RegisterWindow("Camera", [this]() {
@@ -93,7 +68,7 @@ namespace SasamiRenderer
             ImGui::Separator();
 
             float speed = m_camera->MoveSpeed();
-            if (ImGui::SliderFloat("Move Speed", &speed, 0.1f, 30.0f)) {
+            if (UI::Volume("Move Speed", &speed, 0.1f, 30.0f)) {
                 m_camera->SetMoveSpeed(speed);
             }
 
@@ -101,11 +76,11 @@ namespace SasamiRenderer
             ImGui::Separator();
             if (m_renderPass) {
                 float cloudCover = m_renderPass->GetCloudCover();
-                if (ImGui::SliderFloat("Cloud Cover", &cloudCover, 0.0f, 1.0f)) {
+                if (UI::Volume("Cloud Cover", &cloudCover, 0.0f, 1.0f)) {
                     m_renderPass->SetCloudCover(cloudCover);
                 }
                 float cloudDensity = m_renderPass->GetCloudDensity();
-                if (ImGui::SliderFloat("Cloud Density", &cloudDensity, 0.5f, 8.0f)) {
+                if (UI::Volume("Cloud Density", &cloudDensity, 0.5f, 8.0f)) {
                     m_renderPass->SetCloudDensity(cloudDensity);
                 }
             }
@@ -229,17 +204,11 @@ namespace SasamiRenderer
 
     void RayMarchApp::OnShutdown(ApplicationCore& app)
     {
+        m_inputConnections.clear();
         app.ClearObjects();
         m_camera     = nullptr;
         m_renderPass = nullptr;
     }
-
-    void RayMarchApp::OnResize(ApplicationCore& app, UINT width, UINT height)
-    {
-        (void)app;
-        (void)width;
-        (void)height;
-    }
 }
 
-SASAMI_IMPLEMENT_APPLICATION(SasamiRenderer::RayMarchApp, 1280, 720, L"RayMarch Sample")
+SASAMI_IMPLEMENT_APPLICATION(SasamiEngine::Sample::RayMarch::RayMarchApp, 1280, 720, L"RayMarch Sample")

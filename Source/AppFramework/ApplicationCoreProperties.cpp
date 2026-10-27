@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include "Foundation/Math/MathUtil.h"
 #include "Foundation/Tools/DebugOutput.h"
 #include "Foundation/Tools/ScopedPerfTimer.h"
 #include "Input/InputSystem.h"
@@ -18,14 +19,24 @@
 #include "UI/ImGuiCoordinator.h"
 
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     void ApplicationCore::SetDirectionalLight(const DirectionalLight& light)
     {
         if (!m_renderer) {
             return;
         }
-        m_renderer->SetDirectionalLightSettings(light.ToRenderLight());
+        // Every writer of the sun direction funnels through here -- the Lighting UI, both
+        // scene-load paths, and the light.dir debug command -- so this is the one place that
+        // can guarantee pitch stays inside the range DirectionFromYawPitch is injective over.
+        // Outside it the stored angles alias onto a mirrored direction (see
+        // Math::NormalizeYawPitch), which is how a scene ends up authored with pitch = 180
+        // degrees: a sun that reads as "overhead" in the file but sits exactly on the horizon,
+        // leaving roofs at N.L == 0 and casting shadows the shadow map cannot resolve.
+        // Normalizing does not move the light, only how it is written down.
+        DirectionalLight normalized = light;
+        Math::NormalizeYawPitch(normalized.yaw, normalized.pitch);
+        m_renderer->SetDirectionalLightSettings(normalized.ToRenderLight());
     }
 
     bool ApplicationCore::GetShowDirectionalLightOnSkybox() const
@@ -383,22 +394,6 @@ namespace SasamiRenderer
     void ApplicationCore::ReinsertParticles()
     {
         if (m_renderer) m_renderer->ReinsertParticles();
-    }
-
-    bool ApplicationCore::GetMeshletDebugViewEnabled() const
-    {
-        if (!m_renderer) {
-            return false;
-        }
-        return m_renderer->GetMeshletDebugViewEnabled();
-    }
-
-    void ApplicationCore::SetMeshletDebugViewEnabled(bool enabled)
-    {
-        if (!m_renderer) {
-            return;
-        }
-        m_renderer->SetMeshletDebugViewEnabled(enabled);
     }
 
     bool ApplicationCore::GetUseMeshShader() const
@@ -893,6 +888,12 @@ namespace SasamiRenderer
         return m_renderer ? m_renderer->IsHardwareRayTracingSupported() : false;
     }
 
+    const BackendFeatureSupport& ApplicationCore::GetFeatureSupport() const
+    {
+        static const BackendFeatureSupport kNone{};
+        return m_renderer ? m_renderer->GetFeatureSupport() : kNone;
+    }
+
     Renderer::RayTracingStats ApplicationCore::GetRayTracingStats() const
     {
         if (!m_renderer) {
@@ -925,4 +926,4 @@ namespace SasamiRenderer
         m_renderer->CycleGBufferDebugView(delta);
     }
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::App

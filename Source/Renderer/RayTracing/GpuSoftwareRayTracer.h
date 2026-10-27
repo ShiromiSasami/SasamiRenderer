@@ -13,7 +13,7 @@
 // Forward-declare NRD Integration to avoid pulling NRI/NRD headers into every TU.
 namespace nrd { struct Integration; }
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     //
     // GpuSoftwareRayTracer
@@ -385,7 +385,7 @@ namespace SasamiRenderer
             uint32_t gbufferHeight;  // native G-Buffer height (may differ from renderHeight)
             uint32_t maxBounces;     // max reflection bounces per sample (1 = single-bounce)
             uint32_t debugView;
-            uint32_t pad1;
+            uint32_t punctualLightFalloff; // RendererEnums::PunctualLightFalloff
             uint32_t pad2;
             uint32_t pad3;
         };
@@ -420,7 +420,9 @@ namespace SasamiRenderer
         };
         static_assert(sizeof(AmbientOcclusionFrameConstants) >= 112u);
 
-        // ---- ReSTIR / SVGF cbuffer (matches all SWRT ReSTIR HLSL shaders, 256 bytes) ----
+        // ---- ReSTIR / SVGF cbuffer (matches all SWRT ReSTIR HLSL shaders, 512-byte slots) ----
+        // The first 256 bytes were full; punctualLightFalloff opened a second 256-byte block.
+        // Every slot offset must use kReSTIRCbufSlotSize, never a literal 256.
         struct alignas(256) ReSTIRFrameConstants
         {
             float    invVP[16];           // row_major float4x4 g_invVP
@@ -447,10 +449,13 @@ namespace SasamiRenderer
             float    ambientIntensity;
             uint32_t pointLightCount;
             uint32_t spotLightCount;
-            uint32_t cbPad0;
-            uint32_t cbPad1;
+            uint32_t cbPad0;               // reused as gbufferWidth by Initial / NRD_Pack
+            uint32_t cbPad1;               // reused as gbufferHeight by Initial / NRD_Pack
+            uint32_t punctualLightFalloff; // RendererEnums::PunctualLightFalloff
+            uint32_t cbPad2[3];
         };
-        static_assert(sizeof(ReSTIRFrameConstants) == 256u);
+        static_assert(sizeof(ReSTIRFrameConstants) == 512u);
+        static constexpr UINT64 kReSTIRCbufSlotSize = sizeof(ReSTIRFrameConstants);
 
         // ---- GPU light structs for ReSTIR passes ----
         struct GpuPointLightRT
@@ -608,7 +613,7 @@ namespace SasamiRenderer
         // ---- NRD textures ----
         Resource m_nrdDiffIn;             // RGBA16F  EIN_DIFF_RADIANCE_HITDIST
         Resource m_nrdViewZ;              // R16F     EIN_VIEWZ
-        Resource m_nrdNormalRoughness;    // RGBA8    EIN_NORMAL_ROUGHNESS
+        Resource m_nrdNormalRoughness;    // R10G10B10A2   EIN_NORMAL_ROUGHNESS
         Resource m_nrdMotionVec;          // RG16F    EIN_MV  (zeroed, no motion vecs yet)
         Resource m_nrdDiffOut;            // RGBA16F  EOUT_DIFF_RADIANCE_HITDIST
         // ---- A-Trous denoising ----
@@ -676,4 +681,8 @@ namespace SasamiRenderer
                                             RayTracingRuntimeStats& outStats);
     };
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

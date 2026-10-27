@@ -23,7 +23,7 @@ namespace
     };
 }
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     bool RendererFrameCoordinator::Initialize(IRHIDevice& device,
                                               RenderPipelineStateCache& pipelineStateCache,
@@ -32,7 +32,7 @@ namespace SasamiRenderer
                                               const AllocateSrvRangeCallback& allocateSrvRange)
     {
         if (frameCount == 0) {
-            DebugLogDialog("RendererFrameCoordinator::Initialize: frameCount must be greater than zero.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("RendererFrameCoordinator::Initialize: frameCount must be greater than zero.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
 
@@ -48,7 +48,7 @@ namespace SasamiRenderer
 
             HRESULT hr = m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, frame.cmdAllocator);
             if (FAILED(hr)) {
-                DebugLogDialog("RendererFrameCoordinator::Initialize: CreateCommandAllocator failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+                DebugLogDialog("RendererFrameCoordinator::Initialize: CreateCommandAllocator failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
                 return false;
             }
 
@@ -56,7 +56,7 @@ namespace SasamiRenderer
                                                            cameraCbSize,
                                                            frame.cameraCB,
                                                            reinterpret_cast<void**>(&frame.cameraCBPtr))) {
-                DebugLogDialog("RendererFrameCoordinator::Initialize: Camera CB creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+                DebugLogDialog("RendererFrameCoordinator::Initialize: Camera CB creation failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
                 return false;
             }
             frame.cameraCbCapacity = 1;
@@ -75,7 +75,7 @@ namespace SasamiRenderer
                                                  &m_pipelineStateCache->GetPipelineState(),
                                                  m_mainCommandList);
         if (FAILED(hr)) {
-            DebugLogDialog("RendererFrameCoordinator::Initialize: Main command list creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("RendererFrameCoordinator::Initialize: Main command list creation failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
         m_mainCommandList.Close();
@@ -83,13 +83,13 @@ namespace SasamiRenderer
 
         hr = m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, m_frameFence.GetAddressOf());
         if (FAILED(hr)) {
-            DebugLogDialog("RendererFrameCoordinator::Initialize: Frame fence creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("RendererFrameCoordinator::Initialize: Frame fence creation failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
 
         m_frameFenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
         if (!m_frameFenceEvent) {
-            DebugLogDialog("RendererFrameCoordinator::Initialize: Frame fence event creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("RendererFrameCoordinator::Initialize: Frame fence event creation failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
 

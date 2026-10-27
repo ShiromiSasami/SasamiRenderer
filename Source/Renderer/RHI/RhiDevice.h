@@ -4,7 +4,7 @@
 
 #include <memory>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     class IRhiCommandEncoder
     {
@@ -14,6 +14,8 @@ namespace SasamiRenderer
         virtual void BeginDebugLabel(const char*) {}
         virtual void EndDebugLabel() {}
         virtual void TransitionResources(const RhiResourceTransitionDesc*, uint32_t) {}
+        // Orders UAV writes before later UAV reads/writes. count == 0 means all UAV resources.
+        virtual void UavBarrier(const RhiResourceHandle*, uint32_t) {}
         virtual void BeginRenderPass(const RhiRenderPassDesc&) {}
         virtual void EndRenderPass() {}
         virtual void SetGraphicsPipeline(RhiPipelineHandle) {}
@@ -23,6 +25,9 @@ namespace SasamiRenderer
         virtual void SetScissors(const RhiRect*, uint32_t) {}
         virtual void Draw(const RhiDrawDesc&) {}
         virtual void DrawIndexed(const RhiDrawIndexedDesc&) {}
+        // ExecuteIndirect / vkCmdDrawIndexedIndirect(Count). Default no-op: backends without it
+        // draw nothing, so callers that need a fallback must check the backend themselves.
+        virtual void DrawIndexedIndirect(const RhiDrawIndexedIndirectDesc&) {}
         virtual void Dispatch(const RhiDispatchDesc&) {}
         virtual void CopyBuffer(const RhiBufferCopyDesc&) {}
 
@@ -42,6 +47,7 @@ namespace SasamiRenderer
         virtual void SetComputeConstantBufferView(uint32_t slot, RhiGpuAddress) {}
         virtual void SetGraphicsShaderResourceView(uint32_t slot, RhiGpuAddress) {}
         virtual void SetComputeShaderResourceView(uint32_t slot, RhiGpuAddress) {}
+        virtual void SetComputeUnorderedAccessView(uint32_t slot, RhiGpuAddress) {}
 
         // Render targets / clear
         virtual void SetRenderTargets(uint32_t numRtvs,
@@ -77,6 +83,35 @@ namespace SasamiRenderer
         virtual bool ExecuteBackendFrame(const RhiBackendFrameDesc& frameDesc) = 0;
 
         virtual RhiTextureHandle CreateRhiTexture(const RhiTextureDesc& desc) = 0;
+        // Creates a cube texture and uploads all six faces. `faces` holds 6 pointers in the
+        // +X, -X, +Y, -Y, +Z, -Z order that both D3D12 and Vulkan use for cube array layers.
+        // Every face is `faceSize` x `faceSize` with `rowPitchBytes` per row, single mip.
+        // Returns {} when the backend cannot do this.
+        virtual RhiTextureHandle CreateRhiTextureCubeFromFaces(uint32_t faceSize,
+                                                               const void* const faces[6],
+                                                               uint32_t rowPitchBytes,
+                                                               RhiFormat format) { return {}; }
+        // Creates a single-mip 3D texture and uploads `texels` (x fastest, then y, then z).
+        // Only R32Float and R16Float are accepted; `rowPitchBytes` and `slicePitchBytes` describe
+        // the CPU layout. The texture ends up readable from every shader stage.
+        // Returns {} when the backend cannot do this.
+        virtual RhiTextureHandle CreateRhiTexture3DFromData(uint32_t width,
+                                                            uint32_t height,
+                                                            uint32_t depth,
+                                                            const void* texels,
+                                                            uint32_t rowPitchBytes,
+                                                            uint32_t slicePitchBytes,
+                                                            RhiFormat format) { return {}; }
+        // Creates a sampled 2D texture with `mipLevels` mips and uploads them all. mipData[i] and
+        // rowPitchBytes[i] describe mip i; for block-compressed formats a row is one row of 4x4
+        // blocks. Accepts R8G8B8A8UNorm[Srgb] and the BC formats. Returns {} when the backend
+        // cannot do this.
+        virtual RhiTextureHandle CreateRhiTexture2DFromData(uint32_t width,
+                                                            uint32_t height,
+                                                            uint32_t mipLevels,
+                                                            const void* const* mipData,
+                                                            const uint32_t* rowPitchBytes,
+                                                            RhiFormat format) { return {}; }
         virtual RhiBufferHandle CreateRhiBuffer(const RhiBufferDesc& desc, const void* initialData = nullptr) = 0;
         virtual bool UpdateRhiBuffer(RhiBufferHandle buffer,
                                      uint64_t offsetInBytes,
@@ -123,6 +158,10 @@ namespace SasamiRenderer
         virtual std::unique_ptr<IRhiCommandEncoder> CreateCommandEncoder(RhiQueueType queueType) = 0;
         virtual bool SubmitCommandEncoder(IRhiCommandEncoder& encoder, RhiQueueType queueType) = 0;
 
+        // GPU virtual address of a buffer, for inline root descriptors (SetGraphics/Compute*View).
+        // 0 on backends without GPU addresses (DX11 / OpenGL / Vulkan for now).
+        virtual RhiGpuAddress GetRhiBufferGpuAddress(RhiBufferHandle) { return 0; }
+
         // Ray tracing (default no-op; DX11/OpenGL inherit these empty implementations)
         virtual bool BuildRhiBlases(
             const RhiBlasDesc* descs, uint32_t count,
@@ -138,3 +177,7 @@ namespace SasamiRenderer
             const RhiShaderBindingTableDesc&) { return {}; }
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

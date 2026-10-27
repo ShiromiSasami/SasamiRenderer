@@ -13,7 +13,7 @@
 #include <vector>
 #include "Foundation/Math/MathUtil.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     using Math::Mul4x4;
     using Math::Clamp01;
@@ -127,4 +127,4 @@ namespace SasamiRenderer
 		return !outVertices.empty();
 	}
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::App

@@ -3,7 +3,8 @@
 // deferred tasks are still draining, so the window keeps painting instead of showing a
 // frozen/white surface. Mirrors the begin/end skeleton of Renderer::Render's D3D12
 // compatibility-surface path (see RendererFrameGraph.cpp / RendererGraphicsCommands.cpp)
-// with a minimal body: clear + optional overlay (loading UI).
+// with a minimal body: clear + optional overlay (loading UI). Backends that own their own
+// frame take the ExecuteBackendFrame path instead, with the same clear and overlay.
 #define NOMINMAX
 #include "Renderer/Runtime/Renderer.h"
 #include "Renderer/Scene/SceneSynchronizer.h"
@@ -22,14 +23,32 @@
 #include "Foundation/Tools/ScopedPerfTimer.h"
 #include "d3dx12.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     void Renderer::RenderBootFrame(const OverlayRenderCallback& overlay)
     {
         ScopedPerfTimer perfTimer("Renderer::RenderBootFrame");
 
-        if (!m_device || !m_device->GetCapabilities().supportsD3D12CompatibilitySurface) {
-            return; // Non-D3D12 backends: no-op, the app falls back to title-bar progress.
+        if (!m_device) {
+            return;
+        }
+
+        if (!m_device->GetCapabilities().supportsD3D12CompatibilitySurface) {
+            // Backends that own their whole frame get the same treatment as a normal frame, minus
+            // the scene: a clear plus the overlay. The caller has already built the ImGui frame for
+            // the boot window, so the overlay draws exactly what the D3D12 path draws -- previously
+            // this returned immediately and progress only appeared in the title bar.
+            //
+            // Leaving mesh and rayMarch at their defaults is what selects the clear-only path
+            // inside each backend; there is no scene to draw yet by definition.
+            RhiBackendFrameDesc frameDesc{};
+            frameDesc.clearColor = { 0.06f, 0.06f, 0.08f, 1.0f };
+            frameDesc.overlay = m_frameOverlay;
+            frameDesc.present = true;
+            if (!m_device->ExecuteBackendFrame(frameDesc)) {
+                DebugLog("Renderer::RenderBootFrame: native backend frame execution failed.\n");
+            }
+            return;
         }
 
         const UINT backIndex = m_device->GetSwapChain()->GetCurrentBackBufferIndex();
@@ -62,4 +81,4 @@ namespace SasamiRenderer
         SubmitAndPresent(cmdList, backIndex);
     }
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

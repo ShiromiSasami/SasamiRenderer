@@ -65,7 +65,7 @@ cbuffer ReflectionFrameConstants : register(b0)
     uint  g_gbufferHeight;    // native G-Buffer resolution (full render res, >= g_renderHeight)
     uint  g_maxBounces;       // max reflection bounces per sample (1 = single-bounce, up to 8)
     uint  g_debugView;        // RendererEnums::GBufferDebugView
-    uint  g_padDebug0;
+    uint  g_punctualLightFalloff; // RendererEnums::PunctualLightFalloff
     uint  g_padDebug1;
     uint  g_padDebug2;
 };
@@ -161,7 +161,9 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
     // GBuffer.w now stores length(worldPos - cameraPos) written by CookTorranceGGX_PS.hlsl.
     float ndcX =  ((float(gbufPx.x) + 0.5f) / float(g_gbufferWidth))  * 2.0f - 1.0f;
     float ndcY = -((float(gbufPx.y) + 0.5f) / float(g_gbufferHeight)) * 2.0f + 1.0f;
-    float4 viewRayH = mul(float4(ndcX, ndcY, 1.0f, 1.0f), g_invVP);
+    // Reverse-Z: far plane is NDC z = 0. The depth VALUE below stays linear camera distance,
+    // which is convention-independent -- only this ray-direction unprojection is affected.
+    float4 viewRayH = mul(float4(ndcX, ndcY, 0.0f, 1.0f), g_invVP);
     float3 rayDir   = normalize(viewRayH.xyz / viewRayH.w - g_cameraPos);
     float3 hitPos   = g_cameraPos + rayDir * linearDepth;
 
@@ -242,6 +244,12 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
         float3 throughput = float3(1.0f, 1.0f, 1.0f);
         float3 sampleColor = float3(0.0f, 0.0f, 0.0f);
         bool sampleResolvedRadiance = false;
+        // Split-sum prefiltered-radiance weight: the composite pass multiplies this
+        // output by Fresnel itself, so each GGX-sampled (H ~ D*NdotH) first-bounce
+        // sample is weighted by NdotL (Karis 2013, PrefilterEnvMap) and normalised by
+        // the sum of weights. Mirror samples keep weight 1; samples below the horizon
+        // get weight 0 and are excluded from both numerator and denominator.
+        float sampleWeight = 1.0f;
 
         for (uint b = 0; b < maxBounces; ++b)
         {
@@ -277,8 +285,18 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
 
                 float3 H  = TangentToWorld(SampleGGX_H(Xi, pathRough), pathNorm);
                 reflDir   = reflect(pathInDir, H);
-                if (dot(reflDir, pathNorm) <= 0.0f)
+                float NdotL = dot(reflDir, pathNorm);
+                if (b == 0u)
+                    sampleWeight = max(NdotL, 0.0f);
+                if (NdotL <= 0.0f)
+                {
+                    if (b == 0u)
+                    {
+                        sampleColor = (float3)0;
+                        sampleResolvedRadiance = false;
+                    }
                     break; // invalid sample: bail out of bounce loop
+                }
             }
 
             // ---- Trace this bounce ----
@@ -350,14 +368,14 @@ void CS_Reflection(uint3 id : SV_DispatchThreadID)
             pathRough  = mat.roughness;
         }
 
-        reflColorAccum += sampleColor;
-        weightAccum    += 1.0f;
-        resolvedAccum  += sampleResolvedRadiance ? 1.0f : 0.0f;
+        reflColorAccum += sampleColor * sampleWeight;
+        weightAccum    += sampleWeight;
+        resolvedAccum  += sampleResolvedRadiance ? sampleWeight : 0.0f;
     }
 
     float3 reflColor = (weightAccum > 0.0f) ? (reflColorAccum / weightAccum) : (float3)0;
 
-    // Roughness attenuation only 窶・Fresnel is applied per-channel in PBR_PS.hlsl
+    // Roughness attenuation only — Fresnel is applied per-channel in PBR_BRDF.hlsli
     // using the surface's F0 so that colored metals get correct per-channel tint.
     // Storing scalar fresnelWeight here (the old approach) collapsed the float3 Fresnel
     // to a luminance value, which caused green/blue bleed on red/gold metals.

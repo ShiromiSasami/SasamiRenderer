@@ -6,7 +6,7 @@
 
 #include "Loader/ModelLoader.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     // Binary cache of already-parsed, already-converted static meshes.
     //
@@ -19,6 +19,10 @@ namespace SasamiRenderer
     // Pure CPU + file IO, no engine state: safe to call from a JobSystem worker.
     namespace StaticMeshCache
     {
+        // <exe>/AssetCache — shared root of every on-disk asset cache (static meshes here,
+        // cluster DAGs under a `dag/` subdirectory).
+        std::filesystem::path GetCacheDirectory();
+
         // <exe>/AssetCache/<source path with separators flattened>.<scale>.smesh
         std::filesystem::path ResolveCachePath(const std::string& sourcePath, float uniformScale);
 
@@ -39,3 +43,4 @@ namespace SasamiRenderer
                   const std::vector<LoadedStaticMesh>& meshes);
     }
 }
+namespace SasamiEngine { using namespace App; }

@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     using RhiGpuAddress = uint64_t;
 
@@ -21,6 +21,12 @@ namespace SasamiRenderer
         Unknown,
         R8UNorm,
         R8G8B8A8UNorm,
+        // Same 32bpp layout as R8G8B8A8UNorm; the difference is that the sampler decodes to
+        // linear on read and encodes on write. Base-colour textures and the G-Buffer albedo
+        // target use it so 8-bit storage keeps its precision in the darks. A fully typed
+        // D3D12 resource cannot be viewed through a different format, so the resource itself
+        // has to be created with this -- not created as UNorm and viewed as sRGB.
+        R8G8B8A8UNormSrgb,
         B8G8R8A8UNorm,
         R16G16B16A16Float,
         R32G32B32Float,
@@ -34,6 +40,16 @@ namespace SasamiRenderer
         D16UNorm,
         D32Float,
         D24UNormS8UInt,
+        // Block-compressed (4x4 texel blocks; BC1/BC4 8 bytes per block, the rest 16). Only
+        // sampled textures uploaded through CreateRhiTexture2DFromData accept them.
+        BC1UNorm,
+        BC1UNormSrgb,
+        BC3UNorm,
+        BC3UNormSrgb,
+        BC4UNorm,
+        BC5UNorm,
+        BC7UNorm,
+        BC7UNormSrgb,
     };
 
     enum class RhiResourceState : uint32_t
@@ -47,6 +63,10 @@ namespace SasamiRenderer
         CopySource,
         CopyDest,
         Present,
+        // Argument / count buffer read by DrawIndexedIndirect (D3D12 INDIRECT_ARGUMENT,
+        // Vulkan DRAW_INDIRECT stage + INDIRECT_COMMAND_READ access). Appended last so the
+        // numeric values of the older states do not move.
+        IndirectArgument,
     };
 
     enum class RhiResourceDimension : uint32_t
@@ -275,6 +295,9 @@ namespace SasamiRenderer
         RhiGpuDescriptorHandle gpu{};
         uint32_t count = 0;
         uint32_t increment = 0;
+        // Heap to pass to IRhiCommandEncoder::SetDescriptorHeap (DX12: id is the raw
+        // ID3D12DescriptorHeap*). Left invalid on backends without descriptor heaps.
+        RhiHandle heap{};
         bool IsValid() const { return count > 0 && cpu.IsValid(); }
     };
 
@@ -313,7 +336,7 @@ namespace SasamiRenderer
 
     struct RhiClearDepthStencil
     {
-        float depth = 1.0f;
+        float depth = 0.0f; // Reverse-Z: far plane clears to 0.0, near plane is 1.0
         uint32_t stencil = 0;
     };
 
@@ -327,6 +350,12 @@ namespace SasamiRenderer
         RhiTextureUsageFlags usage = RhiTextureUsageFlags::ShaderResource;
         RhiMemoryUsage memoryUsage = RhiMemoryUsage::GpuOnly;
         RhiResourceState initialState = RhiResourceState::Common;
+        // Set when the texture will be viewed as a cube (RhiTextureViewDimension::TextureCube or
+        // TextureCubeArray). Vulkan needs VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT at image-creation
+        // time -- a cube view over an image created without it is invalid -- so the intent cannot
+        // be inferred later from the view desc alone. Requires arrayLayers to be a multiple of 6.
+        // D3D12/D3D11 derive the cube-ness from the view and ignore this.
+        bool cubeCompatible = false;
     };
 
     struct RhiTextureViewDesc
@@ -456,6 +485,12 @@ namespace SasamiRenderer
         RhiCullMode cullMode = RhiCullMode::Back;
         bool frontCounterClockwise = false;
         bool depthClipEnabled = true;
+        // D3D-style rasterizer depth bias (constant in minimum-resolvable-depth units, clamp, slope).
+        // Reverse-Z engines pass negative values to push casters away from the light.
+        // The OpenGL backend ignores the whole raster block for RHI pipelines (known gap).
+        int32_t depthBias = 0;
+        float depthBiasClamp = 0.0f;
+        float slopeScaledDepthBias = 0.0f;
     };
 
     struct RhiDepthStencilStateDesc
@@ -463,7 +498,8 @@ namespace SasamiRenderer
         bool depthTestEnabled = true;
         bool depthWriteEnabled = true;
         bool stencilEnabled = false;
-        RhiCompareOp depthCompare = RhiCompareOp::LessEqual;
+        // Reverse-Z: near=1.0, far=0.0, so a fragment passes when its depth is >= what's stored.
+        RhiCompareOp depthCompare = RhiCompareOp::GreaterEqual;
     };
 
     struct RhiBlendStateDesc
@@ -531,6 +567,15 @@ namespace SasamiRenderer
         bool transparent = false;
         uint64_t albedoSrv = 0;
         uint64_t occlusionSrv = 0;
+        // Whether occlusionSrv's R channel may be read as ambient occlusion. The raster material
+        // layout has a single texture slot, so when a model ships occlusion and metallic-roughness
+        // as separate images the loader keeps metallic-roughness here and drops AO (see
+        // MeshComponent.cpp), leaving this false. Without this flag a consumer cannot tell whether
+        // .r is ambient occlusion or someone else's channel. Derived from the same material field
+        // the D3D12 path gates on, MaterialConstants' extra[2][1] (occlusionStrength); D3D12 uses
+        // it as a continuous scale, while the native paths can only treat it as on/off because
+        // their push constants are already at Vulkan's guaranteed 128-byte minimum.
+        bool occlusionSlotHasAo = false;
         float model[16] = {};
         float baseColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
         float emissive[3] = {};
@@ -550,6 +595,12 @@ namespace SasamiRenderer
         bool transparent = false;
         uint64_t albedoSrv = 0;
         uint64_t occlusionSrv = 0;
+        // Whether occlusionSrv's R channel may be read as ambient occlusion. Unlike the static
+        // path, the skinned loader (ModelLoaderSkinned.cpp) only ever populates occlusionSrv from
+        // glTF's dedicated occlusionTexture slot and never substitutes metallic-roughness into it,
+        // so the slot always holds real AO; this then only reflects the asset-authored
+        // occlusionStrength, matching the static path's test.
+        bool occlusionSlotHasAo = false;
         float model[16] = {};
         float baseColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
         float emissive[3] = {};
@@ -568,9 +619,15 @@ namespace SasamiRenderer
         const RhiBackendSkinnedMeshDrawDesc* skinnedDraws = nullptr;
         uint32_t skinnedDrawCount = 0;
         float viewProjection[16] = {};
+        // Inverse of the above. The sky pass needs it to turn a screen position back into a
+        // world-space ray; inverting on the GPU per pixel would be absurd, and the camera
+        // already has it (RhiBackendRayMarchFrameDesc carries the same thing for the same reason).
+        float invViewProjection[16] = {};
         float cameraPos[3] = {};
         float sunDir[3] = { 0.0f, -1.0f, 0.0f };
         float sunIntensity = 1.0f;
+        // RenderSettings::exposure, applied before the native ACES tonemap (NativeTonemap.hlsli).
+        float exposure = 1.3f;
         float sunColor[3] = { 1.0f, 1.0f, 1.0f };
         float renderWidth = 1.0f;
         float renderHeight = 1.0f;
@@ -578,6 +635,60 @@ namespace SasamiRenderer
         bool enableShadow = false;
         bool enableSsao = false;
         bool enablePostProcess = false;
+
+        // Opaque descriptor handle of the environment cubemap for the native sky/ambient path, or 0
+        // when no HDR environment is loaded. Same convention as the per-draw albedo handle: the value
+        // is produced by CreateRhiShaderResourceView and only the owning backend can interpret it.
+        uint64_t environmentCubeSrv = 0;
+
+        // Low-resolution counterpart of environmentCubeSrv used as diffuse ambient. Sampling the full
+        // resolution cube along the normal would read like a mirror, not an irradiance term.
+        uint64_t ambientCubeSrv = 0;
+
+        // Directional-shadow parameters for the native path. DirectX 11 and Vulkan both consume
+        // them (Vulkan since 2026-09-25); OpenGL still reads none of them, so it renders the
+        // native path unshadowed.
+        //
+        // `lightViewProjection` follows this renderer's row-vector convention and reverse-Z depth
+        // (near = 1.0, far = 0.0), same as `viewProjection` above. Build it with
+        // Math::BuildDirectionalLightViewProjection rather than by hand.
+        float lightViewProjection[16] = {};
+        float shadowDepthBias = 0.0f;
+        // World-space offset along the surface normal, scaled by `shadowTexelWorld` in the shader.
+        float shadowNormalBias = 0.0f;
+        // World size of one shadow-map texel. The normal bias is meaningless without it.
+        float shadowTexelWorld = 0.0f;
+        // 0 means "no shadow map this frame" -- the backend falls back to unshadowed lighting even
+        // when enableShadow is set, so a failed shadow allocation degrades instead of going black.
+        uint32_t shadowMapResolution = 0u;
+
+        // SSAO tuning for the native path. These mirror the RenderSettings fields of the same
+        // names that the DirectX 12 generator is fed through its SSAOCB; before they existed here
+        // all three native backends duplicated the defaults as local constants, so moving the UI
+        // sliders changed nothing outside DirectX 12. The defaults below are those same
+        // RenderSettings defaults, so a description left untouched renders exactly as before.
+        float    runtimeAoRadius = 0.5f;
+        float    runtimeAoBias = 0.025f;
+        float    runtimeAoIntensity = 2.5f;
+        float    runtimeAoThickness = 0.15f;
+        // 0 = 12 samples, 1 = 20, 2 = 32 (ResolveSampleCount in SSAO_PS.hlsl).
+        uint32_t runtimeAoQuality = 1u;
+    };
+
+    // Defined in RhiUIOverlay.h. Backends that render their whole frame internally call this back
+    // between the scene and Present so the UI layer can draw on top; null means "no overlay".
+    class IRhiFrameOverlay;
+
+    // A back-buffer capture asked of a backend that owns its whole frame.
+    //
+    // The capture has to happen after the overlay and before Present: with a discard swap effect
+    // the back buffer is undefined once presented, so there is nothing left to read afterwards.
+    // The backend fills in the result fields before returning from ExecuteBackendFrame.
+    struct RhiBackendCaptureRequest
+    {
+        const wchar_t* path = nullptr;
+        bool completed = false;
+        bool succeeded = false;
     };
 
     struct RhiBackendFrameDesc
@@ -585,6 +696,8 @@ namespace SasamiRenderer
         RhiClearColor clearColor{};
         RhiBackendRayMarchFrameDesc rayMarch{};
         RhiBackendMeshFrameDesc mesh{};
+        IRhiFrameOverlay* overlay = nullptr;
+        RhiBackendCaptureRequest* capture = nullptr;
         bool present = true;
     };
 
@@ -603,6 +716,20 @@ namespace SasamiRenderer
         uint32_t startIndex = 0;
         int32_t baseVertex = 0;
         uint32_t startInstance = 0;
+    };
+
+    // GPU-driven indexed draws. `argsBuffer` holds tightly packed records of five uint32
+    // {indexCountPerInstance, instanceCount, startIndex, baseVertex(int), startInstance}, the
+    // D3D12_DRAW_INDEXED_ARGUMENTS / VkDrawIndexedIndirectCommand layout (stride 20 bytes).
+    // With a valid `countBuffer`, the GPU draws min(maxDrawCount, *count) records; otherwise
+    // exactly maxDrawCount. Both buffers must be in RhiResourceState::IndirectArgument.
+    struct RhiDrawIndexedIndirectDesc
+    {
+        RhiBufferHandle argsBuffer{};
+        uint64_t argsOffsetInBytes = 0;
+        uint32_t maxDrawCount = 1;
+        RhiBufferHandle countBuffer{};
+        uint64_t countOffsetInBytes = 0;
     };
 
     struct RhiDrawDesc
@@ -791,3 +918,7 @@ namespace SasamiRenderer
         bool supportsThreadedPipelineCreation = false;
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

@@ -9,7 +9,7 @@
 
 #include <functional>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     class Skybox;
 
@@ -46,6 +46,11 @@ namespace SasamiRenderer
                      uint32_t renderHeight,
                      const std::function<bool(const LightSystem::ShadowPassContext&)>& softwareShadowCallback,
                      const DrawCallback& drawCallback,
-                     const DrawCallback& drawSkinnedCallback) const;
+                     const DrawCallback& drawSkinnedCallback,
+                     const DrawCallback& drawClusterCallback = {}) const;
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

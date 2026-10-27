@@ -6,7 +6,7 @@
 #include "Renderer/Scene/DeferredUploadSink.h"
 #include "Renderer/Structures/Mesh.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // GPU-side vertex/index buffers for a list of SkinnedMeshes (68-byte stride)
     class SkinnedMeshBuffer
@@ -39,3 +39,7 @@ namespace SasamiRenderer
         std::vector<GPUItem> m_items;
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

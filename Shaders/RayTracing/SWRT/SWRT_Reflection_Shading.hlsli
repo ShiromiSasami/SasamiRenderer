@@ -1,13 +1,17 @@
 #ifndef SASAMI_SWRT_REFLECTION_SHADING_HLSLI
 #define SASAMI_SWRT_REFLECTION_SHADING_HLSLI
 
+#include "Shared/Common/PunctualLightFalloff.hlsli"
+
 // Reflection sampling, direct-light shading, environment fallback, and transparent continuation helpers.
 
 float3 ComputeCameraRayDir(uint2 pixel, uint2 resolution)
 {
     float ndcX =  ((float(pixel.x) + 0.5f) / float(resolution.x)) * 2.0f - 1.0f;
     float ndcY = -((float(pixel.y) + 0.5f) / float(resolution.y)) * 2.0f + 1.0f;
-    float4 dir = mul(float4(ndcX, ndcY, 1.0f, 1.0f), g_invVP);
+    // Reverse-Z: the far plane is NDC z = 0. Using 1 here would unproject the NEAR plane,
+    // leaving an almost-zero vector for normalize() to blow up on.
+    float4 dir = mul(float4(ndcX, ndcY, 0.0f, 1.0f), g_invVP);
     return normalize(dir.xyz / dir.w - g_cameraPos);
 }
 
@@ -53,6 +57,7 @@ float3 ShadeDirectPBR(float3 pos, float3 N, float3 V, GpuMaterial mat)
 
     // ---- 逶ｴ謗･蜈・(NEE / MIS) ----------------------------------------
     // IS Only 繝｢繝ｼ繝峨・縺ｨ縺阪・繧ｹ繧ｭ繝・・縲・EE Only / MIS 縺ｧ縺ｯ蜈ｨ繝ｩ繧､繝医∈ shadow ray縲・
+    // TODO: SWRT_SAMPLE_MIS currently behaves exactly like SWRT_SAMPLE_NEE (no MIS weights, no BSDF-sampled light hits).
     if (g_samplingMode != SWRT_SAMPLE_IS)
     {
         // Directional light
@@ -100,9 +105,7 @@ float3 ShadeDirectPBR(float3 pos, float3 N, float3 V, GpuMaterial mat)
             bool inShadow = TraceAnyHit(OffsetRay(pos, N), L, g_tMin, dist - 0.001f);
             if (inShadow) continue;
 
-            float t = dist / max(pl.range, 1e-4f);
-            float atten = saturate(1.0f - t * t);
-            atten *= atten;
+            float atten = PunctualLightFalloff(dist, pl.range, g_punctualLightFalloff);
 
             float3 H = normalize(L + V);
             float NdotV = max(dot(N, V), 0.001f);
@@ -137,9 +140,7 @@ float3 ShadeDirectPBR(float3 pos, float3 N, float3 V, GpuMaterial mat)
             if (inShadow) continue;
 
             float spotAtten = smoothstep(sl.cosOuter, sl.cosInner, cosA);
-            float t = dist / max(sl.range, 1e-4f);
-            float atten = saturate(1.0f - t * t);
-            atten = atten * atten * spotAtten;
+            float atten = PunctualLightFalloff(dist, sl.range, g_punctualLightFalloff) * spotAtten;
 
             float3 H = normalize(L + V);
             float NdotV = max(dot(N, V), 0.001f);

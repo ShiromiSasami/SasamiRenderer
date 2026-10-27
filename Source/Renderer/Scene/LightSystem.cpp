@@ -48,10 +48,10 @@ namespace
         float params[4];         // x: コーン外角のコサイン値, yzw: 未使用
     };
 
-    using SasamiRenderer::Math::Clamp01;
+    using SasamiEngine::Foundation::Math::Clamp01;
 }
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // =========================================================================
     // Initialize
@@ -109,7 +109,7 @@ namespace SasamiRenderer
         }
         if (!frame.lightCBPtr &&
             !ResourceUploadUtility::CreateUploadBuffer(*m_device, lightCbSize, frame.lightCB, &frame.lightCBPtr)) {
-            DebugLogDialog("LightSystem::InitializeFrameResources: Light CB creation failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("LightSystem::InitializeFrameResources: Light CB creation failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
 
@@ -119,7 +119,7 @@ namespace SasamiRenderer
         CpuDescriptorHandle lightSrvCpu{};
         GpuDescriptorHandle lightSrvGpu{};
         if (!allocateSrvRange(2, lightSrvCpu, lightSrvGpu)) {
-            DebugLogDialog("LightSystem::InitializeFrameResources: SRV allocation failed for light buffers.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            DebugLogDialog("LightSystem::InitializeFrameResources: SRV allocation failed for light buffers.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
             return false;
         }
 
@@ -350,7 +350,7 @@ namespace SasamiRenderer
     // ライトの yaw/pitch/distance などからシャドウカメラの VP 行列を計算する。
     // ExecuteShadowPass() の内部でも呼ばれるが、外部から VP 行列だけ取得したい場合にも使える。
     // =========================================================================
-    // Shadow pass execution → LightSystem_Shadow.cpp
+    // Shadow pass execution → LightSystemShadow.cpp
 
     LightSystem::DirectionalLightSettings LightSystem::GetDirectionalLightSettings() const
     {
@@ -374,6 +374,7 @@ namespace SasamiRenderer
         settings.slopeScaleBias = m_shadowSlopeScaleBias;
         settings.normalBias = m_shadowNormalBias;
         settings.farBiasScale = m_shadowFarBiasScale;
+        settings.contactShadowEnabled = m_contactShadowEnabled;
         return settings;
     }
 
@@ -398,5 +399,6 @@ namespace SasamiRenderer
         m_shadowSlopeScaleBias = settings.slopeScaleBias;
         m_shadowNormalBias = (std::max)(0.0f, settings.normalBias);
         m_shadowFarBiasScale = (std::max)(1.0f, settings.farBiasScale);
+        m_contactShadowEnabled = settings.contactShadowEnabled;
     }
 }

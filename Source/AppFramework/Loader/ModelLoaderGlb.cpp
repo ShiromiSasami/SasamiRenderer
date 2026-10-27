@@ -1,7 +1,7 @@
 #include "ModelLoaderGlb.h"
 #include <cstring>
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     namespace {
         constexpr uint32_t kGlbMagic     = 0x46546C67u; // "glTF"

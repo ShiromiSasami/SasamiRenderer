@@ -15,7 +15,7 @@
 #include <filesystem>
 #include <system_error>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {

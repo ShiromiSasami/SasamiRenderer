@@ -52,6 +52,7 @@
     <ClInclude Include="Source\AppFramework\ApplicationResourcePaths.h" />
     <ClInclude Include="Source\AppFramework\IApplication.h" />
     <ClInclude Include="Source\AppFramework\Light\DirectionalLight.h" />
+    <ClInclude Include="Source\AppFramework\Light\DefaultSunLight.h" />
     <ClInclude Include="Source\AppFramework\Component\MeshComponent.h" />
     <ClInclude Include="Source\AppFramework\Component\SkinnedMeshComponent.h" />
     <ClInclude Include="Source\AppFramework\Component\CpuTextureLoader.h" />
@@ -61,24 +62,48 @@
     <ClInclude Include="Source\AppFramework\Object\SpotLight.h" />
     <ClInclude Include="Source\AppFramework\ECS\EcsRegistry.h" />
     <ClInclude Include="Source\AppFramework\Loader\AssetLoader.h" />
+    <ClInclude Include="Source\AppFramework\Placement\InstanceScatter.h" />
+    <ClInclude Include="Source\AppFramework\Placement\PlacementRandom.h" />
+    <ClInclude Include="Source\AppFramework\Placement\PlacementTransform.h" />
+    <ClInclude Include="Source\AppFramework\Placement\SplinePlacement.h" />
     <ClInclude Include="Source\AppFramework\Loader\ModelLoader.h" />
     <ClInclude Include="Source\AppFramework\Loader\ModelLoaderGlb.h" />
+    <ClInclude Include="Source\AppFramework\Loader\ModelLoaderEmbeddedImages.h" />
     <ClInclude Include="Source\AppFramework\Loader\ModelLoaderGltfUtility.h" />
     <ClInclude Include="Source\AppFramework\Object\SObject.h" />
     <ClInclude Include="Source\AppFramework\Object\SkinnedModel.h" />
     <ClInclude Include="Source\AppFramework\Object\StaticModel.h" />
+    <ClInclude Include="Source\AppFramework\Object\SampleFloorBox.h" />
     <ClInclude Include="Source\AppFramework\Component\IComponent.h" />
     <ClInclude Include="Source\AppFramework\Component\TransformComponent.h" />
-    <ClInclude Include="Source\AppFramework\UI\UiButton.h" />
-    <ClInclude Include="Source\AppFramework\UI\UiLayout.h" />
-    <ClInclude Include="Source\AppFramework\UI\UiTab.h" />
-    <ClInclude Include="Source\AppFramework\UI\UiTabBar.h" />
-    <ClInclude Include="Source\AppFramework\UI\UiTabbedPanel.h" />
-    <ClInclude Include="Source\AppFramework\UI\UiText.h" />
-    <ClInclude Include="Source\AppFramework\UI\UiVolume.h" />
-    <ClInclude Include="Source\AppFramework\UI\UiWindow.h" />
+    <ClInclude Include="Source\AppFramework\UI\UIButton.h" />
+    <ClInclude Include="Source\AppFramework\UI\UILayout.h" />
+    <ClInclude Include="Source\AppFramework\UI\UITab.h" />
+    <ClInclude Include="Source\AppFramework\UI\UITabBar.h" />
+    <ClInclude Include="Source\AppFramework\UI\UITabbedPanel.h" />
+    <ClInclude Include="Source\AppFramework\UI\UIPanelRegistry.h" />
+    <ClInclude Include="Source\AppFramework\UI\UIText.h" />
+    <ClInclude Include="Source\AppFramework\UI\UICommitPolicy.h" />
+    <ClInclude Include="Source\AppFramework\UI\UIVolume.h" />
+    <ClInclude Include="Source\AppFramework\UI\UIGate.h" />
+    <ClInclude Include="Source\AppFramework\UI\UIEditBuffer.h" />
+    <ClInclude Include="Source\AppFramework\UI\UIIntVolume.h" />
+    <ClInclude Include="Source\AppFramework\UI\UIColor.h" />
+    <ClInclude Include="Source\AppFramework\UI\UIVector3.h" />
+    <ClInclude Include="Source\AppFramework\UI\UIAngle.h" />
+    <ClInclude Include="Source\AppFramework\UI\UIWindow.h" />
     <ClInclude Include="Source\AppFramework\UI\ImGuiCoordinator.h" />
+    <ClInclude Include="Source\AppFramework\UI\Backend\IUIRenderBackend.h" />
+    <ClInclude Include="Source\AppFramework\UI\Backend\UIFrameOverlay.h" />
+    <ClInclude Include="Source\AppFramework\UI\Backend\UIRenderBackendDx12.h" />
+    <ClInclude Include="Source\AppFramework\UI\Backend\UIRenderBackendDx11.h" />
+    <ClInclude Include="Source\AppFramework\UI\Backend\UIRenderBackendOpenGL.h" />
+    <ClInclude Include="Source\AppFramework\UI\Backend\UIRenderBackendVulkan.h" />
     <ClInclude Include="Source\AppFramework\Input\InputSystem.h" />
+    <ClInclude Include="Source\AppFramework\Input\CameraInputBinding.h" />
+    <ClInclude Include="Source\AppFramework\Config\IniStreamParser.h" />
+    <ClInclude Include="Source\AppFramework\Config\IniDocument.h" />
+    <ClInclude Include="Source\AppFramework\Config\IniWriter.h" />
     <ClInclude Include="Source\Foundation\Math\Color.h" />
     <ClInclude Include="Source\Foundation\Math\Rotation3.h" />
     <ClInclude Include="Source\Foundation\Math\Vector3.h" />
@@ -101,9 +126,56 @@
     <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugCommandQueue.h" />
     <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugCommandRegistry.h" />
     <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugRemoteControlServer.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugAppCommands.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugCommandArgs.h" />
     <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugCaptureCommands.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugLightCommands.h" />
     <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugRenderCommands.h" />
     <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugSceneCommands.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugVoxelCommands.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugCrowdCommands.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugParticleCharacterCommands.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugAnimCommands.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugToonCommands.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugFluidCommands.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugSmokeMeshCommands.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugCullingCommands.h" />
+    <ClInclude Include="Source\AppFramework\Gameplay\CharacterMovement.h" />
+    <ClInclude Include="Source\AppFramework\Gameplay\FollowCamera.h" />
+    <ClInclude Include="Source\AppFramework\Gameplay\CameraShake.h" />
+    <ClInclude Include="Source\AppFramework\Gameplay\GameplaySelfTest.h" />
+    <ClInclude Include="Source\AppFramework\Debug\VoxelOccupancyViewer.h" />
+    <ClInclude Include="Source\AppFramework\Debug\FrameRecorder.h" />
+    <ClInclude Include="Source\AppFramework\Debug\VoxelStreamOverlay.h" />
+    <ClInclude Include="Source\AppFramework\Debug\ParticleCharacterModel.h" />
+    <ClInclude Include="Source\AppFramework\Debug\ParticleCharacterOverlay.h" />
+    <ClInclude Include="Source\AppFramework\Debug\SmokeSurfaceOverlay.h" />
+    <ClInclude Include="Source\AppFramework\Editor\EditorSelection.h" />
+    <ClInclude Include="Source\AppFramework\Editor\EditorTransformMath.h" />
+    <ClInclude Include="Source\AppFramework\Editor\SceneHierarchyPanel.h" />
+    <ClInclude Include="Source\AppFramework\Editor\ObjectInspectorPanel.h" />
+    <ClInclude Include="Source\AppFramework\Editor\EditorWindows.h" />
+    <ClInclude Include="Source\AppFramework\Editor\EditorMainMenu.h" />
+    <ClInclude Include="Source\AppFramework\Editor\EditorViewMode.h" />
+    <ClInclude Include="Source\AppFramework\Editor\ContentAssetCatalog.h" />
+    <ClInclude Include="Source\AppFramework\Editor\EditorModelSpawner.h" />
+    <ClInclude Include="Source\AppFramework\Editor\ContentBrowserPanel.h" />
+    <ClInclude Include="Source\AppFramework\Editor\EditorPlaySession.h" />
+    <ClInclude Include="Source\AppFramework\Editor\EditorDockLayout.h" />
+    <ClInclude Include="Source\AppFramework\Editor\EditorPlayToolbar.h" />
+    <ClInclude Include="Source\AppFramework\Editor\EditorGizmo.h" />
+    <ClInclude Include="Libraries\ImGuizmo\ImGuizmo.h" />
+    <ClInclude Include="Source\AppFramework\Editor\EditorSceneSnapshot.h" />
+    <ClInclude Include="Source\AppFramework\Editor\EditorPicking.h" />
+    <ClInclude Include="Source\AppFramework\Editor\EditorSelectionOverlay.h" />
+    <ClInclude Include="Source\AppFramework\Debug\RemoteControl\DebugEditorCommands.h" />
+    <ClInclude Include="Source\AppFramework\Debug\WindFlowOverlay.h" />
+    <ClInclude Include="Source\AppFramework\Debug\WindOverlayProjection.h" />
+    <ClInclude Include="Source\AppFramework\Debug\IsoSurfaceOverlayDraw.h" />
+    <ClInclude Include="Source\AppFramework\Debug\IsoSurfaceSceneMeshes.h" />
+    <ClInclude Include="Source\AppFramework\Debug\WindEffectsOverlay.h" />
+    <ClInclude Include="Source\AppFramework\Debug\WindParticleGpuCheck.h" />
+    <ClInclude Include="Source\AppFramework\Debug\MolecularBodyGpuCheck.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\AppFramework\ApplicationCore.cpp" />
@@ -124,24 +196,45 @@
     <ClCompile Include="Source\AppFramework\UI\BootProgressWindow.cpp" />
     <ClCompile Include="Source\AppFramework\Object\Camera.cpp" />
     <ClCompile Include="Source\AppFramework\Loader\AssetLoader.cpp" />
+    <ClCompile Include="Source\AppFramework\Placement\InstanceScatter.cpp" />
+    <ClCompile Include="Source\AppFramework\Placement\SplinePlacement.cpp" />
     <ClCompile Include="Source\AppFramework\Loader\ModelLoader.cpp" />
     <ClCompile Include="Source\AppFramework\Loader\ModelLoaderGlb.cpp" />
+    <ClCompile Include="Source\AppFramework\Loader\ModelLoaderEmbeddedImages.cpp" />
     <ClCompile Include="Source\AppFramework\Loader\ModelLoaderGltfUtility.cpp" />
     <ClCompile Include="Source\AppFramework\Loader\ModelLoaderSkinned.cpp" />
     <ClCompile Include="Source\AppFramework\Loader\ModelLoaderOBJ.cpp" />
     <ClCompile Include="Source\AppFramework\Object\SObject.cpp" />
     <ClCompile Include="Source\AppFramework\Object\SkinnedModel.cpp" />
     <ClCompile Include="Source\AppFramework\Object\StaticModel.cpp" />
-    <ClCompile Include="Source\AppFramework\UI\UiButton.cpp" />
-    <ClCompile Include="Source\AppFramework\UI\UiLayout.cpp" />
-    <ClCompile Include="Source\AppFramework\UI\UiTab.cpp" />
-    <ClCompile Include="Source\AppFramework\UI\UiTabBar.cpp" />
-    <ClCompile Include="Source\AppFramework\UI\UiTabbedPanel.cpp" />
-    <ClCompile Include="Source\AppFramework\UI\UiText.cpp" />
-    <ClCompile Include="Source\AppFramework\UI\UiVolume.cpp" />
-    <ClCompile Include="Source\AppFramework\UI\UiWindow.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UIButton.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UILayout.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UITab.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UITabBar.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UITabbedPanel.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UIPanelRegistry.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UIText.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UICommitPolicy.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UIVolume.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UIGate.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UIEditBuffer.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UIIntVolume.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UIColor.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UIVector3.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UIAngle.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\UIWindow.cpp" />
     <ClCompile Include="Source\AppFramework\UI\ImGuiCoordinator.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\Backend\UIFrameOverlay.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\Backend\UIRenderBackendFactory.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\Backend\UIRenderBackendDx12.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\Backend\UIRenderBackendDx11.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\Backend\UIRenderBackendOpenGL.cpp" />
+    <ClCompile Include="Source\AppFramework\UI\Backend\UIRenderBackendVulkan.cpp" />
     <ClCompile Include="Source\AppFramework\Input\InputSystem.cpp" />
+    <ClCompile Include="Source\AppFramework\Input\CameraInputBinding.cpp" />
+    <ClCompile Include="Source\AppFramework\Config\IniStreamParser.cpp" />
+    <ClCompile Include="Source\AppFramework\Config\IniDocument.cpp" />
+    <ClCompile Include="Source\AppFramework\Config\IniWriter.cpp" />
     <!-- ImGui core and backends -->
     <ClCompile Include="Libraries\imgui-master\imgui.cpp" />
     <ClCompile Include="Libraries\ufbx\ufbx.c">
@@ -157,17 +250,81 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="Libraries\imgui-master\imgui_draw.cpp" />
+    <ClCompile Include="Libraries\ImGuizmo\ImGuizmo.cpp" />
     <ClCompile Include="Libraries\imgui-master\imgui_tables.cpp" />
     <ClCompile Include="Libraries\imgui-master\imgui_widgets.cpp" />
     <ClCompile Include="Libraries\imgui-master\backends\imgui_impl_win32.cpp" />
     <ClCompile Include="Libraries\imgui-master\backends\imgui_impl_dx12.cpp" />
+    <!-- One ImGui renderer backend per configuration: RhiBuild.props makes the graphics backends
+         mutually exclusive, and each of these needs a library (d3d11.lib / opengl32.lib) that only
+         its own configuration links. The vendored sources have no RHI_* guards of their own, so the
+         switch has to happen here rather than inside the file. -->
+    <ClCompile Include="Libraries\imgui-master\backends\imgui_impl_dx11.cpp">
+      <ExcludedFromBuild Condition="'$(EnableDirectX11Backend)'!='true'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="Libraries\imgui-master\backends\imgui_impl_vulkan.cpp">
+      <ExcludedFromBuild Condition="'$(EnableVulkanBackend)'!='true'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="Libraries\imgui-master\backends\imgui_impl_opengl3.cpp">
+      <ExcludedFromBuild Condition="'$(EnableOpenGLBackend)'!='true'">true</ExcludedFromBuild>
+      <!-- This vendored backend parses the GL version string with sscanf/strcpy, which /sdl
+           elevates from C4996 to an error. Relaxed here rather than by editing the upstream file,
+           the same way ufbx.c is handled above. -->
+      <SDLCheck>false</SDLCheck>
+      <DisableSpecificWarnings>4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
     <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugNamedPipeTransport.cpp" />
     <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugCommandQueue.cpp" />
     <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugCommandRegistry.cpp" />
     <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugRemoteControlServer.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugAppCommands.cpp" />
     <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugCaptureCommands.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugLightCommands.cpp" />
     <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugRenderCommands.cpp" />
     <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugSceneCommands.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugVoxelCommands.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugCrowdCommands.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugParticleCharacterCommands.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugAnimCommands.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugToonCommands.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugFluidCommands.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugSmokeMeshCommands.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugCullingCommands.cpp" />
+    <ClCompile Include="Source\AppFramework\Gameplay\CharacterMovement.cpp" />
+    <ClCompile Include="Source\AppFramework\Gameplay\FollowCamera.cpp" />
+    <ClCompile Include="Source\AppFramework\Gameplay\CameraShake.cpp" />
+    <ClCompile Include="Source\AppFramework\Gameplay\GameplaySelfTest.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\VoxelOccupancyViewer.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\FrameRecorder.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\VoxelStreamOverlay.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\ParticleCharacterModel.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\ParticleCharacterOverlay.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\SmokeSurfaceOverlay.cpp" />
+    <ClCompile Include="Source\AppFramework\Editor\EditorSelection.cpp" />
+    <ClCompile Include="Source\AppFramework\Editor\EditorTransformMath.cpp" />
+    <ClCompile Include="Source\AppFramework\Editor\SceneHierarchyPanel.cpp" />
+    <ClCompile Include="Source\AppFramework\Editor\ObjectInspectorPanel.cpp" />
+    <ClCompile Include="Source\AppFramework\Editor\EditorWindows.cpp" />
+    <ClCompile Include="Source\AppFramework\Editor\EditorMainMenu.cpp" />
+    <ClCompile Include="Source\AppFramework\Editor\EditorViewMode.cpp" />
+    <ClCompile Include="Source\AppFramework\Editor\ContentAssetCatalog.cpp" />
+    <ClCompile Include="Source\AppFramework\Editor\EditorModelSpawner.cpp" />
+    <ClCompile Include="Source\AppFramework\Editor\ContentBrowserPanel.cpp" />
+    <ClCompile Include="Source\AppFramework\Editor\EditorPlaySession.cpp" />
+    <ClCompile Include="Source\AppFramework\Editor\EditorDockLayout.cpp" />
+    <ClCompile Include="Source\AppFramework\Editor\EditorPlayToolbar.cpp" />
+    <ClCompile Include="Source\AppFramework\Editor\EditorGizmo.cpp" />
+    <ClCompile Include="Source\AppFramework\Editor\EditorSceneSnapshot.cpp" />
+    <ClCompile Include="Source\AppFramework\Editor\EditorPicking.cpp" />
+    <ClCompile Include="Source\AppFramework\Editor\EditorSelectionOverlay.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\RemoteControl\DebugEditorCommands.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\WindFlowOverlay.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\WindOverlayProjection.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\IsoSurfaceOverlayDraw.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\IsoSurfaceSceneMeshes.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\WindEffectsOverlay.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\WindParticleGpuCheck.cpp" />
+    <ClCompile Include="Source\AppFramework\Debug\MolecularBodyGpuCheck.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>15.0</VCProjectVersion>
@@ -247,6 +404,7 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <Import Project="RhiBuild.props" />
+  <Import Project="SasamiPaths.props" />
   <ImportGroup Label="ExtensionSettings">
   </ImportGroup>
   <ImportGroup Label="Shared">
@@ -331,7 +489,7 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp23</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;C:\local\boost_1_89_0;$(RhiVulkanIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;$(BoostIncludeDir);$(RhiVulkanIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/FS /utf-8 %(AdditionalOptions)</AdditionalOptions>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
@@ -379,7 +537,7 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp23</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;C:\local\boost_1_89_0;$(RhiVulkanIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;$(BoostIncludeDir);$(RhiVulkanIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/FS /utf-8 %(AdditionalOptions)</AdditionalOptions>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>

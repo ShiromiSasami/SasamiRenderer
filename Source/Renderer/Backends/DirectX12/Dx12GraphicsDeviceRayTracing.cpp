@@ -21,7 +21,7 @@
 #include "Renderer/Utilities/ResourceUploadUtility.h"
 #include "d3dx12.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     using Microsoft::WRL::ComPtr;
 
@@ -574,6 +574,6 @@ namespace SasamiRenderer
         return true;
     }
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render
 
 #endif // RHI_DIRECTX12

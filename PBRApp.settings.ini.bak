@@ -1,0 +1,17 @@
+# SasamiRenderer PBRApp settings. Only values that differ from the built-in
+# defaults are stored; delete a line to go back to the default, delete the file
+# to reset everything.
+[meta]
+version = 2
+[render_settings]
+rasterSoftwareRayTracedReflectionEnabled = 1
+rasterSoftwareRayTracedAmbientOcclusionEnabled = 1
+runtimeAoMethod = 1
+runtimeAoRadius = 2.046
+exposure = 0.35
+[gi]
+intensity = 0.812
+baked = 1
+[app]
+probe_preset = 2
+probe_radius = 0.171

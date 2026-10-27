@@ -2,7 +2,7 @@
 #include "Renderer/RenderGraph/RenderGraph.h"
 #include "Foundation/Tools/DebugOutput.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     void SSAORenderPass::BuildRequirements(RenderPassRequirementBuilder& builder) const
     {

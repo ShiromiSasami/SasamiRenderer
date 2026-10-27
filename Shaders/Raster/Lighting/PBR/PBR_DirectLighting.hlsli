@@ -14,6 +14,7 @@
 #include "Raster/Lighting/PBR/PBR_LightTypes.hlsli"
 #include "Raster/Lighting/PBR/PBR_BRDF.hlsli"
 #include "Raster/Lighting/PBR/PBR_Shadow.hlsli"
+#include "Shared/Common/PunctualLightFalloff.hlsli"
 
 // Cook-Torrance surface parameters needed to evaluate the punctual-light BRDF.
 // Filled out identically by the deferred and forward lighting passes.
@@ -26,9 +27,9 @@ struct PbrSurface
     float3 F0;
     float  roughness;
     float  a;   // roughness^2 (GGX alpha)
-    float  k;   // Schlick-GGX remapped roughness term: (roughness + 1)^2 / 8
     float  NdotV;
     float  ao;
+    float3 specularEnergyCompensation; // SpecularEnergyCompensation(F0, NdotV, roughness)
 };
 
 // Accumulates all point-light contributions. Identical math in the deferred and
@@ -43,16 +44,15 @@ float3 AccumulatePointLights(PbrSurface s, float aoDirectStrength)
         float dist = length(toL);
         if (dist < pl.posRange.w && dist > 1e-4 && pl.colorIntensity.w > 0.0) {
             float3 Lp = toL / dist;
-            float atten = saturate(1.0 - dist / max(pl.posRange.w, 1e-3));
-            atten *= atten;
+            float atten = PunctualLightFalloff(dist, pl.posRange.w, (uint)u_debugParams.z);
             float3 Hp = normalize(s.V + Lp);
             float NdotLp = saturate(dot(s.N, Lp));
             float NdotHp = saturate(dot(s.N, Hp));
             float VdotHp = saturate(dot(s.V, Hp));
             float Dp = DistributionGGX(NdotHp, s.a);
-            float Gp = GeometrySmith(s.NdotV, NdotLp, s.k);
+            float Vp = V_SmithGGXCorrelated(s.NdotV, NdotLp, s.roughness);
             float3 Fp = FresnelSchlick(VdotHp, s.F0);
-            float3 specP = (Dp * Gp) * Fp / max(4.0 * s.NdotV * NdotLp, 1e-4);
+            float3 specP = (Dp * Vp) * Fp * s.specularEnergyCompensation;
             float3 diffP = (1.0 - Fp) * s.diffuseReflectance / 3.14159265;
             // Per-light occlusion: screen-space contact shadow toward the light
             // (UE contact shadows / Filament punctual lights) + micro-shadowing.
@@ -85,16 +85,15 @@ float3 AccumulateSpotLights(PbrSurface s, float aoDirectStrength)
             float3 Ls = toL / dist;
             float cosTheta = dot(normalize(-Ls), normalize(sl.dirCosInner.xyz));
             float spot = smoothstep(sl.params.x, sl.dirCosInner.w, cosTheta);
-            float atten = saturate(1.0 - dist / max(sl.posRange.w, 1e-3));
-            atten *= atten;
+            float atten = PunctualLightFalloff(dist, sl.posRange.w, (uint)u_debugParams.z);
             float3 Hs = normalize(s.V + Ls);
             float NdotLs = saturate(dot(s.N, Ls));
             float NdotHs = saturate(dot(s.N, Hs));
             float VdotHs = saturate(dot(s.V, Hs));
             float Ds = DistributionGGX(NdotHs, s.a);
-            float Gs = GeometrySmith(s.NdotV, NdotLs, s.k);
+            float Vs = V_SmithGGXCorrelated(s.NdotV, NdotLs, s.roughness);
             float3 Fs = FresnelSchlick(VdotHs, s.F0);
-            float3 specS = (Ds * Gs) * Fs / max(4.0 * s.NdotV * NdotLs, 1e-4);
+            float3 specS = (Ds * Vs) * Fs * s.specularEnergyCompensation;
             float3 diffS = (1.0 - Fs) * s.diffuseReflectance / 3.14159265;
 
             // Spot shadow: 3x3 PCF, per-light shadow slice from params.y

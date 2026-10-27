@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // Renders the water surface as an indexed grid mesh whose vertices are
     // displaced in the vertex shader by sampling FluidHeightfieldSim's current
@@ -26,6 +26,12 @@ namespace SasamiRenderer
 
         // Must be called before Execute; pointer must remain valid for the lifetime of this node.
         void SetFluidSim(const FluidHeightfieldSim* sim) { m_fluidSim = sim; }
+
+        // How far the surface normal bends the backdrop sample, in UV units at unit slope.
+        // Water's IOR is 1.33, but a screen-space offset is not a real refraction integral --
+        // this is the artistic knob that stands in for the depth the real bend would depend on.
+        void SetRefractionStrength(float strength) { m_refractionStrength = strength; }
+        float GetRefractionStrength() const { return m_refractionStrength; }
 
         bool IsInitialized() const { return m_initialized; }
         bool IsEnabled()     const { return m_enabled; }
@@ -48,7 +54,12 @@ namespace SasamiRenderer
         uint32_t         m_gridIndexCount = 0u;
 
         const FluidHeightfieldSim* m_fluidSim = nullptr;
+        float m_refractionStrength = 0.06f;
         bool m_initialized = false;
         bool m_enabled     = false; // Off by default
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

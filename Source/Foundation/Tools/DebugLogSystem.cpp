@@ -11,7 +11,7 @@
 #include <string>
 #include <windows.h>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Foundation
 {
     namespace
     {

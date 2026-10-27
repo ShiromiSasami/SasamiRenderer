@@ -9,7 +9,7 @@
 #define BCDEC_IMPLEMENTATION
 #include "bcdec/bcdec.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     namespace
     {
@@ -87,7 +87,9 @@ namespace SasamiRenderer
         enum DxgiFormat : uint32_t
         {
             DXGI_FORMAT_R8G8B8A8_UNORM = 28,
+            DXGI_FORMAT_R8G8B8A8_UNORM_SRGB = 29,
             DXGI_FORMAT_B8G8R8A8_UNORM = 87,
+            DXGI_FORMAT_B8G8R8A8_UNORM_SRGB = 91,
             DXGI_FORMAT_BC1_UNORM = 71,
             DXGI_FORMAT_BC1_UNORM_SRGB = 72,
             DXGI_FORMAT_BC2_UNORM = 74,
@@ -102,18 +104,7 @@ namespace SasamiRenderer
             DXGI_FORMAT_BC7_UNORM_SRGB = 99,
         };
 
-        enum class BlockFormat
-        {
-            None,
-            BC1,
-            BC2,
-            BC3,
-            BC4,
-            BC5,
-            BC7,
-            Rgba8,
-            Bgra8,
-        };
+        using BlockFormat = DdsTextureLoader::DdsFormat;
 
         std::wstring FormatFourCcForLog(uint32_t fourCC)
         {
@@ -145,6 +136,20 @@ namespace SasamiRenderer
                 case BlockFormat::BC7:
                     bcdec_bc7(block, rgba, 16);
                     break;
+                case BlockFormat::BC6HUnsigned:
+                case BlockFormat::BC6HSigned: {
+                    // HDR is clamped to [0,1] because this loader only produces RGBA8.
+                    float rgb[48]; // 4x4, 3 floats/pixel, pitch 12 floats
+                    bcdec_bc6h_float(block, rgb, 12, format == BlockFormat::BC6HSigned ? 1 : 0);
+                    for (int i = 0; i < 16; ++i) {
+                        for (int c = 0; c < 3; ++c) {
+                            const float v = (std::clamp)(rgb[i * 3 + c], 0.0f, 1.0f);
+                            rgba[i * 4 + c] = static_cast<uint8_t>(v * 255.0f + 0.5f);
+                        }
+                        rgba[i * 4 + 3] = 255;
+                    }
+                    break;
+                }
                 case BlockFormat::BC4: {
                     uint8_t r[16]; // 4x4, 1 byte/pixel, pitch 4
                     bcdec_bc4(block, r, 4);
@@ -190,6 +195,8 @@ namespace SasamiRenderer
                 case BlockFormat::BC3: return BCDEC_BC3_BLOCK_SIZE;
                 case BlockFormat::BC4: return BCDEC_BC4_BLOCK_SIZE;
                 case BlockFormat::BC5: return BCDEC_BC5_BLOCK_SIZE;
+                case BlockFormat::BC6HUnsigned:
+                case BlockFormat::BC6HSigned: return BCDEC_BC6H_BLOCK_SIZE;
                 case BlockFormat::BC7: return BCDEC_BC7_BLOCK_SIZE;
                 default: return 0;
             }
@@ -204,7 +211,7 @@ namespace SasamiRenderer
         // the mip chain without decoding.
         size_t ComputeLevelByteSize(BlockFormat format, uint32_t width, uint32_t height, uint32_t rgbBitCount);
 
-        bool IsBlockCompressed(BlockFormat format)
+        bool IsBlockCompressedFormat(BlockFormat format)
         {
             switch (format) {
                 case BlockFormat::BC1:
@@ -212,6 +219,8 @@ namespace SasamiRenderer
                 case BlockFormat::BC3:
                 case BlockFormat::BC4:
                 case BlockFormat::BC5:
+                case BlockFormat::BC6HUnsigned:
+                case BlockFormat::BC6HSigned:
                 case BlockFormat::BC7:
                     return true;
                 default:
@@ -221,7 +230,7 @@ namespace SasamiRenderer
 
         size_t ComputeLevelByteSize(BlockFormat format, uint32_t width, uint32_t height, uint32_t rgbBitCount)
         {
-            if (IsBlockCompressed(format)) {
+            if (IsBlockCompressedFormat(format)) {
                 const size_t blocksX = (static_cast<size_t>(width) + 3u) / 4u;
                 const size_t blocksY = (static_cast<size_t>(height) + 3u) / 4u;
                 return blocksX * blocksY * static_cast<size_t>(BlockByteSize(format));
@@ -314,44 +323,23 @@ namespace SasamiRenderer
 
     namespace DdsTextureLoader
     {
-        bool LoadRgba8FromDds(const std::wstring& path,
-                              std::vector<uint8_t>& outPixels,
-                              UINT& outWidth,
-                              UINT& outHeight)
+        bool IsBlockCompressed(DdsFormat format)
         {
-            outPixels.clear();
-            outWidth = 0;
-            outHeight = 0;
+            return IsBlockCompressedFormat(format);
+        }
 
-            std::ifstream file(path, std::ios::binary | std::ios::ate);
-            if (!file.is_open()) {
-                DebugLog((L"[DdsTextureLoader] Failed to open \"" + path + L"\"").c_str());
-                return false;
-            }
-
-            const std::streamoff fileSizeOff = file.tellg();
-            if (fileSizeOff < 0) {
-                DebugLog((L"[DdsTextureLoader] Failed to determine size of \"" + path + L"\"").c_str());
-                return false;
-            }
-            const size_t fileSize = static_cast<size_t>(fileSizeOff);
-            file.seekg(0, std::ios::beg);
-
+        bool ParseDds(const uint8_t* data, size_t fileSize, DdsImageInfo& outInfo, const std::wstring& path)
+        {
+            outInfo = DdsImageInfo{};
             constexpr size_t kMinimumHeaderSize = 4 + sizeof(DdsHeader);
-            if (fileSize < kMinimumHeaderSize) {
+            if (data == nullptr || fileSize < kMinimumHeaderSize) {
                 DebugLog((L"[DdsTextureLoader] File too small to be a valid DDS: \"" + path + L"\"").c_str());
-                return false;
-            }
-
-            std::vector<uint8_t> fileBytes(fileSize);
-            if (!file.read(reinterpret_cast<char*>(fileBytes.data()), static_cast<std::streamsize>(fileSize))) {
-                DebugLog((L"[DdsTextureLoader] Failed to read \"" + path + L"\"").c_str());
                 return false;
             }
 
             size_t cursor = 0;
             uint32_t magic = 0;
-            std::memcpy(&magic, fileBytes.data() + cursor, sizeof(magic));
+            std::memcpy(&magic, data + cursor, sizeof(magic));
             cursor += sizeof(magic);
             if (magic != kDdsMagic) {
                 DebugLog((L"[DdsTextureLoader] Missing 'DDS ' magic in \"" + path + L"\"").c_str());
@@ -359,7 +347,7 @@ namespace SasamiRenderer
             }
 
             DdsHeader header{};
-            std::memcpy(&header, fileBytes.data() + cursor, sizeof(header));
+            std::memcpy(&header, data + cursor, sizeof(header));
             cursor += sizeof(header);
 
             if (header.size != sizeof(DdsHeader)) {
@@ -376,7 +364,6 @@ namespace SasamiRenderer
                 return false;
             }
 
-            // Not const: the mip-chain walk below may advance these to a smaller level.
             UINT width = header.width;
             UINT height = header.height;
             if (width == 0 || height == 0) {
@@ -385,8 +372,7 @@ namespace SasamiRenderer
             }
 
             BlockFormat format = BlockFormat::None;
-            bool isSrgbHint = false; // Parsed for completeness; sRGB conversion is handled by the consumer, not here.
-            (void)isSrgbHint;
+            bool isSrgb = false;
 
             if ((header.ddspf.flags & kDdpfFourCC) && header.ddspf.fourCC == kFourCcDX10) {
                 constexpr size_t kDxt10HeaderSize = sizeof(DdsHeaderDxt10);
@@ -395,13 +381,14 @@ namespace SasamiRenderer
                     return false;
                 }
                 DdsHeaderDxt10 dxt10{};
-                std::memcpy(&dxt10, fileBytes.data() + cursor, kDxt10HeaderSize);
+                std::memcpy(&dxt10, data + cursor, kDxt10HeaderSize);
                 cursor += kDxt10HeaderSize;
 
                 switch (dxt10.dxgiFormat) {
                     case DXGI_FORMAT_BC1_UNORM:
                     case DXGI_FORMAT_BC1_UNORM_SRGB:
                         format = BlockFormat::BC1;
+                        isSrgb = dxt10.dxgiFormat == DXGI_FORMAT_BC1_UNORM_SRGB;
                         break;
                     case DXGI_FORMAT_BC2_UNORM:
                     case DXGI_FORMAT_BC2_UNORM_SRGB:
@@ -410,6 +397,7 @@ namespace SasamiRenderer
                     case DXGI_FORMAT_BC3_UNORM:
                     case DXGI_FORMAT_BC3_UNORM_SRGB:
                         format = BlockFormat::BC3;
+                        isSrgb = dxt10.dxgiFormat == DXGI_FORMAT_BC3_UNORM_SRGB;
                         break;
                     case DXGI_FORMAT_BC4_UNORM:
                         format = BlockFormat::BC4;
@@ -420,18 +408,23 @@ namespace SasamiRenderer
                     case DXGI_FORMAT_BC7_UNORM:
                     case DXGI_FORMAT_BC7_UNORM_SRGB:
                         format = BlockFormat::BC7;
+                        isSrgb = dxt10.dxgiFormat == DXGI_FORMAT_BC7_UNORM_SRGB;
                         break;
                     case DXGI_FORMAT_R8G8B8A8_UNORM:
+                    case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
                         format = BlockFormat::Rgba8;
+                        isSrgb = dxt10.dxgiFormat == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
                         break;
                     case DXGI_FORMAT_B8G8R8A8_UNORM:
+                    case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
                         format = BlockFormat::Bgra8;
                         break;
                     case DXGI_FORMAT_BC6H_UF16:
+                        format = BlockFormat::BC6HUnsigned;
+                        break;
                     case DXGI_FORMAT_BC6H_SF16:
-                        DebugLog((L"[DdsTextureLoader] BC6H (HDR) is not supported: \"" + path + L"\" DXGI_FORMAT=" +
-                                  std::to_wstring(dxt10.dxgiFormat)).c_str());
-                        return false;
+                        format = BlockFormat::BC6HSigned;
+                        break;
                     default:
                         DebugLog((L"[DdsTextureLoader] Unsupported DXGI_FORMAT " + std::to_wstring(dxt10.dxgiFormat) +
                                   L" in \"" + path + L"\"").c_str());
@@ -468,44 +461,114 @@ namespace SasamiRenderer
                 return false;
             }
 
+            outInfo.format = format;
+            outInfo.srgb = isSrgb;
+            outInfo.width = width;
+            outInfo.height = height;
+            outInfo.pitchOrLinearSize = header.pitchOrLinearSize;
+            const uint32_t mipCount = (header.mipMapCount > 0u) ? header.mipMapCount : 1u;
+            uint32_t w = width;
+            uint32_t h = height;
+            for (uint32_t mip = 0; mip < mipCount; ++mip) {
+                DdsMipLevel level;
+                level.offset = cursor;
+                level.byteSize = ComputeLevelByteSize(format, w, h, header.ddspf.rgbBitCount);
+                level.width = w;
+                level.height = h;
+                if (IsBlockCompressedFormat(format)) {
+                    level.rowPitch = ((w + 3u) / 4u) * static_cast<uint32_t>(BlockByteSize(format));
+                } else {
+                    level.rowPitch = w * ((header.ddspf.rgbBitCount > 0u) ? (header.ddspf.rgbBitCount / 8u) : 4u);
+                }
+                outInfo.mips.push_back(level);
+                cursor += level.byteSize;
+                w = (w > 1u) ? w / 2u : 1u;
+                h = (h > 1u) ? h / 2u : 1u;
+            }
+            return true;
+        }
+
+        bool DecodeDdsMipToRgba8(const uint8_t* data, size_t fileSize, const DdsImageInfo& info, uint32_t mip,
+                                 std::vector<uint8_t>& outPixels, const std::wstring& path)
+        {
+            if (mip >= info.mips.size() || info.mips[mip].offset > fileSize) {
+                return false;
+            }
+            const DdsMipLevel& level = info.mips[mip];
+            const uint8_t* pixelData = data + level.offset;
+            const size_t pixelAvailable = fileSize - level.offset;
+            if (IsBlockCompressedFormat(info.format)) {
+                return DecodeBlockCompressed(info.format, pixelData, pixelAvailable, level.width, level.height, outPixels, path);
+            }
+            return DecodeUncompressed32Bpp(info.format, pixelData, pixelAvailable, level.width, level.height,
+                                           info.pitchOrLinearSize, outPixels, path);
+        }
+
+        bool LoadRgba8FromDds(const std::wstring& path,
+                              std::vector<uint8_t>& outPixels,
+                              UINT& outWidth,
+                              UINT& outHeight)
+        {
+            outPixels.clear();
+            outWidth = 0;
+            outHeight = 0;
+
+            std::ifstream file(path, std::ios::binary | std::ios::ate);
+            if (!file.is_open()) {
+                DebugLog((L"[DdsTextureLoader] Failed to open \"" + path + L"\"").c_str());
+                return false;
+            }
+
+            const std::streamoff fileSizeOff = file.tellg();
+            if (fileSizeOff < 0) {
+                DebugLog((L"[DdsTextureLoader] Failed to determine size of \"" + path + L"\"").c_str());
+                return false;
+            }
+            const size_t fileSize = static_cast<size_t>(fileSizeOff);
+            file.seekg(0, std::ios::beg);
+
+            constexpr size_t kMinimumHeaderSize = 4 + sizeof(DdsHeader);
+            if (fileSize < kMinimumHeaderSize) {
+                DebugLog((L"[DdsTextureLoader] File too small to be a valid DDS: \"" + path + L"\"").c_str());
+                return false;
+            }
+
+            std::vector<uint8_t> fileBytes(fileSize);
+            if (!file.read(reinterpret_cast<char*>(fileBytes.data()), static_cast<std::streamsize>(fileSize))) {
+                DebugLog((L"[DdsTextureLoader] Failed to read \"" + path + L"\"").c_str());
+                return false;
+            }
+
+            DdsImageInfo info;
+            if (!ParseDds(fileBytes.data(), fileSize, info, path)) {
+                return false;
+            }
+
             // Skip to a mip that fits the streaming budget instead of always decoding the
             // top level. Bistro ships 337 textures at 2048x2048; decoding every top mip to
             // RGBA8 costs 5.3 GB of CPU memory and as much again in upload buffers, which
             // exhausts the GPU before the scene can render. Decoding a smaller mip keeps
             // the whole set well inside budget, and DDS already carries the chain so this
             // costs nothing but an offset walk.
-            const uint32_t mipCount = (header.mipMapCount > 0u) ? header.mipMapCount : 1u;
             uint32_t mipLevel = 0u;
-            while (mipLevel + 1u < mipCount &&
-                   (width > kMaxDecodedTextureDimension || height > kMaxDecodedTextureDimension)) {
-                const size_t levelBytes = ComputeLevelByteSize(format, width, height, header.ddspf.rgbBitCount);
-                if (levelBytes == 0u || cursor + levelBytes > fileSize) {
+            while (mipLevel + 1u < info.mips.size()) {
+                const DdsMipLevel& level = info.mips[mipLevel];
+                if (level.width <= kMaxDecodedTextureDimension && level.height <= kMaxDecodedTextureDimension) {
+                    break;
+                }
+                if (level.byteSize == 0u || level.offset + level.byteSize > fileSize) {
                     break; // Truncated chain: decode what we are already positioned at.
                 }
-                cursor += levelBytes;
-                width = (width > 1u) ? width / 2u : 1u;
-                height = (height > 1u) ? height / 2u : 1u;
                 ++mipLevel;
             }
 
-            const uint8_t* pixelData = fileBytes.data() + cursor;
-            const size_t pixelAvailable = fileSize - cursor;
-
-            bool ok = false;
-            if (IsBlockCompressed(format)) {
-                ok = DecodeBlockCompressed(format, pixelData, pixelAvailable, width, height, outPixels, path);
-            } else {
-                ok = DecodeUncompressed32Bpp(format, pixelData, pixelAvailable, width, height,
-                                              header.pitchOrLinearSize, outPixels, path);
-            }
-
-            if (!ok) {
+            if (!DecodeDdsMipToRgba8(fileBytes.data(), fileSize, info, mipLevel, outPixels, path)) {
                 outPixels.clear();
                 return false;
             }
 
-            outWidth = width;
-            outHeight = height;
+            outWidth = info.mips[mipLevel].width;
+            outHeight = info.mips[mipLevel].height;
             return true;
         }
     }

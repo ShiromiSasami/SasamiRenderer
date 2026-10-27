@@ -5,7 +5,7 @@
 #include <chrono>
 #include <cstring>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Foundation
 {
     namespace
     {

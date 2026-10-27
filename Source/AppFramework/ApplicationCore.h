@@ -9,6 +9,7 @@
 #include "Object/PointLight.h"
 #include "Object/SpotLight.h"
 #include "ECS/EcsRegistry.h"
+#include "Renderer/Config/BackendFeatureSupport.h"
 #include "Renderer/Runtime/Renderer.h"
 #include "Renderer/Scene/RenderCameraProxy.h"
 #include "Renderer/Structures/RendererEnums.h"
@@ -22,18 +23,21 @@
 #include <utility>
 #include <vector>
 
-namespace SasamiRenderer
+// Foundation layer types: declared in their own namespace so these stay the same entities as
+// the definitions, not new SasamiEngine:: types that happen to share a name.
+namespace SasamiEngine::Foundation { class InitTaskScheduler; struct BootStatus; }
+// Renderer layer types, for the same reason as the Foundation ones above.
+namespace SasamiEngine::Render { class IRenderNode; class IRenderPass; struct RenderCameraProxy; }
+namespace SasamiEngine::Render::Voxel { class SceneVoxelization; }
+
+namespace SasamiEngine::App
 {
-    namespace Debug { class DebugRemoteControlServer; }
+    namespace Debug { class DebugRemoteControlServer; class DebugCommandRegistry; class VoxelOccupancyViewer; class WindFlowOverlay; class WindEffectsOverlay; class FrameRecorder; class VoxelStreamOverlay; class ParticleCharacterOverlay; class SmokeSurfaceOverlay; }
+    class EditorWindows;
 
     class AsyncAssetLoadService;
     class Camera;
-    class InitTaskScheduler;
     class StartupCoordinator;
-    struct BootStatus;
-    class IRenderNode;
-    class IRenderPass;
-    struct RenderCameraProxy;
 
 	class ApplicationCore
 	{
@@ -64,6 +68,15 @@ namespace SasamiRenderer
         UINT GetWidth() const { return m_width; }
         UINT GetHeight() const { return m_height; }
         float GetDeltaTime() const { return m_deltaTime; }
+        // Deterministic capture (G1): a positive value replaces the wall-clock delta with a
+        // constant, so time-driven state (animation, particles, sun) depends on the frame count
+        // alone. 0 restores the wall clock. Seeded from SASAMI_FIXED_DT at startup.
+        void SetFixedDeltaTime(float seconds) { m_fixedDeltaTime = seconds > 0.0f ? seconds : 0.0f; }
+        float GetFixedDeltaTime() const { return m_fixedDeltaTime; }
+        // Scene frames rendered since boot handed off; lets a capture wait for N frames
+        // instead of a wall-clock sleep.
+        uint64_t GetSceneFrameCount() const { return m_sceneFrameCount; }
+        bool IsBootRunning() const;
         void RequestQuit() { m_running = false; }
         void SetGraphicsRuntime(GraphicsRuntime runtime);
         GraphicsRuntime GetGraphicsRuntime() const;
@@ -72,6 +85,34 @@ namespace SasamiRenderer
         void RenderFrame();
         void RenderFrame(const Camera& camera);
         void ResizeRenderer(UINT width, UINT height);
+
+        // Debug remote-control command registry, or null when SASAMI_DEBUG_REMOTE was not
+        // set at startup. Exposed so an application can register commands for state that
+        // lives in the application rather than here -- the PBR sample's gizmo toggles are
+        // sample state, and pushing them into ApplicationCore just to make them scriptable
+        // would put sample concerns in the framework.
+        //
+        // Register only from the main thread. DebugCommandRegistry has no internal
+        // synchronization; it is safe because the transport thread only enqueues request
+        // lines and DebugRemoteControlServer::DrainPendingCommands is what reads the map,
+        // on the main thread. Registering from any other thread races with that drain.
+        Debug::DebugCommandRegistry* GetDebugCommandRegistry();
+
+        // Latest scene occupancy voxelization, shared by the voxel.scene command and the
+        // "Voxel Occupancy" window. Main thread only.
+        Render::Voxel::SceneVoxelization& GetSceneVoxelization() { return *m_sceneVoxelization; }
+        Debug::VoxelOccupancyViewer& GetVoxelViewer() { return *m_voxelViewer; }
+        Debug::WindFlowOverlay& GetWindFlowOverlay() { return *m_windFlowOverlay; }
+        // Smoke / fire / petals carried by the wind overlay's field (voxel.wind.fx). Main thread only.
+        Debug::WindEffectsOverlay& GetWindEffectsOverlay() { return *m_windEffectsOverlay; }
+        // PNG-sequence recorder behind debug.record. Main thread only.
+        Debug::FrameRecorder& GetFrameRecorder() { return *m_frameRecorder; }
+        // Camera-centred voxel chunk streaming behind voxel.stream. Main thread only.
+        Debug::VoxelStreamOverlay& GetVoxelStreamOverlay() { return *m_voxelStreamOverlay; }
+        Debug::ParticleCharacterOverlay& GetParticleCharacterOverlay() { return *m_particleCharacterOverlay; }
+        // Live smoke iso-surface behind smoke.mesh live. Main thread only.
+        Debug::SmokeSurfaceOverlay& GetSmokeSurfaceOverlay() { return *m_smokeSurfaceOverlay; }
+        EditorWindows& GetEditorWindows() { return *m_editorWindows; }
 
         DirectionalLight GetDirectionalLight() const;
         void SetDirectionalLight(const DirectionalLight& light);
@@ -144,8 +185,6 @@ namespace SasamiRenderer
         void  SetParticleDrag(float d);
         void  SetParticleEmitOrigin(float x, float y, float z);
         void  ReinsertParticles();
-        bool GetMeshletDebugViewEnabled() const;
-        void SetMeshletDebugViewEnabled(bool enabled);
         bool GetUseMeshShader() const;
         void SetUseMeshShader(bool enabled);
         int GetRenderPathModeIndex() const;
@@ -219,6 +258,8 @@ namespace SasamiRenderer
         int  GetSwrtReflectionAtrousIterations() const;
         void SetSwrtReflectionAtrousIterations(int n);
         bool IsHardwareRayTracingSupported() const;
+        // Backend/GPU feature availability, for greying out controls the current backend cannot run.
+        const BackendFeatureSupport& GetFeatureSupport() const;
         Renderer::RayTracingStats GetRayTracingStats() const;
         int GetGBufferDebugViewIndex() const;
         void SetGBufferDebugViewIndex(int modeIndex);
@@ -234,6 +275,9 @@ namespace SasamiRenderer
         bool AddRenderNode(const std::shared_ptr<IRenderNode>& renderNode);
         void SetRenderNodePreset(const std::shared_ptr<IRenderNode>& renderNode);
         void UseDefaultRenderNodePreset();
+        // Default preset plus the toon outline pass. Opt-in: the outline is not part of
+        // the default sequence, so other samples pay nothing for it.
+        void UseToonRenderNodePreset();
         bool AddRenderPass(const std::shared_ptr<IRenderPass>& renderPass);
         bool AddRenderPassBefore(std::string_view targetTag, const std::shared_ptr<IRenderPass>& renderPass);
         bool AddRenderPassAfter(std::string_view targetTag, const std::shared_ptr<IRenderPass>& renderPass);
@@ -270,6 +314,8 @@ namespace SasamiRenderer
         std::vector<PointLight*> GetPointLightObjects() const;
         std::vector<SpotLight*> GetSpotLightObjects() const;
         std::vector<StaticModel*> GetStaticModels() const;
+        std::vector<SkinnedModel*> GetSkinnedModels() const;
+        std::vector<Camera*> GetCameraObjects() const;
         bool SaveScene(const std::string& path) const;
         bool LoadScene(const std::string& path);
 
@@ -281,6 +327,12 @@ namespace SasamiRenderer
         bool RequestScreenshot(const std::string& path, std::string& outResolvedPath);
         // True once the queued capture finished, with `outMessage` describing the outcome.
         bool PollScreenshotResult(std::string& outMessage);
+        // Queues a dump of an intermediate render target (e.g. "gbuffer.albedo") to a PNG.
+        // `path` is UTF-8 and is resolved the same way as RequestScreenshot. Returns an
+        // empty string when the request was accepted, or an error message otherwise.
+        // Shares the same pending slot as RequestScreenshot; poll PollScreenshotResult
+        // for completion.
+        std::string RequestTargetDump(const std::string& name, const std::string& path);
         // Non-destructive: applies [camera]/[directional_light]/[point_light]/[spot_light]
         // onto existing objects without clearing the scene. Ignores [static_model] and
         // unknown sections. Intended for restoring saved view/light state at startup.
@@ -292,6 +344,10 @@ namespace SasamiRenderer
         Camera* GetActiveCamera() const { return m_activeCamera; }
         bool DeleteObject(SObject* object);
         void ClearObjects();
+        // Bumped by every ClearObjects. Raw SObject pointers a game keeps across frames are
+        // dangling once it changes -- LoadScene clears and rebuilds the scene from the
+        // debug pipe while the game still holds its camera and model pointers.
+        uint64_t GetSceneGeneration() const { return m_sceneGeneration; }
         void InvalidateRenderObjects() { m_objectsDirty = true; }
 
     private:
@@ -303,7 +359,15 @@ namespace SasamiRenderer
 
         void InitializeDebugRemoteControl();
         bool InitializeRenderer();
+        // Shared by InitializeRenderer/BootFinalizeRendererCore: stands up ImGui's renderer
+        // backend (or falls back to platform-only input) and, if it succeeds, wires the
+        // resulting overlay recorder into the renderer.
+        bool InitializeUIOverlay();
         void ShutdownRenderer();
+        // Shared by RequestScreenshot/RequestTargetDump: resolves `path` to an absolute
+        // path (falling back to the input path if resolution fails) and ensures a ".png"
+        // extension, returning both the UTF-8 and wide-string forms. False if `path` is empty.
+        static bool ResolveCapturePath(const std::string& path, std::string& outResolvedPath, std::wstring& outWidePath);
         void RenderFrameInternal(const RenderCameraProxy& cameraProxy);
         bool UpdateMainCameraProxy();
         void SyncModelsToRenderer(Renderer& renderer);
@@ -330,17 +394,31 @@ namespace SasamiRenderer
         std::unique_ptr<AsyncAssetLoadService> m_assetLoadService;
         std::unique_ptr<StartupCoordinator> m_startup;
         std::unique_ptr<Renderer> m_renderer;
+        // Declared after m_renderer so they are destroyed first: the voxelizer owns GPU resources.
+        std::unique_ptr<Render::Voxel::SceneVoxelization> m_sceneVoxelization;
+        std::unique_ptr<Debug::VoxelOccupancyViewer> m_voxelViewer;
+        std::unique_ptr<Debug::WindFlowOverlay> m_windFlowOverlay;
+        std::unique_ptr<Debug::WindEffectsOverlay> m_windEffectsOverlay;
+        std::unique_ptr<Debug::FrameRecorder> m_frameRecorder;
+        std::unique_ptr<Debug::VoxelStreamOverlay> m_voxelStreamOverlay;
+        std::unique_ptr<Debug::ParticleCharacterOverlay> m_particleCharacterOverlay;
+        std::unique_ptr<Debug::SmokeSurfaceOverlay> m_smokeSurfaceOverlay;
+        std::unique_ptr<EditorWindows> m_editorWindows;
         GraphicsRuntime m_graphicsRuntime = GetBuildDefaultGraphicsRuntime();
         float m_deltaTime = 0.0f;
+        float m_fixedDeltaTime = 0.0f;
+        uint64_t m_sceneFrameCount = 0;
         std::vector<std::unique_ptr<SObject>> m_objects;
         EcsRegistry m_ecsRegistry;
         std::unordered_map<SObject*, EntityId> m_objectEntityMap;
         Camera* m_activeCamera = nullptr;
         RenderCameraProxy m_activeCameraProxy{};
         bool m_objectsDirty = false;
+        uint64_t m_sceneGeneration = 0;
         // Debug-only remote control channel. Null unless SASAMI_DEBUG_REMOTE=1 was set at
         // startup. Held by pointer so the header does not have to pull in the transport
         // (and with it <windows.h> networking headers) for every ApplicationCore user.
         std::unique_ptr<Debug::DebugRemoteControlServer> m_debugRemoteControl;
 		};
 }
+namespace SasamiEngine { using namespace App; }

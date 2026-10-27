@@ -1,6 +1,8 @@
 #ifndef SWRT_RESERVOIR_HLSLI
 #define SWRT_RESERVOIR_HLSLI
 
+#include "Shared/Common/PunctualLightFalloff.hlsli"
+
 // ---------------------------------------------------------------------------
 // ReSTIR DI Reservoir
 // One reservoir per pixel; stored in a RWStructuredBuffer<Reservoir>.
@@ -85,15 +87,14 @@ uint ReSTIRSeed(uint2 pixel, uint frameIndex, uint salt)
 // Approximate luminance contribution of a point/spot light at a shading point.
 // ---------------------------------------------------------------------------
 
-float PhatPoint(float3 pos, float3 N, float3 lightPos, float3 lightColorIntensity, float lightRange)
+float PhatPoint(float3 pos, float3 N, float3 lightPos, float3 lightColorIntensity, float lightRange, uint falloffMode)
 {
     float3 toLight = lightPos - pos;
     float  dist    = length(toLight);
     if (dist >= lightRange || dist < 1e-5f) return 0.0f;
     float3 L       = toLight / dist;
     float  NdotL   = max(dot(N, L), 0.0f);
-    float  t       = dist / max(lightRange, 1e-4f);
-    float  atten   = saturate(1.0f - t * t) * (1.0f - t * t);
+    float  atten   = PunctualLightFalloff(dist, lightRange, falloffMode);
     float  lum     = dot(lightColorIntensity, float3(0.2126f, 0.7152f, 0.0722f));
     return lum * NdotL * atten;
 }

@@ -1,17 +1,80 @@
+// Chan 2018 micro-shadowing, shared verbatim with the D3D12 lighting passes so the two cannot
+// drift apart. Resolved through DXC's -I <shader root> (ShaderCompilationService), the same
+// mechanism every other shared header under Shaders/ relies on.
+#include "Shared/Common/MicroShadowing.hlsli"
+#include "../../Native/NativePbr.hlsli"
+#include "../../Native/NativeShadow.hlsli"
+#include "../../Native/NativeTonemap.hlsli"
+#include "../../Native/NativeLighting.hlsli"
+
 struct MeshPushConstants
 {
-    row_major float4x4 modelViewProjection;
+    // Per-draw data only; view/projection and the light moved out to g_frame below since they are
+    // the same for every draw this frame (VulkanNativeMeshPushConstants must fit Vulkan's
+    // guaranteed 128-byte push constant minimum -- see its static_assert).
+    row_major float4x4 model;
     float4 baseColor;
-    float4 lightDirIntensity;
-    float4 lightColor;
+    // xyz = emissive, w = roughness.
     float4 emissiveRoughness;
+    // x = metallic, yzw = unused.
+    float4 materialParams;
 };
 
 [[vk::push_constant]]
 ConstantBuffer<MeshPushConstants> g_mesh : register(b0);
 
+// Per-frame constants shared by every draw this frame, matching VulkanNativeMeshFrameConstants
+// (VulkanGraphicsDeviceUtils.h) field-for-field. DXC's Vulkan register-shift table
+// (ShaderCompilationService.cpp) only remaps space0; space1 registers pass through unshifted, so
+// b0/space1 lands at Vulkan set=1, binding=0.
+struct FrameConstants
+{
+    row_major float4x4 viewProjection;
+    row_major float4x4 lightViewProjection;
+    // x = shadow depth bias, y = shadow normal bias, z = shadow map texel world size,
+    // w = shadow map resolution, or 0 if shadows are disabled/unavailable this frame.
+    float4 shadowParams;
+    // x = 1 when a refreshed runtime-AO texture is bound at t4 this frame (0 => the white dummy,
+    // so runtimeAo reads 1.0 and drops out), yz = inverse render resolution for the screen-space
+    // lookup, w = tonemap exposure (RenderSettings::exposure). Mirrors DirectX 11's u_featureFlags.z / u_featureFlags2.zw.
+    float4 aoParams;
+    // xyz = direction the light travels (shaders negate it to get l), w = intensity.
+    float4 lightDirIntensity;
+    // rgb = light colour, w = 1 when the ambient cube at t1 is bound.
+    float4 lightColor;
+    // xyz = camera world position, w = 1 when image-based ambient is enabled.
+    float4 cameraPosFlags;
+};
+ConstantBuffer<FrameConstants> g_frame : register(b0, space1);
+
 Texture2D<float4> g_albedo  : register(t0);
 SamplerState      g_sampler : register(s0);
+
+// Low-resolution environment cube used as diffuse ambient (see Skybox::GetNativeAmbientCubemapSrv).
+// A distinct register from g_albedo/g_sampler above (t1/s1, not t0/s0) so the Vulkan backend can bind
+// both in the same descriptor set (see GetOrCreateNativeMeshTextureDescriptorSet).
+TextureCube<float4> g_ambientCube    : register(t1);
+SamplerState         g_ambientSampler : register(s1);
+
+// Material AO (t2/s2 -- see GetOrCreateNativeMeshTextureDescriptorSet). The Vulkan backend only
+// binds a real texture here when the draw's single texture slot holds a packed glTF ORM image
+// (occlusion in R); otherwise it binds the 1x1 white dummy so .r reads as 1.0 (no occlusion),
+// which keeps every mesh without a packed ORM texture rendering exactly as before this existed.
+Texture2D<float4> g_occlusion       : register(t2);
+SamplerState       g_occlusionSampler : register(s2);
+
+// Directional shadow map: depth-only, sampled with hardware PCF comparison (see SampleShadow in
+// NativeShadow.hlsli). t3/s3 -- confirmed free of the t0-t2/s0-s2 slots above
+// (see GetOrCreateNativeMeshTextureDescriptorSet).
+Texture2D                 g_shadowMap     : register(t3);
+SamplerComparisonState    g_shadowSampler : register(s3);
+
+// Runtime (screen-space) ambient occlusion -- DirectX 12's RuntimeAOTex, produced here by
+// VulkanAmbientOcclusion (depth+normal prepass -> SSAO -> blur, all before this pass runs).
+// t4/s4, the next free pair after the shadow map. Gated by g_frame.aoParams.x: when it is 0 the
+// white dummy is bound and runtimeAo is 1.0, which is exactly pre-SSAO behaviour.
+Texture2D<float4> g_runtimeAo        : register(t4);
+SamplerState      g_runtimeAoSampler : register(s4);
 
 struct VSInput
 {
@@ -27,29 +90,82 @@ struct PSInput
     float3 normal   : NORMAL;
     float4 color    : COLOR0;
     float2 uv       : TEXCOORD0;
+    float3 worldPos : TEXCOORD1;
+    float3 worldN   : TEXCOORD2;
 };
 
 PSInput VSMain(VSInput input)
 {
     PSInput output;
-    output.position = mul(float4(input.position, 1.0f), g_mesh.modelViewProjection);
+    float4 worldPos = mul(float4(input.position, 1.0f), g_mesh.model);
+    output.position = mul(worldPos, g_frame.viewProjection);
     output.normal = normalize(input.normal);
     output.color = input.color * g_mesh.baseColor;
     output.uv = input.uv;
+    output.worldPos = worldPos.xyz;
+    output.worldN = normalize(mul(input.normal, (float3x3)g_mesh.model));
     return output;
 }
 
 float4 PSMain(PSInput input) : SV_TARGET
 {
-    float3 n = normalize(input.normal);
-    float3 l = normalize(-g_mesh.lightDirIntensity.xyz);
-    float ndotl = saturate(dot(n, l));
-    float ambient = 0.16f;
+    float3 n = normalize(input.worldN);
+    float3 v = normalize(g_frame.cameraPosFlags.xyz - input.worldPos);
+    float3 l = normalize(-g_frame.lightDirIntensity.xyz);
+
+    // Mirrors DX12's DeferredLighting_PS.hlsl: rawAo = saturate(materialAo * runtimeAo).
+    // runtimeAo is now real on this path too (VulkanAmbientOcclusion, generated earlier in the
+    // frame), looked up by screen position rather than UV because it is a screen-space term.
+    // SV_POSITION.xy is already in top-left-origin framebuffer coordinates -- the viewport's
+    // negative height applies the same flip to this pass and to the AO chain -- so dividing by the
+    // render resolution lands on the matching AO texel.
+    float materialAo = g_occlusion.Sample(g_occlusionSampler, input.uv).r;
+    float runtimeAo = 1.0f;
+    if (g_frame.aoParams.x > 0.5f) {
+        float2 aoUv = input.position.xy * g_frame.aoParams.yz;
+        runtimeAo = g_runtimeAo.Sample(g_runtimeAoSampler, aoUv).r;
+    }
+    float ao = NativeResolveAo(materialAo, runtimeAo);
+
     float4 texSample = g_albedo.Sample(g_sampler, input.uv);
+
+    // Cut-out geometry -- fences, foliage cards, grilles -- stores its silhouette in the albedo
+    // alpha and has no material flag anywhere in this renderer to announce itself. Without this
+    // clip the whole quad is drawn and paints over what is behind it, which reads as geometry
+    // popping in front of walls it should be hidden by.
+    //
+    // Only the sampled alpha is tested, never baseColor.a, so an opaque material tinted with a low
+    // alpha is left alone. There is no has-texture flag here as there is in the DirectX 11 shader,
+    // and none is needed: a mesh without an albedo gets the 1x1 white dummy image the device binds
+    // as a fallback, whose alpha is 1.0, so the test never fires for it.
+    //
+    // This brings Vulkan in line with the DirectX 11 and OpenGL native shaders, which have carried
+    // the same fixed 0.5 cutoff since 2026-09-09; Vulkan was the only one left drawing the full
+    // quad. A per-material alpha mode and cutoff would be better, but that needs alphaMode and
+    // alphaCutoff threaded from the asset loader through SurfaceMaterial and RhiBackendMeshDrawDesc,
+    // none of which exist yet -- a separate, larger change.
+    if (texSample.a < 0.5f) {
+        discard;
+    }
+
+    // Only the direct-light term is shadowed, never ambient (see NativeShadeSurface). SampleShadow
+    // early-outs to 1.0 when shadowParams.w == 0 (shadows disabled or unavailable this frame).
+    float shadowTerm = SampleShadow(g_shadowMap, g_shadowSampler, input.worldPos, n, g_frame.lightViewProjection, g_frame.shadowParams);
+
+    float roughness = saturate(g_mesh.emissiveRoughness.w);
+    float metallic = saturate(g_mesh.materialParams.x);
+
+    // Prefers the real environment cube once one is bound, otherwise the analytic hemisphere.
+    bool ambientEnabled = g_frame.cameraPosFlags.w > 0.5f;
+    float3 ambientRadiance = (g_frame.lightColor.w > 0.5f)
+        ? g_ambientCube.Sample(g_ambientSampler, n).rgb
+        : NativeHemisphereAmbient(n);
+
     float4 surface = input.color * texSample;
-    float3 lit = surface.rgb * g_mesh.lightColor.rgb * (ambient + ndotl * g_mesh.lightDirIntensity.w);
-    lit += g_mesh.emissiveRoughness.rgb;
-    lit = lit / (lit + 1.0f);
+    float3 lit = NativeShadeSurface(surface.rgb, metallic, roughness, n, v, l, g_frame.lightColor.rgb,
+                                    g_frame.lightDirIntensity.w, shadowTerm, ao, ambientEnabled,
+                                    ambientRadiance, g_mesh.emissiveRoughness.rgb);
+    lit = NativeTonemap(lit, g_frame.aoParams.w);
     lit = pow(saturate(lit), 1.0f / 2.2f);
     return float4(lit, surface.a);
 }

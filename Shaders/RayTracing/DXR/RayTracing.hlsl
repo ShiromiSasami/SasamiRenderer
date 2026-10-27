@@ -23,6 +23,8 @@
 // =============================================================================
 
 #include "RayTracing_Types.hlsli"
+#include "Shared/Common/RayOffset.hlsli"
+#include "Shared/Common/PunctualLightFalloff.hlsli"
 
 RaytracingAccelerationStructure SceneBVH : register(t0);
 ConstantBuffer<FrameConstants> gFrame : register(b0);
@@ -146,9 +148,9 @@ void ClosestHitShader(inout RadiancePayload payload, in Attributes attributes)
         const float3 shadowOffsetNormal = (dot(geometricNormal, directionalLight) >= 0.0)
             ? geometricNormal
             : -geometricNormal;
-        shadowRay.Origin = worldPosition + shadowOffsetNormal * 0.01;
+        shadowRay.Origin = OffsetRay(worldPosition, shadowOffsetNormal);
         shadowRay.Direction = directionalLight;
-        shadowRay.TMin = 0.01;
+        shadowRay.TMin = 0.001;
         shadowRay.TMax = 1000.0;
         TraceRay(SceneBVH,
                  RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
@@ -195,9 +197,9 @@ void ClosestHitShader(inout RadiancePayload payload, in Attributes attributes)
             const float3 shadowOffsetN = (dot(geometricNormal, lightDir) >= 0.0)
                 ? geometricNormal : -geometricNormal;
             RayDesc pointShadowRay;
-            pointShadowRay.Origin    = worldPosition + shadowOffsetN * 0.01;
+            pointShadowRay.Origin    = OffsetRay(worldPosition, shadowOffsetN);
             pointShadowRay.Direction = lightDir;
-            pointShadowRay.TMin      = 0.01;
+            pointShadowRay.TMin      = 0.001;
             pointShadowRay.TMax      = distance - 0.01;
             TraceRay(SceneBVH,
                      RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
@@ -206,7 +208,7 @@ void ClosestHitShader(inout RadiancePayload payload, in Attributes attributes)
             if (pointShadow.occluded != 0u) continue;
         }
 
-        const float attenuation = pow(Saturate(1.0 - distance / max(light.posRange.w, 1e-3)), 2.0);
+        const float attenuation = PunctualLightFalloff(distance, light.posRange.w, gFrame.punctualLightFalloff);
         const float3 lightColor = light.colorIntensity.rgb * light.colorIntensity.a * attenuation;
         const float pointNdotL = Saturate(dot(normal, lightDir));
         const float pointMicroShadow = ComputeMicroShadowing(pointNdotL, ao, gFrame.aoMicroShadowStrength);
@@ -239,9 +241,9 @@ void ClosestHitShader(inout RadiancePayload payload, in Attributes attributes)
             const float3 shadowOffsetN = (dot(geometricNormal, lightDir) >= 0.0)
                 ? geometricNormal : -geometricNormal;
             RayDesc spotShadowRay;
-            spotShadowRay.Origin    = worldPosition + shadowOffsetN * 0.01;
+            spotShadowRay.Origin    = OffsetRay(worldPosition, shadowOffsetN);
             spotShadowRay.Direction = lightDir;
-            spotShadowRay.TMin      = 0.01;
+            spotShadowRay.TMin      = 0.001;
             spotShadowRay.TMax      = distance - 0.01;
             TraceRay(SceneBVH,
                      RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
@@ -250,7 +252,7 @@ void ClosestHitShader(inout RadiancePayload payload, in Attributes attributes)
             if (spotShadow.occluded != 0u) continue;
         }
 
-        const float attenuation = pow(Saturate(1.0 - distance / max(light.posRange.w, 1e-3)), 2.0) * spotFactor;
+        const float attenuation = PunctualLightFalloff(distance, light.posRange.w, gFrame.punctualLightFalloff) * spotFactor;
         const float3 lightColor = light.colorIntensity.rgb * light.colorIntensity.a * attenuation;
         const float spotNdotL = Saturate(dot(normal, lightDir));
         const float spotMicroShadow = ComputeMicroShadowing(spotNdotL, ao, gFrame.aoMicroShadowStrength);
@@ -269,9 +271,9 @@ void ClosestHitShader(inout RadiancePayload payload, in Attributes attributes)
             const float3 reflectionOffsetNormal = (dot(geometricNormal, reflectionDir) >= 0.0)
                 ? geometricNormal
                 : -geometricNormal;
-            reflectionRay.Origin = worldPosition + reflectionOffsetNormal * 0.01;
+            reflectionRay.Origin = OffsetRay(worldPosition, reflectionOffsetNormal);
             reflectionRay.Direction = reflectionDir;
-            reflectionRay.TMin = 0.01;
+            reflectionRay.TMin = 0.001;
             reflectionRay.TMax = 10000.0;
 
             const RadiancePayload reflectionPayload = TraceRadianceRay(reflectionRay, payload.bounceIndex + 1u);
@@ -294,9 +296,10 @@ void ClosestHitShader(inout RadiancePayload payload, in Attributes attributes)
         transmissionDir = SafeNormalize(transmissionDir);
 
         RayDesc transmissionRay;
-        transmissionRay.Origin = worldPosition + transmissionDir * 0.03;
+        transmissionRay.Origin = OffsetRay(worldPosition,
+            (dot(transmissionDir, geometricNormal) < 0.0) ? -geometricNormal : geometricNormal);
         transmissionRay.Direction = transmissionDir;
-        transmissionRay.TMin = 0.01;
+        transmissionRay.TMin = 0.001;
         transmissionRay.TMax = 10000.0;
 
         const RadiancePayload transmissionPayload =
@@ -358,8 +361,10 @@ void RayGenShader()
     const float2 uv = (float2(pixel) + 0.5) / float2(gFrame.renderWidth, gFrame.renderHeight);
     const float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
 
-    const float4 nearPoint = mul(float4(ndc, 0.0, 1.0), gFrame.inverseViewProjection);
-    const float4 farPoint = mul(float4(ndc, 1.0, 1.0), gFrame.inverseViewProjection);
+    // Reverse-Z: near = 1.0, far = 0.0, so the NDC z literals used to reconstruct
+    // the near/far world points are swapped relative to the forward-Z convention.
+    const float4 nearPoint = mul(float4(ndc, 1.0, 1.0), gFrame.inverseViewProjection);
+    const float4 farPoint = mul(float4(ndc, 0.0, 1.0), gFrame.inverseViewProjection);
     const float3 worldNear = nearPoint.xyz / max(nearPoint.w, 1e-6);
     const float3 worldFar = farPoint.xyz / max(farPoint.w, 1e-6);
 

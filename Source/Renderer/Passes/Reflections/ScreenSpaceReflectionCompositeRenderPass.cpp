@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {

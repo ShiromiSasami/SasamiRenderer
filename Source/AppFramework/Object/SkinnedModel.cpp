@@ -1,6 +1,6 @@
 #include "Object/SkinnedModel.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     bool SkinnedModel::LoadModel(const std::string& assetPath, ModelFormat format)
     {

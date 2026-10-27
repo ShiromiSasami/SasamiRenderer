@@ -18,7 +18,7 @@
 #include "Renderer/Utilities/ResourceUploadUtility.h"
 #include "d3dx12.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace DxrRayTracerUtility
     {
@@ -118,7 +118,7 @@ namespace SasamiRenderer
             }
 
             std::vector<uint8_t> bytecode;
-            if (!SasamiRenderer::ShaderCompilationService::GetOrCompileShaderBytecodeDxc(
+            if (!SasamiEngine::Render::ShaderCompilationService::GetOrCompileShaderBytecodeDxc(
                     "DxrRayTracer", relPath.c_str(), "", "lib_6_6", bytecode)) {
                 DebugLog("DxrRayTracer: failed to compile ray tracing shader library.\n");
                 return false;

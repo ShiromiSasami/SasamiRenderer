@@ -38,7 +38,7 @@ namespace
     }
 }
 
-namespace SasamiRenderer::Culling
+namespace SasamiEngine::Render::Culling
 {
     FrustumPlanes ExtractFrustumPlanes(const float viewProj[16])
     {
@@ -61,9 +61,11 @@ namespace SasamiRenderer::Culling
             frustum.planes[kRight][i] = col3[i] - col0[i];
             frustum.planes[kBottom][i] = col1[i] + col3[i];
             frustum.planes[kTop][i] = col3[i] - col1[i];
-            // D3D depth range is 0..1, so the near plane is simply col(2) (not col(2) + col(3)).
-            frustum.planes[kNear][i] = col2[i];
-            frustum.planes[kFar][i] = col3[i] - col2[i];
+            // Reverse-Z: NDC z range is still 0..1, but near=1.0 and far=0.0 (swapped from the
+            // conventional mapping), so the near/far plane derivations swap accordingly: the
+            // far plane is now simply col(2), and the near plane is col(3) - col(2).
+            frustum.planes[kNear][i] = col3[i] - col2[i];
+            frustum.planes[kFar][i] = col2[i];
         }
 
         for (int p = 0; p < 6; ++p) {

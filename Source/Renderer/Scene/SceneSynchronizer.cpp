@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     SceneSynchronizer::SceneSynchronizer(SceneSubmitter& sceneSubmitter,
                                          CameraState& cameraState,

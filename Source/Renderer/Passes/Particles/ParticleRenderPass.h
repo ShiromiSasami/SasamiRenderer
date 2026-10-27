@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // Renders ParticleSystem's particle buffer as camera-facing alpha-blended
     // billboards. No vertex/index buffer: each billboard's 4 corners come from a
@@ -49,3 +49,7 @@ namespace SasamiRenderer
         bool m_enabled     = false; // Off by default
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

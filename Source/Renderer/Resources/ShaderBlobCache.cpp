@@ -1,6 +1,6 @@
 #include "Renderer/Resources/ShaderBlobCache.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     using Microsoft::WRL::ComPtr;
 

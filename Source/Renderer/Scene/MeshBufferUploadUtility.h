@@ -8,7 +8,7 @@
 #include "Renderer/RHI/RhiDevice.h"
 #include "Renderer/Scene/DeferredUploadSink.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // Shared GPU vertex/index buffer upload+bind logic for MeshBuffer and SkinnedMeshBuffer.
     // VertexT is the only axis of variation (Vertex vs SkinnedVertex); GPUItemT is each
@@ -256,3 +256,7 @@ namespace SasamiRenderer
         }
     }
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

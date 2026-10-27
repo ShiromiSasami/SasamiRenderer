@@ -2,7 +2,7 @@
 
 #include <atomic>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // Per-feature readiness flags for progressive initialization. Init tasks publish
     // readiness by storing true AFTER the feature's GPU objects are fully assigned
@@ -24,6 +24,7 @@ namespace SasamiRenderer
         std::atomic<bool> dxrReady{false};
         std::atomic<bool> giReady{false};
         std::atomic<bool> fluidReady{false};
+        std::atomic<bool> smokeReady{false};
         std::atomic<bool> particlesReady{false};
         std::atomic<bool> allReady{false};         // every deferred init task completed
 
@@ -33,3 +34,7 @@ namespace SasamiRenderer
         }
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

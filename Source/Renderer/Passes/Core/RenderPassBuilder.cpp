@@ -10,6 +10,7 @@
 #include "Renderer/Passes/RayTracing/RayTracingRenderPass.h"
 #include "Renderer/Passes/Geometry/ShadowRenderPass.h"
 #include "Renderer/Passes/Sky/SkyboxRenderPass.h"
+#include "Renderer/Passes/Geometry/ToonOutlineRenderPass.h"
 #include "Renderer/Passes/Reflections/ScreenSpaceReflectionRenderPass.h"
 #include "Renderer/Passes/Reflections/ScreenSpaceReflectionCompositeRenderPass.h"
 #include "Renderer/Passes/Reflections/SoftwareReflectionCompositeRenderPass.h"
@@ -21,7 +22,7 @@
 #include "Renderer/Passes/Transparency/TransparentSceneColorCopyRenderPass.h"
 #include "Renderer/Passes/Sky/VolumetricCloudRenderPass.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     bool IRenderPassBuilder::IsAvailable(const RenderPassBuildContext& context) const
     {
@@ -117,6 +118,8 @@ namespace SasamiRenderer
             RenderPassBuilderId::FluidSurface, "Fluid Surface"));
         catalog.Register(std::make_unique<StatelessRenderPassBuilder<ParticleRenderPass>>(
             RenderPassBuilderId::Particles, "Particles"));
+        catalog.Register(std::make_unique<StatelessRenderPassBuilder<ToonOutlineRenderPass>>(
+            RenderPassBuilderId::ToonOutline, "Toon Outline"));
         return catalog;
     }
 
@@ -177,6 +180,7 @@ namespace SasamiRenderer
         case RenderPassType::ScreenSpaceReflectionComposite: return RenderPassBuilderId::ScreenSpaceReflectionComposite;
         case RenderPassType::SoftwareReflection: return RenderPassBuilderId::SoftwareReflection;
         case RenderPassType::SoftwareReflectionComposite: return RenderPassBuilderId::SoftwareReflectionComposite;
+        case RenderPassType::ToonOutline: return RenderPassBuilderId::ToonOutline;
         default: return std::nullopt;
         }
     }

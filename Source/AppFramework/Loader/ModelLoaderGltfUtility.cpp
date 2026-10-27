@@ -2,7 +2,7 @@
 
 #include <fstream>
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     namespace ModelLoaderGltfUtility
     {
@@ -163,6 +163,21 @@ namespace SasamiRenderer
             if (!arr.IsArray() || (int)arr.Size() < n) return false;
             for (int i = 0; i < n; ++i) out[i] = arr[i].GetFloat();
             return true;
+        }
+
+        void ReadAlphaMode(const rapidjson::Value& material, bool& outBlend, bool& outMask, float& outCutoff)
+        {
+            outBlend = false;
+            outMask = false;
+            outCutoff = 0.5f;
+            if (material.HasMember("alphaMode") && material["alphaMode"].IsString()) {
+                const std::string mode = material["alphaMode"].GetString();
+                outBlend = (mode == "BLEND");
+                outMask = (mode == "MASK");
+            }
+            if (material.HasMember("alphaCutoff") && material["alphaCutoff"].IsNumber()) {
+                outCutoff = material["alphaCutoff"].GetFloat();
+            }
         }
 
         const uint8_t* GetAccessorPtr(const std::vector<uint8_t>& buffer,

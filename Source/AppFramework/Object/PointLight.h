@@ -7,7 +7,7 @@
 #include "Foundation/Math/Color.h"
 #include "Renderer/Scene/RenderLightProxy.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     class PointLight : public SObject
     {
@@ -57,3 +57,4 @@ namespace SasamiRenderer
         float m_intensity = 1.0f;
     };
 }
+namespace SasamiEngine { using namespace App; }

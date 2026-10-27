@@ -2,7 +2,7 @@
 
 #include "Renderer/Config/RenderSettings.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     struct RenderFeatureSettingChanges
     {
@@ -173,5 +173,17 @@ namespace SasamiRenderer
             }
             aoDirectLightingStrength = v;
         }
+
+        void SetPunctualLightFalloff(PunctualLightFalloff v)
+        {
+            const uint32_t raw = static_cast<uint32_t>(v);
+            punctualLightFalloff = (raw <= static_cast<uint32_t>(PunctualLightFalloff::InverseSquare))
+                ? v
+                : PunctualLightFalloff::InverseSquare;
+        }
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

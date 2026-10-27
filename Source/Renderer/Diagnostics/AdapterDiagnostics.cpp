@@ -11,7 +11,7 @@
 
 #include "Foundation/Tools/DebugOutput.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {

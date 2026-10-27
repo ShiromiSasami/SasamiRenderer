@@ -15,6 +15,7 @@ cbuffer CameraCB : register(b0)
 
 
 #include "Shared/Common/LightCB.hlsli"
+#include "Shared/Common/PunctualLightFalloff.hlsli"
 #include "Basic_Transform.hlsli"
 
 PSInput VSMain(VSInput input)
@@ -40,10 +41,13 @@ float4 PSMain(PSInput input) : SV_TARGET
         : float4(1.0f, 1.0f, 1.0f, 1.0f);
 
     // Shadow sampling (manual 2x2 PCF):
-    // visibility = (1 / 4) * sum_{kernel} step(shadowDepth >= receiverDepth - bias)
+    // Reverse-Z (near = 1.0, far = 0.0): the caster occludes the receiver when the
+    // caster is nearer, i.e. shadowDepth <= receiverDepth, so bias is added rather
+    // than subtracted from the receiver depth before the comparison.
+    // visibility = (1 / 4) * sum_{kernel} step(shadowDepth <= receiverDepth + bias)
     float3 sc = input.lightPos.xyz / max(input.lightPos.w, 1e-6);
     float2 suv = float2(sc.x * 0.5 + 0.5, -sc.y * 0.5 + 0.5);  // NDC->UV (Y flipped: D3D NDC+1 = texture row 0)
-    float  sdepth = sc.z;             // D3D NDC z is already [0,1]
+    float  sdepth = sc.z;             // Reverse-Z NDC z is [0,1] with near = 1.0, far = 0.0
     float bias = 0.0005;
     float visibility = 1.0;
     if (all(suv >= 0.0) && all(suv <= 1.0)) {
@@ -55,7 +59,10 @@ float4 PSMain(PSInput input) : SV_TARGET
             for (int dx = 0; dx < 2; ++dx) {
                 float2 uv = suv + float2(dx, dy) * texel;
                 float sd = shadowMap.SampleLevel(samp0, float3(uv, 0.0f), 0).r;
-                acc += (sdepth - bias <= sd) ? 1.0 : 0.0;
+                // Reverse-Z: larger depth = nearer to the light, so biasing the receiver
+                // toward the light (reducing shadow acne) means adding bias, and the lit
+                // test flips from "receiver <= caster" to "receiver >= caster".
+                acc += (sdepth + bias >= sd) ? 1.0 : 0.0;
             }
         }
         visibility = acc * 0.25;
@@ -77,10 +84,8 @@ float4 PSMain(PSInput input) : SV_TARGET
         float dist = length(toL);
         if (dist < posRange.w && dist > 1e-4 && colInt.w > 0.0) {
             float3 Lp = toL / dist;
-            // Distance attenuation:
-            // atten = saturate(1 - d / range)^2
-            float atten = saturate(1.0 - dist / max(posRange.w, 1e-3));
-            atten *= atten;
+            // Distance attenuation: selectable falloff curve (u_debugParams.z).
+            float atten = PunctualLightFalloff(dist, posRange.w, (uint)u_debugParams.z);
             pointLightTerm += saturate(dot(N, Lp)) * colInt.w * atten;
         }
     }
@@ -101,8 +106,7 @@ float4 PSMain(PSInput input) : SV_TARGET
             // Spot cone falloff:
             // spotFactor = smoothstep(cosOuter, cosInner, cosTheta)
             float spotFactor = smoothstep(params.x, dirInner.w, cosTheta);
-            float atten = saturate(1.0 - dist / max(posRange.w, 1e-3));
-            atten *= atten;
+            float atten = PunctualLightFalloff(dist, posRange.w, (uint)u_debugParams.z);
             spotLightTerm += saturate(dot(N, Ls)) * colInt.w * atten * spotFactor;
         }
     }

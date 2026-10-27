@@ -12,7 +12,7 @@
 #include <system_error>
 #include <wrl/client.h>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {

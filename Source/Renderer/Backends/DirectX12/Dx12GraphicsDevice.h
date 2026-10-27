@@ -7,7 +7,7 @@
 #include <vector>
 #include <windows.h>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
 #if RHI_DIRECTX12
     class Dx12GraphicsDevice final : public IRHIDevice
@@ -28,10 +28,26 @@ namespace SasamiRenderer
         SwapChain& GetSwapChain() override;
         UINT GetDescriptorHandleIncrementSize(DescriptorHeapType type) const override;
         void WaitForGPU() override;
+        bool SupportsHdr10Output() const override;
+        bool SetHdr10ColorSpaceEnabled(bool enable) override;
         RhiTextureHandle CreateRhiTexture2DFromRgba8(uint32_t width,
                                                      uint32_t height,
                                                      const void* pixels,
-                                                     uint32_t rowPitchBytes) override;
+                                                     uint32_t rowPitchBytes,
+                                                     RhiFormat format) override;
+        RhiTextureHandle CreateRhiTexture3DFromData(uint32_t width,
+                                                    uint32_t height,
+                                                    uint32_t depth,
+                                                    const void* texels,
+                                                    uint32_t rowPitchBytes,
+                                                    uint32_t slicePitchBytes,
+                                                    RhiFormat format) override;
+        RhiTextureHandle CreateRhiTexture2DFromData(uint32_t width,
+                                                    uint32_t height,
+                                                    uint32_t mipLevels,
+                                                    const void* const* mipData,
+                                                    const uint32_t* rowPitchBytes,
+                                                    RhiFormat format) override;
         RhiTextureHandle CreateRhiTexture(const RhiTextureDesc& desc) override;
         RhiBufferHandle CreateRhiBuffer(const RhiBufferDesc& desc, const void* initialData = nullptr) override;
         bool UpdateRhiBuffer(RhiBufferHandle buffer,
@@ -73,6 +89,8 @@ namespace SasamiRenderer
         std::unique_ptr<IRhiCommandEncoder> CreateCommandEncoder(RhiQueueType queueType) override;
         bool SubmitCommandEncoder(IRhiCommandEncoder& encoder, RhiQueueType queueType) override;
         Resource* GetD3D12CompatibilityResource(RhiResourceHandle handle) override;
+        RhiGpuAddress GetRhiBufferGpuAddress(RhiBufferHandle handle) override;
+        ID3D12CommandSignature* GetDx12DrawIndexedCommandSignature() override;
 
         // Ray tracing
         bool BuildRhiBlases(const RhiBlasDesc* descs, uint32_t count,
@@ -129,6 +147,7 @@ namespace SasamiRenderer
 
         ComPtr<ID3D12Device> m_device;
         ComPtr<ID3D12Device5> m_rayTracingDevice;
+        ComPtr<ID3D12CommandSignature> m_drawIndexedCommandSignature;
         CommandQueue m_commandQueue;
         CommandQueue m_computeQueue;
         SwapChain m_swapChain;
@@ -137,6 +156,10 @@ namespace SasamiRenderer
         UINT64 m_fenceValue = 0;
         HANDLE m_fenceEvent = nullptr;
         bool m_supportsHardwareRayTracing = false;
+        bool m_supportsMeshShaders       = false;
+        // Cached at Initialize() from the primary output's current DXGI colour space; see
+        // DetectHdr10DisplaySupport in Dx12GraphicsDeviceInit.cpp.
+        bool m_supportsHdr10Output       = false;
         RhiBackendCapabilities m_capabilities;
         uint64_t m_nextRhiResourceHandle = 1;
         uint64_t m_nextRhiShaderHandle = 1;
@@ -177,3 +200,7 @@ namespace SasamiRenderer
     };
 #endif
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

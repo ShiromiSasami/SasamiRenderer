@@ -1,10 +1,15 @@
 #include "NeuralShaderApp.h"
 #include "ApplicationCore.h"
+#include "Renderer/Scene/SurfaceMaterialFactory.h"
+#include "Object/SampleFloorBox.h"
+#include "Light/DefaultSunLight.h"
 #include "ApplicationEntryPoint.h"
+#include "Input/CameraInputBinding.h"
 #include "Input/InputSystem.h"
 #include "Object/StaticModel.h"
 #include "Renderer/Scene/SurfaceMaterial.h"
 #include "UI/ImGuiCoordinator.h"
+#include "UI/UIVolume.h"
 #include "Foundation/Tools/DebugOutput.h"
 #include "Foundation/Math/MathUtil.h"
 #include "imgui.h"
@@ -14,23 +19,10 @@
 #include <vector>
 #include <boost/signals2/connection.hpp>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Sample::NeuralShader
 {
     namespace
     {
-        SurfaceMaterial MakeMaterial(float r, float g, float b, float roughness, float metallic)
-        {
-            SurfaceMaterial material{};
-            material.baseColor[0] = r;
-            material.baseColor[1] = g;
-            material.baseColor[2] = b;
-            material.baseColor[3] = 1.0f;
-            material.roughness = roughness;
-            material.metallic  = metallic;
-            material.reflectionStrength = Math::DefaultReflectionStrength(roughness, metallic);
-            material.occlusionStrength  = 1.0f;
-            return material;
-        }
     }
 
     void NeuralShaderApp::OnInit(ApplicationCore& app)
@@ -54,14 +46,7 @@ namespace SasamiRenderer
         app.UseDefaultRenderNodePreset();
 
         // Set up directional light (sun)
-        DirectionalLight sun{};
-        sun.yaw       = 45.0f;
-        sun.pitch     = 40.0f;
-        sun.intensity = 2.5f;
-        sun.color.r = 1.00f;
-        sun.color.g = 0.95f;
-        sun.color.b = 0.85f;
-        app.SetDirectionalLight(sun);
+        app.SetDirectionalLight(MakeDefaultSunLight());
 
         StaticModel* floorModel = app.CreateStaticModel();
         if (!floorModel) {
@@ -69,13 +54,7 @@ namespace SasamiRenderer
             app.RequestQuit();
             return;
         }
-        StaticModel::BoxDesc floorDesc{};
-        floorDesc.width    = 12.0f;
-        floorDesc.height   = 0.2f;
-        floorDesc.depth    = 12.0f;
-        floorDesc.material = MakeMaterial(0.52f, 0.54f, 0.58f, 0.9f, 0.0f);
-        floorModel->AddBox(floorDesc);
-        floorModel->SetTranslation(0.0f, -0.1f, 0.5f);
+        AddSampleFloorBox(*floorModel, MakeOpaqueSurfaceMaterial(0.52f, 0.54f, 0.58f, 0.9f, 0.0f));
 
         StaticModel* boxModel = app.CreateStaticModel();
         if (!boxModel) {
@@ -87,33 +66,12 @@ namespace SasamiRenderer
         boxDesc.width    = 1.2f;
         boxDesc.height   = 1.2f;
         boxDesc.depth    = 1.2f;
-        boxDesc.material = MakeMaterial(0.75f, 0.35f, 0.85f, 0.3f, 0.2f);
+        boxDesc.material = MakeOpaqueSurfaceMaterial(0.75f, 0.35f, 0.85f, 0.3f, 0.2f);
         boxModel->AddBox(boxDesc);
         boxModel->SetTranslation(0.0f, 0.6f, 0.5f);
 
         // Input bindings
-        auto& input = InputSystem::Instance();
-        static std::vector<boost::signals2::scoped_connection> s_connections;
-        s_connections.clear();
-
-        s_connections.emplace_back(input.ConnectOnKeyDown([this](WPARAM k) {
-            if (m_camera) m_camera->OnKeyDown(k);
-        }));
-        s_connections.emplace_back(input.ConnectOnKeyUp([this](WPARAM k) {
-            if (m_camera) m_camera->OnKeyUp(k);
-        }));
-        s_connections.emplace_back(input.ConnectOnMouseDown([this](int x, int y) {
-            if (m_camera) m_camera->OnMouseDown(x, y);
-        }));
-        s_connections.emplace_back(input.ConnectOnMouseUp([this]() {
-            if (m_camera) m_camera->OnMouseUp();
-        }));
-        s_connections.emplace_back(input.ConnectOnMouseMove([this](int x, int y, bool held) {
-            if (m_camera) m_camera->OnMouseMove(x, y, held);
-        }));
-        s_connections.emplace_back(input.ConnectOnMouseWheel([this](int d) {
-            if (m_camera) m_camera->OnMouseWheel(d);
-        }));
+        m_inputConnections = ConnectCameraInput([this]() { return m_camera; });
 
         // UI window
         ImGuiCoordinator::Instance().RegisterWindow("Neural Shader", [this]() {
@@ -129,7 +87,7 @@ namespace SasamiRenderer
             ImGui::Separator();
 
             float speed = m_camera->MoveSpeed();
-            if (ImGui::SliderFloat("Move Speed", &speed, 0.1f, 30.0f)) {
+            if (UI::Volume("Move Speed", &speed, 0.1f, 30.0f)) {
                 m_camera->SetMoveSpeed(speed);
             }
         });
@@ -153,16 +111,10 @@ namespace SasamiRenderer
 
     void NeuralShaderApp::OnShutdown(ApplicationCore& app)
     {
+        m_inputConnections.clear();
         app.ClearObjects();
         m_camera = nullptr;
     }
-
-    void NeuralShaderApp::OnResize(ApplicationCore& app, UINT width, UINT height)
-    {
-        (void)app;
-        (void)width;
-        (void)height;
-    }
 }
 
-SASAMI_IMPLEMENT_APPLICATION(SasamiRenderer::NeuralShaderApp, 1280, 720, L"Neural Shader Sample")
+SASAMI_IMPLEMENT_APPLICATION(SasamiEngine::Sample::NeuralShader::NeuralShaderApp, 1280, 720, L"Neural Shader Sample")

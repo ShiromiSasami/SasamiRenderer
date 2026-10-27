@@ -10,7 +10,7 @@
 #include <string_view>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     struct RenderPassBuildContext
     {
@@ -40,6 +40,7 @@ namespace SasamiRenderer
         DebugProbeGrid,
         FluidSurface,
         Particles,
+        ToonOutline,
     };
 
     class IRenderPassBuilder
@@ -58,7 +59,7 @@ namespace SasamiRenderer
     public:
         using RenderPassType = RendererEnums::RenderPassType;
         static constexpr size_t kSequencePassCount =
-            static_cast<size_t>(RendererEnums::RenderPassType::ScreenSpaceReflectionComposite) + 1u;
+            static_cast<size_t>(RendererEnums::RenderPassType::ToonOutline) + 1u;
 
         static RenderPassBuilderCatalog CreateDefault();
 
@@ -80,3 +81,7 @@ namespace SasamiRenderer
         std::vector<std::unique_ptr<IRenderPassBuilder>> m_builders;
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

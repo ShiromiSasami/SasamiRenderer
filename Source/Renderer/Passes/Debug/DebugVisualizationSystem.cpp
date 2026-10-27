@@ -2,7 +2,7 @@
 
 #include "Renderer/Passes/Debug/DebugProbeGridRenderPass.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     void DebugVisualizationSystem::Bind(std::shared_ptr<DebugProbeGridRenderPass> pass, EnsureInsertedCallback onEnable)
     {

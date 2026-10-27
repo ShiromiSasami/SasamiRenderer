@@ -37,8 +37,16 @@
 
 using namespace std;
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
+    namespace
+    {
+        // The state the transparent scene-colour history texture is actually in; see the barrier
+        // below for why it is not PIXEL alone.
+        constexpr D3D12_RESOURCE_STATES kHistoryReadState =
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    }
+
     void Renderer::TransitionBackBufferToRenderTarget(CommandList* cmdList, UINT backIndex)
     {
         D3D12_RESOURCE_BARRIER barrier = {};
@@ -66,7 +74,7 @@ namespace SasamiRenderer
         auto dsvMain = m_renderTargetPool.GetDepthDsv();
         const FLOAT clearColor[] = { 0.2f, 0.2f, 0.2f, 1.0f };
         cmdList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-        cmdList->ClearDepthStencilView(dsvMain, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+        cmdList->ClearDepthStencilView(dsvMain, D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0, 0, nullptr); // Reverse-Z: far plane clears to 0.0, near plane is 1.0
     }
 
     // SWRT execution methods moved to SWRTExecutor.cpp
@@ -201,16 +209,37 @@ namespace SasamiRenderer
         // through the pass's Setup() declarations so the graph stays the single owner.
 
         cmdList->SetGraphicsRootSignature(m_pipelineStateCache.GetRootSignature());
-        cmdList->SetPipelineState(m_pipelineStateCache.GetToneMapPipelineState());
+        DescriptorHeap* heaps[] = { m_srvAllocator.GetHeap() };
+        cmdList->SetDescriptorHeaps(1, heaps);
+
+        // Bloom reads SceneColor in the PIXEL_SHADER_RESOURCE state the graph left it in and
+        // only transitions its own private mips (BloomRenderer). It changes the PSO, viewport and
+        // render target, all of which are set again below.
+        auto* frame = m_frameCoordinator.GetFrameContext(backIndex);
+        bool bloomActive = false;
+        if (m_settings.bloomEnabled && frame && m_bloomRenderer.IsReady()) {
+            bloomActive = m_bloomRenderer.Execute(*cmdList, m_renderTargetPool.GetSceneColorSrv(),
+                                                  m_pipelineStateCache, m_frameCoordinator, *frame,
+                                                  m_settings.bloomRadius);
+        }
+
+        // The HDR10 PSO only differs in RTVFormats[0] (DXGI_FORMAT_R10G10B10A2_UNORM instead of
+        // R8G8B8A8_UNORM), matching whichever format the swap chain is actually running -- see
+        // m_hdrOutputActive / Renderer::ResizeViewport.
+        cmdList->SetPipelineState(m_hdrOutputActive ? m_pipelineStateCache.GetToneMapHdr10PipelineState()
+                                                     : m_pipelineStateCache.GetToneMapPipelineState());
         cmdList->RSSetViewports(1, &m_viewport);
         cmdList->RSSetScissorRects(1, &m_scissorRect);
 
         auto rtv = m_renderTargetPool.GetBackBufferRtv(backIndex);
         cmdList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
 
-        DescriptorHeap* heaps[] = { m_srvAllocator.GetHeap() };
-        cmdList->SetDescriptorHeaps(1, heaps);
         cmdList->SetGraphicsRootDescriptorTable(0, m_renderTargetPool.GetSceneColorSrv());
+        // t1 (root 1, the shadow-map table in the scene passes) carries the bloom result. While
+        // bloom is off it gets SceneColor again, so the table is never left unbound, and
+        // u_toneMapParams.w = 0 makes ToneMap_PS skip it.
+        cmdList->SetGraphicsRootDescriptorTable(1, bloomActive ? m_bloomRenderer.GetResultSrv()
+                                                               : m_renderTargetPool.GetSceneColorSrv());
 
         // ToneMapCB (b0, root parameter 2) has to be bound here. Without it the pass inherits
         // whatever CBV the previous draw left in that slot -- a plain 128-byte camera CB -- and
@@ -222,12 +251,23 @@ namespace SasamiRenderer
         //
         // The camera CB layout already reserves extra0 at exactly offset 128 (mvp 64B + world 64B),
         // which is the slot ToneMapCB declares u_toneMapParams in, so no new buffer type is needed.
-        // mvp/world are padding for this pass and the shader never reads them.
-        if (auto* frame = m_frameCoordinator.GetFrameContext(backIndex)) {
+        // mvp/world are padding for this pass, except mvp[0], which carries the bloom scale.
+        if (frame) {
             const float unusedMatrix[16] = {};
-            const float toneMapParams[4] = { m_settings.exposure, 0.0f, 0.0f, 0.0f };
+            // First matrix slot doubles as u_bloomScale (ToneMap_PS): [0] = 1 / bloom mip count.
+            float bloomScaleMatrix[16] = {};
+            bloomScaleMatrix[0] = bloomActive ? m_bloomRenderer.GetResultScale() : 0.0f;
+            // y: HDR10 output active this frame (see m_hdrOutputActive / Renderer::ResizeViewport),
+            // z: HDR10 paper-white nits (RenderSettings::hdrPaperWhiteNits). Both ignored by
+            // ToneMap_PS.hlsl's SDR path, which is unchanged.
+            const float toneMapParams[4] = {
+                m_settings.exposure,
+                m_hdrOutputActive ? 1.0f : 0.0f,
+                m_settings.hdrPaperWhiteNits,
+                bloomActive ? m_settings.bloomIntensity : 0.0f  // w: bloom lerp weight
+            };
             const D3D12_GPU_VIRTUAL_ADDRESS toneMapCb =
-                m_frameCoordinator.PushCameraCB(*frame, unusedMatrix, unusedMatrix, toneMapParams,
+                m_frameCoordinator.PushCameraCB(*frame, bloomScaleMatrix, unusedMatrix, toneMapParams,
                                                 nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
             if (toneMapCb != 0) {
                 cmdList->SetGraphicsRootConstantBufferView(2, toneMapCb);
@@ -258,26 +298,13 @@ namespace SasamiRenderer
 
         Resource& sceneColor = m_renderTargetPool.GetSceneColorTexture();
         Resource& transmissionCopy = m_renderTargetPool.GetTransmissionSceneColorCopyTexture();
-        D3D12_RESOURCE_BARRIER preCopy[] = {
-            CD3DX12_RESOURCE_BARRIER::Transition(sceneColor.Get(),
-                                                 D3D12_RESOURCE_STATE_RENDER_TARGET,
-                                                 D3D12_RESOURCE_STATE_COPY_SOURCE),
-            CD3DX12_RESOURCE_BARRIER::Transition(transmissionCopy.Get(),
-                                                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                                                 D3D12_RESOURCE_STATE_COPY_DEST)
-        };
-        cmdList->ResourceBarrier(_countof(preCopy), preCopy);
-        cmdList->Get()->CopyResource(transmissionCopy.Get(), sceneColor.Get());
 
-        D3D12_RESOURCE_BARRIER postCopy[] = {
-            CD3DX12_RESOURCE_BARRIER::Transition(sceneColor.Get(),
-                                                 D3D12_RESOURCE_STATE_COPY_SOURCE,
-                                                 D3D12_RESOURCE_STATE_RENDER_TARGET),
-            CD3DX12_RESOURCE_BARRIER::Transition(transmissionCopy.Get(),
-                                                 D3D12_RESOURCE_STATE_COPY_DEST,
-                                                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
-        };
-        cmdList->ResourceBarrier(_countof(postCopy), postCopy);
+        // No barriers here. TransparentSceneColorCopyRenderPass::Setup declares SceneColor as a
+        // copy source and TransmissionSceneColor as a copy destination, so the graph has already
+        // put both in the states this copy needs and its tracker still matches the hardware.
+        // Issuing barriers from inside a pass is what desynchronised the tracker before, and the
+        // debug layer caught it as a before-state mismatch on every launch.
+        cmdList->Get()->CopyResource(transmissionCopy.Get(), sceneColor.Get());
         return true;
     }
 
@@ -309,8 +336,12 @@ namespace SasamiRenderer
             CD3DX12_RESOURCE_BARRIER::Transition(backBuffer->Get(),
                                                  D3D12_RESOURCE_STATE_PRESENT,
                                                  D3D12_RESOURCE_STATE_COPY_SOURCE),
+            // 0xC0, not 0x80: this texture is created through the RHI as
+            // RhiResourceState::ShaderResource (RenderTargetPoolSwrt.cpp), which D3D12 realises as
+            // NON_PIXEL|PIXEL. The resource trace confirms initialState=0xC0, so claiming PIXEL
+            // alone here described a state it had never been in.
             CD3DX12_RESOURCE_BARRIER::Transition(history.Get(),
-                                                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                                 kHistoryReadState,
                                                  D3D12_RESOURCE_STATE_COPY_DEST)
         };
         cmdList->ResourceBarrier(_countof(preCopy), preCopy);
@@ -322,7 +353,7 @@ namespace SasamiRenderer
                                                  D3D12_RESOURCE_STATE_PRESENT),
             CD3DX12_RESOURCE_BARRIER::Transition(history.Get(),
                                                  D3D12_RESOURCE_STATE_COPY_DEST,
-                                                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+                                                 kHistoryReadState)
         };
         cmdList->ResourceBarrier(_countof(postCopy), postCopy);
         m_sceneColorHistoryValid = true;
@@ -353,4 +384,4 @@ namespace SasamiRenderer
     }
 
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

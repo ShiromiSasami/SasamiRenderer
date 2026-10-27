@@ -8,7 +8,7 @@
 #include <wincodec.h>
 #include <wrl.h>
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     namespace
     {

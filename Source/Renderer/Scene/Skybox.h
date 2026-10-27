@@ -11,7 +11,7 @@
 #include <functional>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     class Skybox
     {
@@ -30,6 +30,11 @@ namespace SasamiRenderer
         // srvHeap is the shader-visible CBV/SRV/UAV heap backing allocateSrvRange. The GPU
         // cubemap generator must bind it before dispatching: EnsureTexturesUploaded runs
         // right after the frame command list is reset, when no heap is bound yet.
+        // Minimal setup for the native (non-D3D12) backends, which never reach the full
+        // Initialize below. Only records the device so the RHI-side environment cubemap can be
+        // built later.
+        void InitializeNativeOnly(IRHIDevice& device);
+
         bool Initialize(IRHIDevice& device,
                         const AllocateSrvRangeCallback& allocateSrvRange,
                         DescriptorHeap* srvHeap = nullptr);
@@ -87,6 +92,23 @@ namespace SasamiRenderer
         float GetDirectionalLightMarkerBrightness() const { return m_directionalLightMarkerBrightness; }
         void SetDirectionalLightMarkerAngularRadius(float radians);
 
+        // Builds (once) an RHI cube texture of the HDR sky for the native backend paths, which cannot
+        // use m_skyboxTexture because that lives in a D3D12 descriptor heap. Returns {} when there is
+        // no HDR source loaded or the backend cannot create cube textures. Callers on the D3D12 path
+        // never need this, so nothing is built unless someone asks.
+        RhiTextureHandle EnsureNativeEnvironmentCubemap();
+        RhiTextureHandle GetNativeEnvironmentCubemap() const { return m_nativeEnvCubemap; }
+
+        // Opaque per-backend descriptor handle for the native environment cubemap, or 0 when there is
+        // none. Same shape as the per-draw albedo handle: the backend resolves it to its own descriptor.
+        uint64_t GetNativeEnvironmentCubemapSrv() const { return m_nativeEnvCubemapSrv; }
+
+        // Low-resolution (32^2) counterpart of the above, built in the same pass. Sampling the full
+        // 1024^2 environment cube along the surface normal reads like a mirror, not diffuse ambient;
+        // this smaller cube is coarse enough to approximate an irradiance term without a real
+        // cosine convolution.
+        uint64_t GetNativeAmbientCubemapSrv() const { return m_nativeAmbientCubemapSrv; }
+
     private:
         enum class SourceType
         {
@@ -104,6 +126,13 @@ namespace SasamiRenderer
         bool UploadLdrCubemapTexture(CommandList* cmdList);
         bool UploadFallbackSkyboxTexture(CommandList* cmdList);
         void PublishSkyboxSrv(DXGI_FORMAT format);
+
+        // Shared by EnsureNativeEnvironmentCubemap for both the full-resolution and the low-resolution
+        // ambient cube: converts the already-loaded HDR equirect (m_hdrEquirectPixels) to faceSize^2
+        // faces, packs them to half float, uploads a TextureCube through the RHI and publishes an SRV
+        // into outCubemapSrv. Only the face size differs between the two callers, so the float->half
+        // conversion, size validation and SRV creation live here once instead of twice.
+        RhiTextureHandle BuildNativeCubemap(uint32_t faceSize, uint64_t& outCubemapSrv);
 
         IRHIDevice* m_device = nullptr;
 
@@ -133,6 +162,15 @@ namespace SasamiRenderer
         UINT m_hdrEquirectHeight = 0;
         std::vector<float> m_hdrEquirectPixels;
 
+        RhiTextureHandle m_nativeEnvCubemap{};
+        bool m_nativeEnvCubemapTried = false;
+        uint64_t m_nativeEnvCubemapSrv = 0;
+
+        // Built alongside m_nativeEnvCubemap in the same EnsureNativeEnvironmentCubemap call (guarded
+        // by the same m_nativeEnvCubemapTried latch), just at a much smaller face size.
+        RhiTextureHandle m_nativeAmbientCubemap{};
+        uint64_t m_nativeAmbientCubemapSrv = 0;
+
         SkyboxLoadFormat m_skyboxLoadFormat = SkyboxLoadFormat::Auto;
         bool m_directionalLightMarkerEnabled = true;
         float m_directionalLightMarkerAngularRadius = 0.02f;
@@ -145,3 +183,7 @@ namespace SasamiRenderer
         RhiVertexBufferBinding m_skyboxVbBinding{};
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

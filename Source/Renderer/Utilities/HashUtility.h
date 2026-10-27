@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // Incremental FNV-1a byte hash shared by scene/ray-tracing dirty-state hashing.
     inline void HashBytes(uint64_t& hash, const void* data, size_t size)
@@ -20,3 +20,7 @@ namespace SasamiRenderer
         }
     }
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

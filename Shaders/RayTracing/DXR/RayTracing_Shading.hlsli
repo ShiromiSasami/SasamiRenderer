@@ -77,7 +77,6 @@ float3 EvaluateBrdf(float3 normal,
                     float metallic)
 {
     float a = roughness * roughness;
-    float k = ((roughness + 1.0) * (roughness + 1.0)) / 8.0;
     float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
 
     float3 halfVector = SafeNormalize(view + lightDir);
@@ -93,10 +92,10 @@ float3 EvaluateBrdf(float3 normal,
     float NdotH = Saturate(dot(normal, halfVector));
     float VdotH = Saturate(dot(view, halfVector));
     float D = DistributionGGX(NdotH, a);
-    float G = GeometrySmith(NdotV, NdotL, k);
+    float Vis = V_SmithGGXCorrelated(NdotV, NdotL, roughness);
     float3 F = FresnelSchlick(VdotH, F0);
 
-    float3 specular = (D * G) * F / max(4.0 * NdotV * NdotL, 1e-4);
+    float3 specular = (D * Vis) * F;
     float3 kd = (1.0 - F) * (1.0 - metallic);
     float3 diffuse = kd * albedo / 3.14159265;
     return (diffuse + specular) * NdotL * lightColor;

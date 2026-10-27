@@ -7,7 +7,7 @@
 #include "Foundation/Boot/InitTaskScheduler.h"
 #include "Foundation/Boot/MainThreadTaskPump.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     class ApplicationCore;
 
@@ -78,3 +78,4 @@ namespace SasamiRenderer
         UINT m_pendingResizeHeight = 0;
     };
 }
+namespace SasamiEngine { using namespace App; }

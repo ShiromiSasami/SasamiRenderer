@@ -4,7 +4,7 @@
 #include "Foundation/Math/Rotation3.h"
 #include "Foundation/Math/Vector3.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     struct TransformComponent : public IComponent
     {
@@ -13,3 +13,4 @@ namespace SasamiRenderer
         Vector3 scale = Vector3(1.0f, 1.0f, 1.0f);
     };
 }
+namespace SasamiEngine { using namespace App; }

@@ -7,7 +7,9 @@ float3 ComputeCameraRayDir(uint2 pixel, uint2 sourceSize)
 {
     float ndcX =  ((float(pixel.x) + 0.5f) / float(sourceSize.x)) * 2.0f - 1.0f;
     float ndcY = -((float(pixel.y) + 0.5f) / float(sourceSize.y)) * 2.0f + 1.0f;
-    float4 dir = mul(float4(ndcX, ndcY, 1.0f, 1.0f), g_invVP);
+    // Reverse-Z: far plane is NDC z == 0.0 (not 1.0), so the far point used to build
+    // the camera ray direction must use z=0 here.
+    float4 dir = mul(float4(ndcX, ndcY, 0.0f, 1.0f), g_invVP);
     return normalize(dir.xyz / dir.w - g_cameraPos);
 }
 
@@ -37,7 +39,7 @@ float EvalPhat(uint i, float3 pos, float3 N)
     if (i < g_pointLightCount)
     {
         GpuPointLightRT pl = g_pointLights[i];
-        return PhatPoint(pos, N, pl.pos, pl.colorIntensity, pl.range);
+        return PhatPoint(pos, N, pl.pos, pl.colorIntensity, pl.range, g_punctualLightFalloff);
     }
     uint si = i - g_pointLightCount;
     GpuSpotLightRT sl = g_spotLights[si];
@@ -48,7 +50,7 @@ float EvalPhat(uint i, float3 pos, float3 N)
     float  cosA = dot(-L, normalize(sl.dir));
     if (cosA < sl.cosOuter) return 0.0f;
     float spotAtten = smoothstep(sl.cosOuter, sl.cosInner, cosA);
-    return PhatPoint(pos, N, sl.pos, sl.colorIntensity * spotAtten, sl.range);
+    return PhatPoint(pos, N, sl.pos, sl.colorIntensity * spotAtten, sl.range, g_punctualLightFalloff);
 }
 
 void StoreInvalid(uint2 pixel, uint pixIdx)

@@ -37,7 +37,9 @@ float4 PSMain(PSInput input) : SV_TARGET
 
     float depth = SceneDepthTex.Load(int3(pixel, 0)).r;
     float4 normalSample = GBufferNormalTex.Load(int3(pixel, 0));
-    if (depth >= 1.0 || normalSample.w <= 0.0) {
+    // Reverse-Z: far plane is depth == 0.0, so background pixels satisfy depth <= 0.0.
+    // normalSample.w is a linear distance (unaffected by reverse-Z), so its check is unchanged.
+    if (depth <= 0.0 || normalSample.w <= 0.0) {
         return float4(0.0, 0.0, 0.0, 1.0);
     }
 
@@ -49,10 +51,9 @@ float4 PSMain(PSInput input) : SV_TARGET
     float materialAo = saturate(material.b);
     float3 emissiveColor = GBufferEmissiveTex.Load(int3(pixel, 0)).rgb;
 
-    float runtimeAo = 1.0;
-    if (u_reflectionParams.z > 0.5 && u_reflectionParams.w > 0.5) {
-        runtimeAo = RuntimeAOTex.SampleLevel(LinearWrap, uv, 0).r;
-    }
+    // u_reflectionParams.zw is screen resolution in pixels (see LightCB.hlsli), not a
+    // flag -- it is always > 0.5 for any real viewport, so this used to be a dead check.
+    float runtimeAo = RuntimeAOTex.SampleLevel(LinearWrap, uv, 0).r;
     float rawAo = saturate(materialAo * runtimeAo);
     float ao = lerp(saturate(u_shadowParams.w), 1.0, rawAo);
 
@@ -71,6 +72,9 @@ float4 PSMain(PSInput input) : SV_TARGET
     if (debugMode == 3) return float4(roughness.xxx, 1.0);
     if (debugMode == 4) return float4(metallic.xxx, 1.0);
     if (debugMode == 5) return float4(ao.xxx, 1.0);
+    // Every one of these views is written through an sRGB encode -- calibrated 2026-09-13 against
+    // mode 10, whose Ld is known: only the sRGB reading recovers a unit vector (|Ld| = 1.014;
+    // reading the bytes as linear gives 0.634). So a byte of 185 here is a value of 0.484, not 0.73.
     if (debugMode == 6) return float4(directionalVisibility.xxx, 1.0);
     if (debugMode == 7) return float4(emissiveColor, 1.0);
     if (debugMode == 8 || debugMode == 9) return float4(runtimeAo.xxx, 1.0);
@@ -79,6 +83,9 @@ float4 PSMain(PSInput input) : SV_TARGET
     if (debugMode == 12) return float4(saturate(ReflectionTex.SampleLevel(LinearWrap, uv, 0).rgb), 1.0);
     if (debugMode == 13) return float4(saturate(ReflectionTex.SampleLevel(LinearWrap, uv, 0).a).xxx, 1.0);
     if (debugMode == 14) return float4(saturate(ReflectionTex.SampleLevel(LinearWrap, uv, 0).r).xxx, 1.0);
+    // Not gated on NdotL: a backfacing pixel still belongs to a cascade, and the point of
+    // this view is which cascade a pixel samples, independent of whether it is lit.
+    if (debugMode == 16) return float4(ShadowCascadeDebugColor(ReconstructWorldPos(uv, depth)), 1.0);
 
     // SwrtReflectionComposite is written by the later reflection composite pass.
     return float4(0.0, 0.0, 0.0, 1.0);

@@ -8,7 +8,7 @@
 #include <d3d12.h>
 #include <wrl/client.h>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // Per-pass GPU timing via D3D12 timestamp queries.
     //
@@ -96,3 +96,7 @@ namespace SasamiRenderer
         std::vector<ScopeResult> m_results;
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

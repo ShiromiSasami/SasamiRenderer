@@ -48,9 +48,20 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Samples\PBRApp\RenderingApp.h" />
+    <ClInclude Include="Samples\PBRApp\RenderingAppProbeGrid.h" />
+    <ClInclude Include="Samples\PBRApp\RenderingAppSessionFiles.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Samples\PBRApp\RenderingApp.cpp" />
+    <ClCompile Include="Samples\PBRApp\RenderingAppGiProbeCache.cpp" />
+    <ClCompile Include="Samples\PBRApp\RenderingAppInput.cpp" />
+    <ClCompile Include="Samples\PBRApp\RenderingAppProbeGrid.cpp" />
+    <ClCompile Include="Samples\PBRApp\RenderingAppScene.cpp" />
+    <ClCompile Include="Samples\PBRApp\RenderingAppSessionState.cpp" />
+    <ClCompile Include="Samples\PBRApp\RenderingAppSettingsFile.cpp" />
+    <ClCompile Include="Samples\PBRApp\RenderingAppUI.cpp" />
+    <ClCompile Include="Samples\PBRApp\RenderingAppUILighting.cpp" />
+    <ClCompile Include="Samples\PBRApp\RenderingAppUIRendering.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="SasamiRenderer.vcxproj">
@@ -138,6 +149,7 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <Import Project="RhiBuild.props" />
+  <Import Project="SasamiPaths.props" />
   <ImportGroup Label="ExtensionSettings">
   </ImportGroup>
   <ImportGroup Label="Shared">
@@ -224,7 +236,7 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp23</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Source\Renderer;$(ProjectDir)Samples;$(ProjectDir)Samples\PBRApp;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;C:\local\boost_1_89_0;$(RhiVulkanIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Source\Renderer;$(ProjectDir)Samples;$(ProjectDir)Samples\PBRApp;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;$(BoostIncludeDir);$(RhiVulkanIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/FS /utf-8 %(AdditionalOptions)</AdditionalOptions>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
@@ -277,7 +289,7 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp23</LanguageStandard>
       <ForcedIncludeFiles>$(ProjectDir)Source\StdFirst.h</ForcedIncludeFiles>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Source\Renderer;$(ProjectDir)Samples;$(ProjectDir)Samples\PBRApp;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;C:\local\boost_1_89_0;$(RhiVulkanIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\AppFramework;$(ProjectDir)Source\Renderer;$(ProjectDir)Samples;$(ProjectDir)Samples\PBRApp;$(ProjectDir)Libraries;$(ProjectDir)Libraries\imgui-master;$(ProjectDir)Libraries\rapidjson\include;$(ProjectDir)src\header;$(BoostIncludeDir);$(RhiVulkanIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/FS /utf-8 %(AdditionalOptions)</AdditionalOptions>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>

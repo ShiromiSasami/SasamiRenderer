@@ -4,7 +4,7 @@
 #include <functional>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     using SrvAllocFn = std::function<bool(UINT count, CpuDescriptorHandle& outCpu, GpuDescriptorHandle& outGpu)>;
 
@@ -317,3 +317,7 @@ namespace SasamiRenderer
         bool m_initialized = false;
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

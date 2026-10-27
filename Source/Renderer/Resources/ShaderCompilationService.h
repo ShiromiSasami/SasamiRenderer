@@ -8,7 +8,7 @@
 
 struct ID3D12Device;
 
-namespace SasamiRenderer::ShaderCompilationService
+namespace SasamiEngine::Render::ShaderCompilationService
 {
     std::string GetConfiguredShaderModel();
     std::string ResolveEffectiveShaderModel(ID3D12Device* device, const std::string& requestedModel);
@@ -46,3 +46,7 @@ namespace SasamiRenderer::ShaderCompilationService
                                        const char* profile,
                                        std::vector<uint8_t>& outBytecode);
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

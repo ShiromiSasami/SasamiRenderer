@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <wrl/client.h>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // Memoizes resolved shader bytecode blobs keyed by (source rel path, entry, target)
     // so the same shader is disk-loaded/compiled once per run even when several
@@ -26,3 +26,7 @@ namespace SasamiRenderer
         std::unordered_map<std::wstring, Microsoft::WRL::ComPtr<ID3DBlob>> m_blobs;
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

@@ -1,8 +1,8 @@
 // VolumetricCloud_VS.hlsl
-// Fullscreen triangle at z = 1.0 (far plane) so the depth test
-// (D3D12_COMPARISON_FUNC_LESS_EQUAL, no depth write) naturally passes
-// only on sky/background pixels (depth == 1.0) and is rejected by opaque
-// geometry pixels (depth < 1.0).  No vertex buffer is required.
+// Fullscreen triangle at z = 0.0 (far plane under reverse-Z) so the depth test
+// (D3D12_COMPARISON_FUNC_GREATER_EQUAL, no depth write) naturally passes
+// only on sky/background pixels (depth == 0.0) and is rejected by opaque
+// geometry pixels (depth > 0.0).  No vertex buffer is required.
 
 struct VSOutput
 {
@@ -20,7 +20,7 @@ VSOutput VSMain(uint id : SV_VertexID)
     float2 ndc = uv * 2.0f - 1.0f;
 
     VSOutput o;
-    o.position = float4(ndc.x, -ndc.y, 1.0f, 1.0f); // z=1 → far plane
+    o.position = float4(ndc.x, -ndc.y, 0.0f, 1.0f); // reverse-Z: z=0 → far plane
     o.uv       = uv;
     return o;
 }

@@ -1,3 +1,4 @@
+#include "Renderer/Runtime/NativeBackendFrame.h"
 #include "Renderer/Runtime/Renderer.h"
 #include "Renderer/Passes/Debug/DebugProbeGridRenderPass.h"
 #include "Renderer/Scene/SceneSynchronizer.h"
@@ -40,301 +41,16 @@
 
 using namespace std;
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     using Math::Mul4x4;
 
     namespace
     {
-        D3D12_RESOURCE_STATES ToCompatibilityDx12State(RhiResourceState state)
-        {
-            switch (state) {
-            case RhiResourceState::RenderTarget: return D3D12_RESOURCE_STATE_RENDER_TARGET;
-            case RhiResourceState::DepthWrite: return D3D12_RESOURCE_STATE_DEPTH_WRITE;
-            case RhiResourceState::DepthRead: return D3D12_RESOURCE_STATE_DEPTH_READ;
-            case RhiResourceState::ShaderResource: return D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-            case RhiResourceState::UnorderedAccess: return D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-            case RhiResourceState::CopySource: return D3D12_RESOURCE_STATE_COPY_SOURCE;
-            case RhiResourceState::CopyDest: return D3D12_RESOURCE_STATE_COPY_DEST;
-            case RhiResourceState::Present: return D3D12_RESOURCE_STATE_PRESENT;
-            case RhiResourceState::Common:
-            default: return D3D12_RESOURCE_STATE_COMMON;
-            }
-        }
-
-        D3D_PRIMITIVE_TOPOLOGY ToCompatibilityDx12Topology(RhiPrimitiveTopology topology)
-        {
-            switch (topology) {
-            case RhiPrimitiveTopology::TriangleStrip: return D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
-            case RhiPrimitiveTopology::LineList: return D3D_PRIMITIVE_TOPOLOGY_LINELIST;
-            case RhiPrimitiveTopology::LineStrip: return D3D_PRIMITIVE_TOPOLOGY_LINESTRIP;
-            case RhiPrimitiveTopology::PointList: return D3D_PRIMITIVE_TOPOLOGY_POINTLIST;
-            case RhiPrimitiveTopology::PatchList: return D3D_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST;
-            case RhiPrimitiveTopology::TriangleList:
-            default: return D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-            }
-        }
-
-        class D3D12CommandListRhiEncoder final : public IRhiCommandEncoder
-        {
-        public:
-            D3D12CommandListRhiEncoder(IRHIDevice& device, CommandList& commandList)
-                : m_device(device)
-                , m_commandList(commandList)
-            {
-            }
-
-            void TransitionResources(const RhiResourceTransitionDesc* transitions, uint32_t count) override
-            {
-                if (!transitions || count == 0) {
-                    return;
-                }
-
-                std::vector<ResourceBarrier> barriers;
-                barriers.reserve(count);
-                for (uint32_t i = 0; i < count; ++i) {
-                    Resource* resource = m_device.GetD3D12CompatibilityResource(transitions[i].resource);
-                    if (!resource || !resource->IsValid()) {
-                        continue;
-                    }
-
-                    barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
-                        resource->Get(),
-                        ToCompatibilityDx12State(transitions[i].before),
-                        ToCompatibilityDx12State(transitions[i].after),
-                        transitions[i].subresource));
-                }
-
-                if (!barriers.empty()) {
-                    m_commandList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
-                }
-            }
-
-            void SetViewports(const RhiViewport* viewports, uint32_t count) override
-            {
-                if (!viewports || count == 0) {
-                    return;
-                }
-
-                std::vector<Viewport> dxViewports(count);
-                for (uint32_t i = 0; i < count; ++i) {
-                    dxViewports[i] = {
-                        viewports[i].x,
-                        viewports[i].y,
-                        viewports[i].width,
-                        viewports[i].height,
-                        viewports[i].minDepth,
-                        viewports[i].maxDepth,
-                    };
-                }
-                m_commandList.RSSetViewports(count, dxViewports.data());
-            }
-
-            void SetScissors(const RhiRect* scissors, uint32_t count) override
-            {
-                if (!scissors || count == 0) {
-                    return;
-                }
-
-                std::vector<Rect> dxRects(count);
-                for (uint32_t i = 0; i < count; ++i) {
-                    dxRects[i] = { scissors[i].left, scissors[i].top, scissors[i].right, scissors[i].bottom };
-                }
-                m_commandList.RSSetScissorRects(count, dxRects.data());
-            }
-
-            void SetGraphicsPipeline(RhiPipelineHandle handle) override
-            {
-                if (!handle.IsValid()) return;
-                auto* pso = reinterpret_cast<ID3D12PipelineState*>(static_cast<uintptr_t>(handle.id));
-                m_commandList.Get()->SetPipelineState(pso);
-            }
-
-            void SetComputePipeline(RhiPipelineHandle handle) override
-            {
-                SetGraphicsPipeline(handle);
-            }
-
-            void SetPrimitiveTopology(RhiPrimitiveTopology topology) override
-            {
-                m_commandList.IASetPrimitiveTopology(ToCompatibilityDx12Topology(topology));
-            }
-
-            void Draw(const RhiDrawDesc& desc) override
-            {
-#if defined(_DEBUG)
-                DebugIncrementDrawCount();
-#endif
-                m_commandList.DrawInstanced(desc.vertexCount,
-                                            desc.instanceCount,
-                                            desc.startVertex,
-                                            desc.startInstance);
-            }
-
-            void DrawIndexed(const RhiDrawIndexedDesc& desc) override
-            {
-#if defined(_DEBUG)
-                DebugIncrementDrawCount();
-#endif
-                m_commandList.DrawIndexedInstanced(desc.indexCount,
-                                                   desc.instanceCount,
-                                                   desc.startIndex,
-                                                   desc.baseVertex,
-                                                   desc.startInstance);
-            }
-
-            void Dispatch(const RhiDispatchDesc& desc) override
-            {
-                m_commandList.Dispatch(desc.groupCountX, desc.groupCountY, desc.groupCountZ);
-            }
-
-            void SetGraphicsPipelineLayout(RhiPipelineLayoutHandle handle) override
-            {
-                if (!handle.IsValid()) return;
-                auto* sig = reinterpret_cast<ID3D12RootSignature*>(static_cast<uintptr_t>(handle.id));
-                m_commandList.Get()->SetGraphicsRootSignature(sig);
-            }
-
-            void SetComputePipelineLayout(RhiPipelineLayoutHandle handle) override
-            {
-                if (!handle.IsValid()) return;
-                auto* sig = reinterpret_cast<ID3D12RootSignature*>(static_cast<uintptr_t>(handle.id));
-                m_commandList.Get()->SetComputeRootSignature(sig);
-            }
-
-            void SetDescriptorHeap(RhiDescriptorHeapHandle handle) override
-            {
-                if (!handle.IsValid()) return;
-                auto* heap = reinterpret_cast<ID3D12DescriptorHeap*>(static_cast<uintptr_t>(handle.id));
-                m_commandList.SetDescriptorHeaps(1, &heap);
-            }
-
-            void SetGraphicsDescriptorTable(uint32_t slot, RhiGpuDescriptorHandle table) override
-            {
-                m_commandList.SetGraphicsRootDescriptorTable(slot, { table.ptr });
-            }
-
-            void SetComputeDescriptorTable(uint32_t slot, RhiGpuDescriptorHandle table) override
-            {
-                m_commandList.SetComputeRootDescriptorTable(slot, { table.ptr });
-            }
-
-            void SetGraphicsConstantBufferView(uint32_t slot, RhiGpuAddress address) override
-            {
-                m_commandList.SetGraphicsRootConstantBufferView(slot, address);
-            }
-
-            void SetComputeConstantBufferView(uint32_t slot, RhiGpuAddress address) override
-            {
-                m_commandList.SetComputeRootConstantBufferView(slot, address);
-            }
-
-            void SetGraphicsShaderResourceView(uint32_t slot, RhiGpuAddress address) override
-            {
-                m_commandList.SetGraphicsRootShaderResourceView(slot, address);
-            }
-
-            void SetComputeShaderResourceView(uint32_t slot, RhiGpuAddress address) override
-            {
-                m_commandList.SetComputeRootShaderResourceView(slot, address);
-            }
-
-            void SetRenderTargets(uint32_t numRtvs,
-                                  const RhiCpuDescriptorHandle* rtvs,
-                                  const RhiCpuDescriptorHandle* dsv = nullptr) override
-            {
-                std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> dxRtvs(numRtvs);
-                for (uint32_t i = 0; i < numRtvs; ++i)
-                    dxRtvs[i] = { static_cast<SIZE_T>(rtvs[i].ptr) };
-                const D3D12_CPU_DESCRIPTOR_HANDLE* dsvPtr = nullptr;
-                D3D12_CPU_DESCRIPTOR_HANDLE dxDsv{};
-                if (dsv && dsv->IsValid()) {
-                    dxDsv = { static_cast<SIZE_T>(dsv->ptr) };
-                    dsvPtr = &dxDsv;
-                }
-                m_commandList.OMSetRenderTargets(numRtvs,
-                                                  numRtvs > 0 ? dxRtvs.data() : nullptr,
-                                                  FALSE,
-                                                  dsvPtr);
-            }
-
-            void ClearRenderTarget(RhiCpuDescriptorHandle rtv, const RhiClearColor& color) override
-            {
-                const float rgba[4] = { color.r, color.g, color.b, color.a };
-                m_commandList.ClearRenderTargetView({ static_cast<SIZE_T>(rtv.ptr) }, rgba, 0, nullptr);
-            }
-
-            void ClearDepthStencil(RhiCpuDescriptorHandle dsv, float depth, uint8_t stencil) override
-            {
-                m_commandList.ClearDepthStencilView({ static_cast<SIZE_T>(dsv.ptr) },
-                                                    D3D12_CLEAR_FLAG_DEPTH,
-                                                    depth,
-                                                    stencil,
-                                                    0, nullptr);
-            }
-
-            void SetVertexBuffers(uint32_t startSlot, uint32_t count,
-                                  const RhiVertexBufferView* views) override
-            {
-                std::vector<D3D12_VERTEX_BUFFER_VIEW> dxViews(count);
-                for (uint32_t i = 0; i < count; ++i) {
-                    dxViews[i].BufferLocation = views[i].gpuAddress;
-                    dxViews[i].StrideInBytes  = views[i].strideInBytes;
-                    dxViews[i].SizeInBytes    = views[i].sizeInBytes;
-                }
-                m_commandList.IASetVertexBuffers(startSlot, count, dxViews.data());
-            }
-
-            void SetIndexBuffer(const RhiIndexBufferView& view) override
-            {
-                D3D12_INDEX_BUFFER_VIEW ibv{};
-                ibv.BufferLocation = view.gpuAddress;
-                ibv.SizeInBytes    = view.sizeInBytes;
-                ibv.Format         = view.is32Bit ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT;
-                m_commandList.IASetIndexBuffer(&ibv);
-            }
-
-            void SetVertexBufferBindings(uint32_t startSlot, uint32_t count,
-                                         const RhiVertexBufferBinding* bindings) override
-            {
-                if (count == 0 || !bindings) return;
-                std::vector<D3D12_VERTEX_BUFFER_VIEW> dxViews(count);
-                for (uint32_t i = 0; i < count; ++i) {
-                    Resource* resource = m_device.GetD3D12CompatibilityResource(bindings[i].buffer);
-                    if (!resource) {
-                        continue;
-                    }
-                    dxViews[i].BufferLocation = resource->GetGPUVirtualAddress() + bindings[i].offsetInBytes;
-                    dxViews[i].StrideInBytes  = bindings[i].strideInBytes;
-                    dxViews[i].SizeInBytes    = bindings[i].sizeInBytes;
-                }
-                m_commandList.IASetVertexBuffers(startSlot, count, dxViews.data());
-            }
-
-            void SetIndexBufferBinding(const RhiIndexBufferBinding& binding) override
-            {
-                Resource* resource = m_device.GetD3D12CompatibilityResource(binding.buffer);
-                if (!resource) {
-                    return;
-                }
-                D3D12_INDEX_BUFFER_VIEW ibv{};
-                ibv.BufferLocation = resource->GetGPUVirtualAddress() + binding.offsetInBytes;
-                ibv.SizeInBytes    = binding.sizeInBytes;
-                ibv.Format         = binding.is32Bit ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT;
-                m_commandList.IASetIndexBuffer(&ibv);
-            }
-
-        private:
-            IRHIDevice& m_device;
-            CommandList& m_commandList;
-        };
-
-        bool UsesNativeBackendFrame(const IRHIDevice& device)
-        {
-            return !device.GetCapabilities().supportsFeatureRenderPasses &&
-                   device.GetCapabilities().supportsNativeFrame;
-        }
-
+        // ToCompatibilityDx12State / ToCompatibilityDx12Topology / D3D12CommandListRhiEncoder
+        // used to be defined here as well. They now live in D3D12CommandListRhiEncoder.h with
+        // external linkage so RendererDrawCallbacks.cpp and RendererPassServices.cpp can share
+        // one definition; this file reaches them through Renderer.h -> FrameRenderContext.h.
         uint32_t ComputeScaledDimension(uint32_t dimension, float scale)
         {
             return std::max(1u, static_cast<uint32_t>(std::round(static_cast<float>(dimension) * scale)));
@@ -370,30 +86,7 @@ namespace SasamiRenderer
                    view == RendererEnums::GBufferDebugView::SwrtReflectionComposite;
         }
 
-        constexpr uint32_t kGIProbeCacheMagic = 0x43504753u; // "SGPC", little endian
-        constexpr uint32_t kGIProbeCacheVersion = 3u; // v3: probe bake writes at full weight (see IrradianceProbeGrid::FillUpdateCB)
-        constexpr uint32_t kGIProbeCacheCoeffCount = 9u;
 
-        struct GIProbeCacheFileHeader
-        {
-            uint32_t magic = kGIProbeCacheMagic;
-            uint32_t version = kGIProbeCacheVersion;
-            uint32_t headerSize = 0u;
-            uint32_t coeffCount = kGIProbeCacheCoeffCount;
-            uint32_t countX = 0u;
-            uint32_t countY = 0u;
-            uint32_t countZ = 0u;
-            uint32_t reserved = 0u;
-            float origin[3] = {};
-            float spacing[3] = {};
-            uint64_t stateHash = 0u;
-            uint64_t dataSizeBytes = 0u;
-        };
-
-        bool NearlyEqual(float a, float b)
-        {
-            return std::fabs(a - b) <= 1.0e-4f;
-        }
     }
 
     void Renderer::RetireDeferredUploadBatches()
@@ -421,7 +114,9 @@ namespace SasamiRenderer
         policy.useTessellation = m_settings.useTessellation;
         policy.useTessellationWireframe = m_settings.tessWireframeEnabled;
         policy.useTessellationDebugColors = m_settings.tessDebugColorsEnabled;
-        policy.useMeshletDebugView = m_settings.meshletDebugViewEnabled;
+        policy.useMeshShader = m_settings.useMeshShader &&
+            m_pipelineStateCache.GetMeshShaderPipelineState().Get() != nullptr &&
+            m_pipelineStateCache.GetMeshShaderRootSignature().Get() != nullptr;
         policy.useShadowTessellationPath = useShadowTessPath;
         policy.useSoftwareRayTracedDirectionalShadow =
             (m_settings.renderPathMode == RenderPathMode::Raster) &&
@@ -466,6 +161,7 @@ namespace SasamiRenderer
         policy.vsmBlurEnabled = m_settings.vsmBlurEnabled;
         m_lightSystem.SetAoMinOcclusion(m_settings.aoMinOcclusion);
         m_lightSystem.SetAoDirectLightingStrength(m_settings.aoDirectLightingStrength);
+        m_lightSystem.SetPunctualLightFalloff(m_settings.punctualLightFalloff);
         return policy;
     }
 
@@ -583,10 +279,15 @@ namespace SasamiRenderer
             inputs.ssr.reflectionSrv = m_renderTargetPool.GetSSRReflectionSrv();
             inputs.ssr.reflectionUav = m_renderTargetPool.GetSSRReflectionUav();
         }
-        const bool usesSsaoAo = m_settings.runtimeAoEnabled &&
-            UsesSsaoRuntimeAmbientOcclusion(m_settings.ambientOcclusionMode, m_settings.runtimeAoMethod);
-        const bool usesRayTracedAo = m_settings.runtimeAoEnabled &&
-            UsesRayTracedRuntimeAmbientOcclusion(m_settings.ambientOcclusionMode, m_settings.runtimeAoMethod);
+        // GetEffectiveAmbientOcclusionMode folds runtimeAoEnabled in once, so the predicates and the
+        // switch below cannot disagree about what "runtime AO off" means. The RayTracedAOOnly arm of
+        // that switch used to read the raw setting and bound the SWRT AO texture even with the master
+        // switch off, which is the same hole the native path had at RendererNativeFrame.cpp.
+        const RendererEnums::AmbientOcclusionMode effectiveAoMode = GetEffectiveAmbientOcclusionMode();
+        const bool usesSsaoAo =
+            UsesSsaoRuntimeAmbientOcclusion(effectiveAoMode, m_settings.runtimeAoMethod);
+        const bool usesRayTracedAo =
+            UsesRayTracedRuntimeAmbientOcclusion(effectiveAoMode, m_settings.runtimeAoMethod);
         inputs.ao.ssaoRtv = m_renderTargetPool.GetSSAORtv();
         inputs.ao.ssaoResource =
             (usesSsaoAo && m_renderTargetPool.GetSSAOTexture().IsValid()) ? m_renderTargetPool.GetSSAOTexture().Get() : nullptr;
@@ -595,7 +296,7 @@ namespace SasamiRenderer
         inputs.ao.ssaoBlurRtv = m_renderTargetPool.GetSSAOBlurRtv();
         inputs.ao.ssaoBlurResource =
             (usesSsaoAo && m_renderTargetPool.GetSSAOBlurTexture().IsValid()) ? m_renderTargetPool.GetSSAOBlurTexture().Get() : nullptr;
-        switch (m_settings.ambientOcclusionMode) {
+        switch (effectiveAoMode) {
         case RendererEnums::AmbientOcclusionMode::MaterialOnly:
             inputs.ao.screenSpaceAoSrv = defaultAoSrv;
             break;
@@ -606,11 +307,17 @@ namespace SasamiRenderer
                     m_renderTargetPool.GetSWRTAmbientOcclusionTexture().IsValid()
                         ? m_renderTargetPool.GetSWRTAmbientOcclusionSrv()
                         : defaultAoSrv;
-            } else {
+            } else if (usesSsaoAo) {
                 inputs.ao.screenSpaceAoSrv =
                     m_renderTargetPool.GetSSAOBlurTexture().IsValid() ? m_renderTargetPool.GetSSAOBlurSrv()
                     : m_renderTargetPool.GetSSAOTexture().IsValid() ? m_renderTargetPool.GetSSAOSrv()
                     : defaultAoSrv;
+            } else {
+                // runtimeAoEnabled is false: the SSAO pass above is a no-op and never refreshes
+                // SSAOBlur/SSAO, so binding those textures here would keep showing whatever AO was
+                // baked into them the last time Runtime AO was on. Fall back to the flat white SRV
+                // so disabling Runtime AO actually removes AO instead of freezing the last frame.
+                inputs.ao.screenSpaceAoSrv = defaultAoSrv;
             }
             break;
         case RendererEnums::AmbientOcclusionMode::RayTracedAOOnly:
@@ -653,11 +360,18 @@ namespace SasamiRenderer
 
     RenderPassExecutionServices Renderer::BuildRenderPassExecutionServices(
         const DrawSceneItemsCallback& drawItems,
-        const DrawShadowItemsCallback& drawShadowItems)
+        const DrawShadowItemsCallback& drawShadowItems,
+        bool useMeshShader)
     {
         RenderPassExecutionServices services{};
-        services.drawOpaqueItems = [drawItems]() { drawItems(false); };
-        services.drawTransparentItems = [drawItems]() { drawItems(true); };
+        // The cluster path (drawClusterItems) replaces the VS OpaqueGBuffer draw for static
+        // opaque items when active, so the VS loop must not also draw them -- otherwise every
+        // static opaque item would be rasterized twice. Transparent items always go through the
+        // VS path; the cluster path only covers static opaque geometry. Dynamic-vertex items have no
+        // clusters (SceneSubmitter leaves their DAGs empty), so the VS loop still draws those.
+        services.drawOpaqueItems = [drawItems, useMeshShader]() { drawItems(false, useMeshShader); };
+        services.drawOpaqueItemsVertexPath = [drawItems]() { drawItems(false, false); };
+        services.drawTransparentItems = [drawItems]() { drawItems(true, false); };
         services.drawShadowItems = drawShadowItems;
         services.copySceneColorForTransmission = []() { return true; };
         return services;
@@ -678,6 +392,11 @@ namespace SasamiRenderer
 
         m_renderPassBuilderCatalog = RenderPassBuilderCatalog::CreateDefault();
 
+        // The device does not exist yet, so nothing here can report real capabilities. These are
+        // placeholders that assume everything is supported, which is only safe because the passes
+        // built from them do not gate on capabilities -- HardwareRayTracingPassBuilder is the one
+        // builder that does, and it is deliberately NOT built here. InitializeCore builds it once
+        // the device can answer honestly; until then m_rayTracingRenderPass stays null.
         RenderPassBuildContext buildContext{};
         buildContext.capabilities.supportsFeatureRenderPasses = true;
         buildContext.capabilities.supportsD3D12CompatibilitySurface = true;
@@ -718,10 +437,11 @@ namespace SasamiRenderer
             builtins[static_cast<size_t>(RenderPassType::SoftwareReflectionComposite)]);
         m_proceduralSkyRenderPass = std::dynamic_pointer_cast<ProceduralSkyRenderPass>(
             builtins[static_cast<size_t>(RenderPassType::ProceduralSky)]);
-        m_rayTracingRenderPass = std::dynamic_pointer_cast<RayTracingRenderPass>(
-            m_renderPassBuilderCatalog.Build(RenderPassBuilderId::RayTracing, buildContext));
         m_volumetricCloudRenderPass = std::dynamic_pointer_cast<VolumetricCloudRenderPass>(
             m_renderPassBuilderCatalog.Build(RenderPassBuilderId::VolumetricCloud, buildContext));
+        // Not part of the catalog: the virtual-geometry cluster path has no builder-specific
+        // construction inputs (see MeshShaderRenderPass.h), so it is built directly here.
+        m_meshShaderRenderPass = std::make_shared<MeshShaderRenderPass>();
         m_debugVisualization.Bind(
             std::dynamic_pointer_cast<DebugProbeGridRenderPass>(
                 m_renderPassBuilderCatalog.Build(RenderPassBuilderId::DebugProbeGrid, buildContext)),
@@ -730,6 +450,9 @@ namespace SasamiRenderer
             m_renderPassBuilderCatalog.Build(RenderPassBuilderId::FluidSurface, buildContext));
         m_particleRenderPass = std::dynamic_pointer_cast<ParticleRenderPass>(
             m_renderPassBuilderCatalog.Build(RenderPassBuilderId::Particles, buildContext));
+        m_crowdRenderPass = std::make_shared<CrowdRenderPass>();
+        m_crowdRenderPass->SetCrowdSystem(&m_crowdSystem);
+        m_wireframeOverlayRenderPass = std::make_shared<WireframeOverlayRenderPass>();
 
         m_passRegistry.SetBuiltinPasses(builtins);
 
@@ -744,6 +467,9 @@ namespace SasamiRenderer
             CloseHandle(m_computeFrameFenceEvent);
             m_computeFrameFenceEvent = nullptr;
         }
+
+        m_crowdSystem.Shutdown();
+        if (m_particleVolumeRenderPass) m_particleVolumeRenderPass->Shutdown();
 
         m_frameCoordinator.Shutdown(m_lightSystem);
 
@@ -796,6 +522,9 @@ namespace SasamiRenderer
         }
 
         EnsureVolumetricCloudPassInserted();
+        EnsureMeshShaderPassInserted();
+        EnsureCrowdPassInserted();
+        EnsureWireframeOverlayPassInserted();
     }
 
     void Renderer::SetVolumetricCloudEnabled(bool e)
@@ -812,6 +541,25 @@ namespace SasamiRenderer
     void Renderer::SetDirectionalLightSettings(const DirectionalLightSettings& settings)
     {
         m_lightSystem.SetDirectionalLightSettings(settings);
+    }
+
+    Renderer::DirectionalLightSettings Renderer::GetDirectionalLightSettings() const
+    {
+        return m_lightSystem.GetDirectionalLightSettings();
+    }
+
+    bool Renderer::GetOverlayDeviceContext(RhiOverlayDeviceContext& context) const
+    {
+        return m_device && m_device->GetOverlayDeviceContext(context);
+    }
+
+    bool Renderer::SupportsUIOverlay() const
+    {
+        if (SupportsD3D12OverlayRendering()) {
+            return true;
+        }
+        RhiOverlayDeviceContext context{};
+        return GetOverlayDeviceContext(context);
     }
 
     void Renderer::ResizeViewport(UINT width, UINT height)
@@ -835,10 +583,34 @@ namespace SasamiRenderer
 
         m_renderTargetPool.ReleaseBackBuffers();
 
-        HRESULT hr = m_device->GetSwapChain()->ResizeBuffers(GetBackBufferCount(), width, height, DXGI_FORMAT_R8G8B8A8_UNORM, 0);
+        // render.hdr / RenderSettings::enableHdrOutput only take effect here, at the next resize,
+        // rather than the instant the setting changes: switching the swap chain's format and
+        // colour space needs ResizeBuffers + SetColorSpace1, and this is the one place in the
+        // non-native (DX12 raster) path that already tears down and recreates the swap chain's
+        // buffers. m_device->SupportsHdr10Output() also folds in the display capability check
+        // (Dx12GraphicsDeviceInit.cpp), so an unsupported display silently stays on
+        // DXGI_FORMAT_R8G8B8A8_UNORM even with the setting on.
+        const bool wantHdrOutput = m_settings.enableHdrOutput && m_device->SupportsHdr10Output();
+        const DXGI_FORMAT swapChainFormat =
+            wantHdrOutput ? DXGI_FORMAT_R10G10B10A2_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM;
+
+        HRESULT hr = m_device->GetSwapChain()->ResizeBuffers(GetBackBufferCount(), width, height, swapChainFormat, 0);
         if (FAILED(hr)) {
             DebugLog("ResizeBuffers failed\n");
             return;
+        }
+
+        // SetHdr10ColorSpaceEnabled re-checks swap-chain-level colour-space support
+        // (CheckColorSpaceSupport) before calling SetColorSpace1, and falls back to SDR colour
+        // space if that check fails even though the format above already switched. m_hdrOutputActive
+        // records what actually happened so ToneMapSceneColor's PQ-encode branch only runs when the
+        // backbuffer really is DXGI_FORMAT_R10G10B10A2_UNORM in the HDR10 colour space.
+        //
+        // Skipped entirely (no SetColorSpace1 call at all) when HDR was never requested and is not
+        // currently active, so an ordinary window resize with the feature untouched stays exactly
+        // as before this feature existed.
+        if (wantHdrOutput || m_hdrOutputActive) {
+            m_hdrOutputActive = m_device->SetHdr10ColorSpaceEnabled(wantHdrOutput);
         }
 
         if (!m_renderTargetPool.InitializeBackBuffers(*m_device, m_device->GetSwapChain(), GetBackBufferCount())) {
@@ -901,509 +673,6 @@ namespace SasamiRenderer
         m_environmentManager.SetSkyboxLoadFormat(format);
     }
 
-    Renderer::NodeHandle Renderer::AddNode(const std::shared_ptr<IRenderNode>& renderNode)
-    {
-        return m_passRegistry.AddNode(renderNode);
-    }
-
-    void Renderer::SetRenderNodePreset(std::shared_ptr<IRenderNode> renderNode)
-    {
-        m_passRegistry.SetRenderNodePreset(std::move(renderNode));
-    }
-
-    void Renderer::UseDefaultRenderNodePreset()
-    {
-        m_passRegistry.UseDefaultRenderNodePreset();
-        EnsureDebugProbeGridPassInserted();
-        EnsureFluidSurfacePassInserted();
-        EnsureParticlePassInserted();
-        EnsureVolumetricCloudPassInserted();
-    }
-
-    Renderer::PassHandle Renderer::AddPass(const std::shared_ptr<IRenderPass>& renderPass)
-    {
-        return m_passRegistry.AddPass(renderPass);
-    }
-
-    Renderer::PassHandle Renderer::AddPassBefore(std::string_view targetTag, const std::shared_ptr<IRenderPass>& renderPass)
-    {
-        return m_passRegistry.AddPassBefore(targetTag, renderPass);
-    }
-
-    Renderer::PassHandle Renderer::AddPassAfter(std::string_view targetTag, const std::shared_ptr<IRenderPass>& renderPass)
-    {
-        return m_passRegistry.AddPassAfter(targetTag, renderPass);
-    }
-
-    bool Renderer::ReplacePass(std::string_view targetTag, const std::shared_ptr<IRenderPass>& renderPass)
-    {
-        return m_passRegistry.ReplacePass(targetTag, renderPass);
-    }
-
-    bool Renderer::HasRenderPass(std::string_view tag) const
-    {
-        const auto& passes = m_passRegistry.GetPasses();
-        return std::any_of(passes.begin(), passes.end(),
-                           [tag](const std::shared_ptr<IRenderPass>& pass) {
-                               return pass && pass->Tag() == tag;
-                           });
-    }
-
-    void Renderer::EnsureVolumetricCloudPassInserted()
-    {
-        if (!m_volumetricCloudRenderPass ||
-            !m_settings.volumetricCloudEnabled ||
-            HasRenderPass("VolumetricCloud")) {
-            return;
-        }
-
-        m_volumetricCloudRenderPass->SetEnabled(true);
-        if (AddPassAfter("Skybox", m_volumetricCloudRenderPass).IsValid()) return;
-        if (AddPassAfter("ProceduralSky", m_volumetricCloudRenderPass).IsValid()) return;
-        if (AddPassAfter("Lighting", m_volumetricCloudRenderPass).IsValid()) return;
-        AddPass(m_volumetricCloudRenderPass);
-    }
-
-    bool Renderer::AddPhaseCompletionNode(std::string_view phaseTag,
-                                          std::string_view nodeName,
-                                          const PhaseCompletionCallback& execute,
-                                          PhaseCompletionMode mode,
-                                          const RenderPassRequirements& requirements)
-    {
-        return m_passRegistry.AddPhaseCompletionNode(phaseTag, nodeName, execute, mode, requirements);
-    }
-
-    void Renderer::ClearPhaseCompletionNodes()
-    {
-        m_passRegistry.ClearPhaseCompletionNodes();
-    }
-
-    void Renderer::ClearPasses()
-    {
-        WaitForGPU();
-        m_passRegistry.ClearPasses();
-    }
-
-    void Renderer::RefreshGIBakeStatus(GIBakeState state, uint32_t bvhMissingMask)
-    {
-        const uint32_t total = m_probeGrid.GetTotalProbeCount();
-        const uint32_t completed = m_probeGrid.GetBakedProbeCount();
-        const uint32_t probesPerStep = IrradianceProbeGrid::GetProbesPerBakeStep();
-        const uint32_t remaining = (total > completed) ? (total - completed) : 0u;
-
-        m_giBakeStatus.state = state;
-        m_giBakeStatus.requested = m_giBakeRequested;
-        m_giBakeStatus.progress = (total > 0u)
-            ? std::min(1.0f, static_cast<float>(completed) / static_cast<float>(total))
-            : 0.0f;
-        m_giBakeStatus.completedProbes = completed;
-        m_giBakeStatus.totalProbes = total;
-        m_giBakeStatus.probesPerStep = probesPerStep;
-        m_giBakeStatus.estimatedFramesRemaining = (probesPerStep > 0u)
-            ? ((remaining + probesPerStep - 1u) / probesPerStep)
-            : 0u;
-        m_giBakeStatus.bvhMissingMask = (state == GIBakeState::WaitingForBvh)
-            ? bvhMissingMask
-            : 0u;
-        m_giBakeStatus.sceneInstances = static_cast<uint32_t>(m_rayTracingScene.instances.size());
-        m_giBakeStatus.sceneTriangles = m_rayTracingScene.TriangleCount();
-        m_giBakeStatus.sceneGeometryVersion = m_rayTracingScene.geometryVersion;
-        m_giBakeStatus.sceneMaterialVersion = m_rayTracingScene.materialVersion;
-        m_giBakeStatus.sceneInstanceVersion = m_rayTracingScene.instanceVersion;
-
-        if (state == GIBakeState::WaitingForProbeGrid ||
-            state == GIBakeState::WaitingForBvh) {
-            ++m_giBakeStatus.stalledFrames;
-        } else {
-            m_giBakeStatus.stalledFrames = 0u;
-        }
-    }
-
-    void Renderer::SetGIBakePhase(const char* phase)
-    {
-        std::snprintf(m_giBakeStatus.currentPhase,
-                      sizeof(m_giBakeStatus.currentPhase),
-                      "%s",
-                      phase ? phase : "");
-    }
-
-    void Renderer::AddGIBakeLog(const char* phase, const char* format, ...)
-    {
-        GIBakeStatus::LogEntry entry{};
-        entry.sequence = ++m_giBakeLogSequence;
-        entry.bakeFrame = m_giBakeFrameIndex;
-        entry.state = m_giBakeStatus.state;
-        std::snprintf(entry.phase, sizeof(entry.phase), "%s", phase ? phase : "");
-
-        va_list args;
-        va_start(args, format);
-        std::vsnprintf(entry.message, sizeof(entry.message), format ? format : "", args);
-        va_end(args);
-
-        if (m_giBakeStatus.logCount < GIBakeStatus::kLogCapacity) {
-            m_giBakeStatus.logEntries[m_giBakeStatus.logCount++] = entry;
-            return;
-        }
-
-        for (uint32_t i = 1u; i < GIBakeStatus::kLogCapacity; ++i) {
-            m_giBakeStatus.logEntries[i - 1u] = m_giBakeStatus.logEntries[i];
-        }
-        m_giBakeStatus.logEntries[GIBakeStatus::kLogCapacity - 1u] = entry;
-    }
-
-    Renderer::GIBakeStatus Renderer::GetGIBakeStatus() const
-    {
-        GIBakeStatus status = m_giBakeStatus;
-        const uint32_t total = m_probeGrid.GetTotalProbeCount();
-        const uint32_t completed = m_probeGrid.GetBakedProbeCount();
-        const uint32_t probesPerStep = IrradianceProbeGrid::GetProbesPerBakeStep();
-        const uint32_t remaining = (total > completed) ? (total - completed) : 0u;
-
-        status.requested = m_giBakeRequested;
-        status.progress = (total > 0u)
-            ? std::min(1.0f, static_cast<float>(completed) / static_cast<float>(total))
-            : 0.0f;
-        status.completedProbes = completed;
-        status.totalProbes = total;
-        status.probesPerStep = probesPerStep;
-        status.estimatedFramesRemaining = (probesPerStep > 0u)
-            ? ((remaining + probesPerStep - 1u) / probesPerStep)
-            : 0u;
-        status.sceneInstances = static_cast<uint32_t>(m_rayTracingScene.instances.size());
-        status.sceneTriangles = m_rayTracingScene.TriangleCount();
-        status.sceneGeometryVersion = m_rayTracingScene.geometryVersion;
-        status.sceneMaterialVersion = m_rayTracingScene.materialVersion;
-        status.sceneInstanceVersion = m_rayTracingScene.instanceVersion;
-        if (!m_giBakeRequested && m_probeGrid.IsBaked()) {
-            status.state = GIBakeState::Completed;
-        } else if (!m_giBakeRequested && status.state != GIBakeState::Failed) {
-            status.state = GIBakeState::Idle;
-        }
-
-        return status;
-    }
-
-    void Renderer::RequestGIBake()
-    {
-        m_probeGrid.ResetBakeState();
-        m_giBakeFrameIndex = 0u;
-        m_giBakeLastLoggedMissingMask = 0xFFFFFFFFu;
-        m_giBakeLastLoggedCompletedProbes = 0xFFFFFFFFu;
-        SetGIBakePhase("Request queued");
-        m_giBakeRequested = true;
-        AddGIBakeLog("Request", "Bake requested. scene=%u instances / %u triangles",
-                     static_cast<uint32_t>(m_rayTracingScene.instances.size()),
-                     m_rayTracingScene.TriangleCount());
-        RefreshGIBakeStatus(m_probeGrid.IsInitialized()
-            ? GIBakeState::Baking
-            : GIBakeState::WaitingForProbeGrid);
-    }
-
-    void Renderer::ResetAndRebakeGI()
-    {
-        m_probeGrid.ResetBakeState();
-        m_giBakeFrameIndex   = 0u;
-        m_giBakeLastLoggedMissingMask = 0xFFFFFFFFu;
-        m_giBakeLastLoggedCompletedProbes = 0xFFFFFFFFu;
-        // Do not reallocate the probe buffer here. The current frame may already
-        // have recorded lighting commands that read the existing buffer.
-        m_giBakeClearPending = false;
-        m_giBakeRequested    = true;
-        SetGIBakePhase("Rebuild queued");
-        AddGIBakeLog("Request", "Rebuild queued. scene=%u instances / %u triangles, versions=%llu/%llu/%llu",
-                     static_cast<uint32_t>(m_rayTracingScene.instances.size()),
-                     m_rayTracingScene.TriangleCount(),
-                     static_cast<unsigned long long>(m_rayTracingScene.geometryVersion),
-                     static_cast<unsigned long long>(m_rayTracingScene.materialVersion),
-                     static_cast<unsigned long long>(m_rayTracingScene.instanceVersion));
-        RefreshGIBakeStatus(m_probeGrid.IsInitialized()
-            ? GIBakeState::Baking
-            : GIBakeState::WaitingForProbeGrid);
-    }
-
-    void Renderer::CancelGIBake()
-    {
-        m_giBakeRequested = false;
-        SetGIBakePhase("Canceled");
-        AddGIBakeLog("Cancel", "Bake canceled at %u/%u probes.",
-                     m_probeGrid.GetBakedProbeCount(),
-                     m_probeGrid.GetTotalProbeCount());
-        RefreshGIBakeStatus(m_probeGrid.HasEverBaked()
-            ? GIBakeState::Completed
-            : GIBakeState::Idle);
-    }
-
-    bool Renderer::SaveGIProbeCache(const std::string& path, uint64_t stateHash)
-    {
-        if (!m_device || path.empty() || !m_probeGrid.IsInitialized() || !m_probeGrid.HasEverBaked()) {
-            return false;
-        }
-
-        std::vector<uint8_t> probeData;
-        if (!m_probeGrid.ExportProbeData(*m_device, probeData) || probeData.empty()) {
-            return false;
-        }
-
-        GIProbeCacheFileHeader header{};
-        header.headerSize = sizeof(GIProbeCacheFileHeader);
-        header.countX = m_probeGrid.GetCountX();
-        header.countY = m_probeGrid.GetCountY();
-        header.countZ = m_probeGrid.GetCountZ();
-        header.origin[0] = m_probeGrid.GetOriginX();
-        header.origin[1] = m_probeGrid.GetOriginY();
-        header.origin[2] = m_probeGrid.GetOriginZ();
-        header.spacing[0] = m_probeGrid.GetSpacingX();
-        header.spacing[1] = m_probeGrid.GetSpacingY();
-        header.spacing[2] = m_probeGrid.GetSpacingZ();
-        header.stateHash = stateHash;
-        header.dataSizeBytes = static_cast<uint64_t>(probeData.size());
-
-        // Write to a temporary and rename, matching StaticMeshCache::Save: an interrupted
-        // save must never destroy the previously baked cache or leave a half-written file
-        // in its place.
-        const std::filesystem::path finalPath(path);
-        std::error_code ec;
-        if (finalPath.has_parent_path()) {
-            std::filesystem::create_directories(finalPath.parent_path(), ec);
-            if (ec) {
-                return false;
-            }
-        }
-
-        std::filesystem::path tempPath = finalPath;
-        tempPath += ".tmp";
-
-        {
-            std::ofstream out(tempPath, std::ios::binary | std::ios::trunc);
-            if (!out.is_open()) {
-                return false;
-            }
-
-            out.write(reinterpret_cast<const char*>(&header), sizeof(header));
-            out.write(reinterpret_cast<const char*>(probeData.data()),
-                      static_cast<std::streamsize>(probeData.size()));
-            // Flush explicitly: a failure inside the destructor's flush would otherwise go
-            // unnoticed and rename a short cache into place.
-            out.flush();
-            if (!out.good()) {
-                out.close();
-                std::error_code cleanupEc;
-                std::filesystem::remove(tempPath, cleanupEc);
-                return false;
-            }
-        }
-
-        ec.clear();
-        std::filesystem::remove(finalPath, ec);
-        ec.clear();
-        std::filesystem::rename(tempPath, finalPath, ec);
-        if (ec) {
-            std::error_code cleanupEc;
-            std::filesystem::remove(tempPath, cleanupEc);
-            return false;
-        }
-        return true;
-    }
-
-    bool Renderer::LoadGIProbeCache(const std::string& path, uint64_t stateHash)
-    {
-        if (!m_device || path.empty() || !m_probeGrid.IsInitialized()) {
-            return false;
-        }
-
-        std::ifstream in(path, std::ios::binary);
-        if (!in.is_open()) {
-            return false;
-        }
-
-        GIProbeCacheFileHeader header{};
-        in.read(reinterpret_cast<char*>(&header), sizeof(header));
-        if (!in.good() ||
-            header.magic != kGIProbeCacheMagic ||
-            header.version != kGIProbeCacheVersion ||
-            header.headerSize != sizeof(GIProbeCacheFileHeader) ||
-            header.coeffCount != kGIProbeCacheCoeffCount ||
-            header.stateHash != stateHash ||
-            header.countX != m_probeGrid.GetCountX() ||
-            header.countY != m_probeGrid.GetCountY() ||
-            header.countZ != m_probeGrid.GetCountZ() ||
-            !NearlyEqual(header.origin[0], m_probeGrid.GetOriginX()) ||
-            !NearlyEqual(header.origin[1], m_probeGrid.GetOriginY()) ||
-            !NearlyEqual(header.origin[2], m_probeGrid.GetOriginZ()) ||
-            !NearlyEqual(header.spacing[0], m_probeGrid.GetSpacingX()) ||
-            !NearlyEqual(header.spacing[1], m_probeGrid.GetSpacingY()) ||
-            !NearlyEqual(header.spacing[2], m_probeGrid.GetSpacingZ()) ||
-            header.dataSizeBytes != m_probeGrid.GetProbeDataSizeBytes()) {
-            return false;
-        }
-
-        std::vector<uint8_t> probeData(static_cast<size_t>(header.dataSizeBytes));
-        in.read(reinterpret_cast<char*>(probeData.data()),
-                static_cast<std::streamsize>(probeData.size()));
-        if (!in.good()) {
-            return false;
-        }
-
-        if (!m_probeGrid.ImportProbeData(*m_device, probeData.data(), header.dataSizeBytes)) {
-            return false;
-        }
-
-        m_giBakeRequested = false;
-        m_giBakeFrameIndex = 0u;
-        SetGIBakePhase("Loaded GI probe cache");
-        RefreshGIBakeStatus(GIBakeState::Completed);
-        AddGIBakeLog("Cache", "Loaded GI probe cache. probes=%u/%u",
-                     m_probeGrid.GetBakedProbeCount(),
-                     m_probeGrid.GetTotalProbeCount());
-        return true;
-    }
-
-    void Renderer::FitProbeGridToScene(float bMinX, float bMinY, float bMinZ,
-                                        float bMaxX, float bMaxY, float bMaxZ,
-                                        float margin)
-    {
-        m_probeGrid.FitToSceneBounds(bMinX, bMinY, bMinZ, bMaxX, bMaxY, bMaxZ, margin);
-        if (m_probeGrid.IsInitialized() && m_device) {
-            m_probeGrid.ReallocAndClearProbeBuffer(*m_device);
-        } else {
-            m_probeGrid.ResetBakeState();
-        }
-        RefreshGIBakeStatus(m_giBakeRequested
-            ? GIBakeState::Baking
-            : GIBakeState::Idle);
-    }
-
-    bool Renderer::GetSceneWorldBounds(float outMin[3], float outMax[3]) const
-    {
-        if (m_rayTracingScene.instances.empty()) {
-            return false;
-        }
-
-        float minB[3] = { std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max() };
-        float maxB[3] = { -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max() };
-        for (const auto& instance : m_rayTracingScene.instances) {
-            for (int axis = 0; axis < 3; ++axis) {
-                minB[axis] = std::min(minB[axis], instance.worldBoundsMin[axis]);
-                maxB[axis] = std::max(maxB[axis], instance.worldBoundsMax[axis]);
-            }
-        }
-
-        if (minB[0] > maxB[0] || minB[1] > maxB[1] || minB[2] > maxB[2]) {
-            return false;
-        }
-
-        outMin[0] = minB[0]; outMin[1] = minB[1]; outMin[2] = minB[2];
-        outMax[0] = maxB[0]; outMax[1] = maxB[1]; outMax[2] = maxB[2];
-        return true;
-    }
-
-    bool Renderer::FitProbeGridToSceneAuto(float margin, std::uint32_t probeBudget)
-    {
-        float sceneMin[3];
-        float sceneMax[3];
-        if (!GetSceneWorldBounds(sceneMin, sceneMax)) {
-            return false;
-        }
-
-        m_probeGrid.FitToSceneBoundsWithBudget(sceneMin[0], sceneMin[1], sceneMin[2],
-                                                sceneMax[0], sceneMax[1], sceneMax[2],
-                                                margin, probeBudget);
-        if (m_probeGrid.IsInitialized() && m_device) {
-            m_probeGrid.ReallocAndClearProbeBuffer(*m_device);
-        } else {
-            m_probeGrid.ResetBakeState();
-        }
-        RefreshGIBakeStatus(m_giBakeRequested
-            ? GIBakeState::Baking
-            : GIBakeState::Idle);
-        return true;
-    }
-
-    void Renderer::SetRenderPassSequence(const std::vector<RenderPassType>& sequence)
-    {
-        // Deferred lighting has a hard dependency on OpaqueGBuffer: Lighting samples the
-        // GBuffer targets unconditionally, so a sequence without it renders from targets
-        // nothing wrote. A caller-supplied sequence (the pass-builder UI) can legitimately
-        // omit passes it does not expose, so restore this one rather than trusting the
-        // list verbatim.
-        std::vector<RenderPassType> effectiveSequence = sequence;
-        const bool hasGBuffer = std::find(effectiveSequence.begin(), effectiveSequence.end(),
-                                          RenderPassType::OpaqueGBuffer) != effectiveSequence.end();
-        if (!hasGBuffer) {
-            // Restore it at its default slot: before the passes that read it.
-            const auto lightingIt = std::find(effectiveSequence.begin(), effectiveSequence.end(),
-                                              RenderPassType::Lighting);
-            const auto insertAt = (lightingIt != effectiveSequence.end()) ? lightingIt : effectiveSequence.begin();
-            effectiveSequence.insert(insertAt, RenderPassType::OpaqueGBuffer);
-            DebugLog("Renderer::SetRenderPassSequence: OpaqueGBuffer was missing from the "
-                     "requested sequence and has been restored (deferred lighting requires it).\n");
-        }
-
-        m_passRegistry.SetRenderPassSequence(effectiveSequence);
-
-        // Re-insert non-builtin nodes that were previously added via AddPassBefore/AddPassAfter.
-        // SetRenderPassSequence calls ClearPasses() internally, which removes them.
-        // Keep the probe grid after Lighting/Skybox so deferred PBR has already produced SceneColor.
-        EnsureDebugProbeGridPassInserted();
-        EnsureFluidSurfacePassInserted();
-        EnsureParticlePassInserted();
-        EnsureVolumetricCloudPassInserted();
-    }
-
-    void Renderer::EnsureDebugProbeGridPassInserted()
-    {
-        auto pass = m_debugVisualization.GetPass();
-        if (!pass ||
-            !pass->IsInitialized() ||
-            HasRenderPass("DebugProbeGrid")) {
-            return;
-        }
-        // After Lighting/Skybox so deferred PBR has already produced SceneColor.
-        if (AddPassAfter("Skybox", pass).IsValid()) return;
-        if (AddPassAfter("Lighting", pass).IsValid()) return;
-        AddPass(pass);
-    }
-
-    void Renderer::ReinsertDebugProbeGrid()
-    {
-        EnsureDebugProbeGridPassInserted();
-    }
-
-    void Renderer::EnsureFluidSurfacePassInserted()
-    {
-        if (!m_fluidSurfaceRenderPass ||
-            !m_fluidSurfaceRenderPass->IsInitialized() ||
-            HasRenderPass("FluidSurface")) {
-            return;
-        }
-        // After Lighting/Skybox so deferred PBR has already produced SceneColor.
-        if (AddPassAfter("Skybox", m_fluidSurfaceRenderPass).IsValid()) return;
-        if (AddPassAfter("Lighting", m_fluidSurfaceRenderPass).IsValid()) return;
-        AddPass(m_fluidSurfaceRenderPass);
-    }
-
-    void Renderer::ReinsertFluidSurface()
-    {
-        EnsureFluidSurfacePassInserted();
-    }
-
-    void Renderer::EnsureParticlePassInserted()
-    {
-        if (!m_particleRenderPass ||
-            !m_particleRenderPass->IsInitialized() ||
-            HasRenderPass("Particles")) {
-            return;
-        }
-        if (AddPassAfter("FluidSurface", m_particleRenderPass).IsValid()) return;
-        if (AddPassAfter("Skybox", m_particleRenderPass).IsValid()) return;
-        if (AddPassAfter("Lighting", m_particleRenderPass).IsValid()) return;
-        AddPass(m_particleRenderPass);
-    }
-
-    void Renderer::ReinsertParticles()
-    {
-        EnsureParticlePassInserted();
-    }
 
     void Renderer::UpdateCameraCB(const RenderCameraProxy* camera)
     {
@@ -1446,5 +715,37 @@ namespace SasamiRenderer
         }
         m_sceneSynchronizer.ClearRenderObjects();
         m_sceneSubmitter.ClearSkinnedRenderProxies();
+    }
+
+    bool Renderer::UpdateStaticMeshVertices(size_t meshIndex, const Vertex* vertices, size_t count)
+    {
+        const auto& items = m_meshBuffer.Items();
+        if (!m_device || !vertices || meshIndex >= items.size()) {
+            return false;
+        }
+        const MeshBuffer::GPUItem& item = items[meshIndex];
+        if (!item.rhiVb.IsValid() || item.vertexCount != count) {
+            return false;
+        }
+        return m_device->UpdateRhiBuffer(item.rhiVb, 0, vertices, sizeof(Vertex) * count);
+    }
+
+    bool Renderer::UpdateStaticMeshDynamicVertices(size_t meshIndex, const Vertex* vertices, size_t vertexCount,
+                                                   size_t firstVertex, size_t count, size_t* writtenVertices)
+    {
+        if (!m_device) {
+            return false;
+        }
+        // One more copy than frames in flight: BeginFrame waits for the frame GetBackBufferCount() back.
+        return m_meshBuffer.WriteDynamicVertices(meshIndex, vertices, vertexCount, firstVertex, count,
+                                                 GetBackBufferCount() + 1, m_renderCallCounter, writtenVertices);
+    }
+
+    bool Renderer::SetStaticMeshDrawIndexCount(size_t meshIndex, size_t indexCount)
+    {
+        if (indexCount > UINT32_MAX) {
+            return false;
+        }
+        return m_meshBuffer.SetDrawIndexCount(meshIndex, static_cast<UINT>(indexCount));
     }
 }

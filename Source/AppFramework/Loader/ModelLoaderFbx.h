@@ -5,7 +5,7 @@
 
 #include "Loader/ModelLoader.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     // FBX loading via the vendored ufbx library (Libraries/ufbx). Produces the same
     // LoadedStaticMesh list as the glTF/OBJ paths, so everything downstream
@@ -17,3 +17,4 @@ namespace SasamiRenderer
                             float uniformScale,
                             std::vector<LoadedStaticMesh>& outMeshes);
 }
+namespace SasamiEngine { using namespace App; }

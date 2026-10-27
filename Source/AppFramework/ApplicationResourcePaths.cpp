@@ -8,7 +8,7 @@
 #include <system_error>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     namespace
     {

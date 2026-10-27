@@ -1,6 +1,6 @@
 #include "Renderer/Passes/Geometry/SkinnedOpaqueDrawUtility.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace SkinnedOpaqueDrawUtility
     {

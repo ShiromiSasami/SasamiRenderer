@@ -28,6 +28,9 @@
 
 namespace
 {
+    // PSSM practical-split weight between the logarithmic and power splits (Zhang 2006).
+    constexpr float kCascadeLogSplitLambda = 0.5f;
+
     // =========================================================================
     // GPU 転送用ライト構造体
     // シェーダー側の StructuredBuffer レイアウトと一致する必要がある。
@@ -52,16 +55,32 @@ namespace
         float params[4];         // x: コーン外角のコサイン値, y: shadowIndex（負値 = 影なし）, zw: 未使用
     };
 
-    using SasamiRenderer::Math::Dot3;
-    using SasamiRenderer::Math::TransformPoint;
-    using SasamiRenderer::Math::RoundToMultiple;
-    using SasamiRenderer::Math::Clamp01;
-    using SasamiRenderer::Math::Lerp3;
+    using SasamiEngine::Foundation::Math::Dot3;
+    using SasamiEngine::Foundation::Math::TransformPoint;
+    using SasamiEngine::Foundation::Math::RoundToMultiple;
+    using SasamiEngine::Foundation::Math::Clamp01;
+    using SasamiEngine::Foundation::Math::Lerp3;
 }
 
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
+    namespace
+    {
+        // Shadow maps are created through the RHI as ShaderResource, which D3D12 sees as
+        // NON_PIXEL|PIXEL (0xC0) -- the compute-driven cluster path reads them from a compute
+        // shader as well as the pixel stage. Barriers that named only PIXEL (0x80) therefore
+        // disagreed with the real state and the debug layer reported id=527 on every frame
+        // (36 of the 51 baseline occurrences came from the two shadow maps alone).
+        //
+        // Do NOT apply this blanket-style to every PIXEL_SHADER_RESOURCE in the renderer: three
+        // screen-sized textures really are created at 0x80 (plain SRVs, no render-target or
+        // depth-stencil flag) and their barriers are already correct. An earlier attempt to change
+        // the graph's read state globally made the count worse for exactly that reason.
+        constexpr D3D12_RESOURCE_STATES kShadowReadState =
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    }
+
     void LightSystem::BuildShadowPassContext(ShadowPassContext& outContext,
                                              const float cameraPos[3],
                                              const float cameraPV[16],
@@ -98,9 +117,17 @@ namespace SasamiRenderer
             std::memcpy(outContext.cascadeLightViewProjection[0],
                         outContext.lightViewProjection,
                         sizeof(outContext.lightViewProjection));
-            outContext.cascadeSplitDepths[0] = 1.0f;
-            outContext.cascadeTexelSize[0][0] = (shadowMapWidth > 0u) ? (1.0f / static_cast<float>(shadowMapWidth)) : 0.0f;
-            outContext.cascadeTexelSize[0][1] = (shadowMapHeight > 0u) ? (1.0f / static_cast<float>(shadowMapHeight)) : 0.0f;
+            // Reverse-Z far plane. This is the "this single cascade covers the whole range"
+            // sentinel, so it has to sit at the far end of NDC depth, which is now 0.
+            outContext.cascadeSplitDepths[0] = 0.0f;
+            // World units per texel, matching the CSM and stable-projection paths below. This
+            // used to store 1/resolution -- a UV-space texel -- which no shader noticed only
+            // because nothing read .xy. It does now (PBR_Shadow.hlsli scales the normal bias by
+            // it), so all three fill sites have to agree on the unit.
+            const float fallbackTexelWorld = (m_lightOrthoHalf * 2.0f) /
+                static_cast<float>((std::max)(1u, (std::max)(shadowMapWidth, shadowMapHeight)));
+            outContext.cascadeTexelSize[0][0] = fallbackTexelWorld;
+            outContext.cascadeTexelSize[0][1] = fallbackTexelWorld;
             return;
         }
 
@@ -128,8 +155,11 @@ namespace SasamiRenderer
             {  1.0f,  1.0f },
         };
         for (int i = 0; i < 4; ++i) {
-            const float nearClipPoint[3] = { clipCorners[i][0], clipCorners[i][1], 0.0f };
-            const float farClipPoint[3]  = { clipCorners[i][0], clipCorners[i][1], 1.0f };
+            // Reverse-Z: the near plane is NDC z = 1 and the far plane is z = 0. Getting these
+            // the wrong way round swaps the near and far corner sets, which silently inverts
+            // every cascade's extent rather than failing outright.
+            const float nearClipPoint[3] = { clipCorners[i][0], clipCorners[i][1], 1.0f };
+            const float farClipPoint[3]  = { clipCorners[i][0], clipCorners[i][1], 0.0f };
             TransformPoint(invCameraPV, nearClipPoint, nearCorners[i]);
             TransformPoint(invCameraPV, farClipPoint, farCorners[i]);
         }
@@ -162,7 +192,16 @@ namespace SasamiRenderer
         for (uint32_t cascadeIndex = 0; cascadeIndex < cascadeCount; ++cascadeIndex) {
             const float p = static_cast<float>(cascadeIndex + 1u) / static_cast<float>(cascadeCount);
             const float splitRatio = std::pow(p, (std::max)(1.0f, m_cascadeDistributionExponent));
-            splitDistances[cascadeIndex] = fullNearDistance + (shadowDistance - fullNearDistance) * splitRatio;
+            const float powSplit = fullNearDistance + (shadowDistance - fullNearDistance) * splitRatio;
+            // Practical split scheme (Zhang et al. 2006, PSSM; GPU Gems 3 ch.10): blend the
+            // logarithmic split, which keeps the texel/pixel ratio constant, with the existing
+            // power split. The log term uses a clamped near so a tiny camera near plane does
+            // not starve the far cascades.
+            const float logNear = (std::max)(0.1f, fullNearDistance);
+            const float logSplit = (shadowDistance > logNear)
+                ? logNear * std::pow(shadowDistance / logNear, p)
+                : powSplit;
+            splitDistances[cascadeIndex] = kCascadeLogSplitLambda * logSplit + (1.0f - kCascadeLogSplitLambda) * powSplit;
         }
         for (uint32_t cascadeIndex = cascadeCount; cascadeIndex < kDirectionalCascadeCount; ++cascadeIndex) {
             splitDistances[cascadeIndex] = shadowDistance;
@@ -203,13 +242,36 @@ namespace SasamiRenderer
                 }
             }
 
-            const float frustumRadius = std::sqrt(radiusSq);
+            // Quantised so float noise in the corner maths cannot change the texel size frame to frame.
+            const float frustumRadius = std::ceil(std::sqrt(radiusSq) * 16.0f) / 16.0f;
             const float depthMargin = (std::max)(2.0f, frustumRadius * 0.1f);
             const float lightOffset = (std::max)(m_lightDistance, frustumRadius + depthMargin);
+
+            const float xyMargin = (std::max)(1.0f, frustumRadius * 0.05f);
+            const float stableHalfExtent = (std::max)(m_lightOrthoHalf, frustumRadius + xyMargin);
+            const float halfWidth = stableHalfExtent;
+            const float halfHeight = stableHalfExtent;
+            const float texelWorldX = (halfWidth * 2.0f) / static_cast<float>((std::max)(1u, shadowMapWidth));
+            const float texelWorldY = (halfHeight * 2.0f) / static_cast<float>((std::max)(1u, shadowMapHeight));
+
+            // Snap the light origin to the shadow texel grid along lightRight/lightUp. The light
+            // view is built around the cascade centre, so the centre always lands at light-space
+            // (0, 0); snapping it there afterwards was a no-op and the cascades shimmered as the
+            // camera moved. Snapping the world-space centre's projection keeps every texel at a
+            // fixed world position. The shift is at most half a texel, well inside xyMargin.
+            const float centerRight = Dot3(frustumCenter, lightRight);
+            const float centerUp = Dot3(frustumCenter, lightUp);
+            const float snapRight = RoundToMultiple(centerRight, texelWorldX) - centerRight;
+            const float snapUp = RoundToMultiple(centerUp, texelWorldY) - centerUp;
+            const float snappedCenter[3] = {
+                frustumCenter[0] + lightRight[0] * snapRight + lightUp[0] * snapUp,
+                frustumCenter[1] + lightRight[1] * snapRight + lightUp[1] * snapUp,
+                frustumCenter[2] + lightRight[2] * snapRight + lightUp[2] * snapUp
+            };
             const float lightPosition[3] = {
-                frustumCenter[0] - lightForward[0] * lightOffset,
-                frustumCenter[1] - lightForward[1] * lightOffset,
-                frustumCenter[2] - lightForward[2] * lightOffset
+                snappedCenter[0] - lightForward[0] * lightOffset,
+                snappedCenter[1] - lightForward[1] * lightOffset,
+                snappedCenter[2] - lightForward[2] * lightOffset
             };
 
             const float lightView[16] = {
@@ -222,27 +284,33 @@ namespace SasamiRenderer
                 1.0f
             };
 
-            float lightSpaceCenter[3] = {};
-            TransformPoint(lightView, frustumCenter, lightSpaceCenter);
+            // snappedCenter sits at light-space (0, 0) by construction.
+            const float minX = -halfWidth;
+            const float maxX = halfWidth;
+            const float minY = -halfHeight;
+            const float maxY = halfHeight;
 
-            const float xyMargin = (std::max)(1.0f, frustumRadius * 0.05f);
-            const float stableHalfExtent = (std::max)(m_lightOrthoHalf, frustumRadius + xyMargin);
-            const float halfWidth = stableHalfExtent;
-            const float halfHeight = stableHalfExtent;
-            const float texelWorldX = (halfWidth * 2.0f) / static_cast<float>((std::max)(1u, shadowMapWidth));
-            const float texelWorldY = (halfHeight * 2.0f) / static_cast<float>((std::max)(1u, shadowMapHeight));
-            const float centerX = RoundToMultiple(lightSpaceCenter[0], texelWorldX);
-            const float centerY = RoundToMultiple(lightSpaceCenter[1], texelWorldY);
-            const float minX = centerX - halfWidth;
-            const float maxX = centerX + halfWidth;
-            const float minY = centerY - halfHeight;
-            const float maxY = centerY + halfHeight;
-
-            const float minimumDepthSpan = (std::max)(0.001f, m_lightFar - m_lightNear);
-            const float stableDepthHalf = (std::max)(minimumDepthSpan * 0.5f, frustumRadius + depthMargin);
-            float depthCenter = RoundToMultiple(lightSpaceCenter[2], (std::max)(0.5f, stableDepthHalf * 0.05f));
-            const float minZ = (std::max)(0.001f, depthCenter - stableDepthHalf);
-            const float maxZ = minZ + stableDepthHalf * 2.0f;
+            // The light sits lightOffset behind the cascade centre, so in light space this
+            // cascade's bounding sphere occupies [lightOffset - frustumRadius, lightOffset +
+            // frustumRadius]. Anything nearer than that -- a wall, a roof, the upper storeys of
+            // a building between the sun and the street -- still casts into the cascade, so the
+            // depth slab has to begin at the light plane, not at the sphere.
+            //
+            // It used to be centred on lightSpaceCenter[2] with a half-depth floored at
+            // (m_lightFar - m_lightNear) * 0.5, a constant that describes the fallback
+            // projection and has nothing to do with this cascade. The two floors disagreed:
+            // lightOffset is floored at m_lightDistance (50) while the half-depth was floored at
+            // 15, so whenever frustumRadius + depthMargin fell below 50 -- every near cascade --
+            // the slab came out as [35, 65] and DepthClipEnable threw away every caster in
+            // [0, 35). That is the shadow leak: the CPU deliberately keeps those casters
+            // (Culling::IsAabbVisibleIgnoringNearPlane) and the rasteriser then discarded them.
+            //
+            // Both planes below are functions of frustumRadius and depthMargin only. Those depend
+            // on the cascade's frustum shape, not on where the camera is or which way it looks, so
+            // the slab is constant per cascade and needs no snapping to stay shimmer-free -- the
+            // depth quantisation the old RoundToMultiple provided is now structural.
+            const float minZ = 0.001f;
+            const float maxZ = lightOffset + frustumRadius + depthMargin;
 
             if (maxX <= minX || maxY <= minY || maxZ <= minZ) {
                 Math::BuildDirectionalLightViewProjection(m_lightYaw,
@@ -257,10 +325,12 @@ namespace SasamiRenderer
                 const float lightProjection[16] = {
                     2.0f / (maxX - minX), 0.0f,                 0.0f,                0.0f,
                     0.0f,                 2.0f / (maxY - minY),0.0f,                0.0f,
-                    0.0f,                 0.0f,                 1.0f / (maxZ - minZ),0.0f,
+                    0.0f,                 0.0f,                -1.0f / (maxZ - minZ),0.0f,
                     -(maxX + minX) / (maxX - minX),
                     -(maxY + minY) / (maxY - minY),
-                    -minZ / (maxZ - minZ),
+                    // Reverse-Z: z_ndc = (maxZ - z) / (maxZ - minZ), so minZ maps to 1 and maxZ
+                    // to 0. Paired with the negated row above.
+                    maxZ / (maxZ - minZ),
                     1.0f
                 };
                 Math::Mul4x4(lightView, lightProjection, outContext.cascadeLightViewProjection[cascadeIndex]);
@@ -319,7 +389,7 @@ namespace SasamiRenderer
             std::memcpy(outContext.cascadeLightViewProjection[cascadeIndex],
                         outContext.lightViewProjection,
                         sizeof(outContext.lightViewProjection));
-            outContext.cascadeSplitDepths[cascadeIndex] = 1.0f;
+            outContext.cascadeSplitDepths[cascadeIndex] = 0.0f;  // reverse-Z far plane
             outContext.cascadeTexelSize[cascadeIndex][0] = texelWorld;
             outContext.cascadeTexelSize[cascadeIndex][1] = texelWorld;
         }
@@ -488,7 +558,7 @@ namespace SasamiRenderer
 
         cb.debugParams[0] = static_cast<float>(static_cast<int>(debugView));
         cb.debugParams[1] = m_aoDirectLightingStrength;
-        cb.debugParams[2] = 0.0f;
+        cb.debugParams[2] = static_cast<float>(static_cast<uint32_t>(m_punctualLightFalloff));
         cb.debugParams[3] = 0.0f;
 
         // シャドウマップの逆解像度（PCF テクスチャ座標オフセット計算用）
@@ -512,10 +582,18 @@ namespace SasamiRenderer
         cb.shadowCascadeParams[2] = m_shadowNormalBias;
         cb.shadowCascadeParams[3] = static_cast<float>(shadowContext.cascadeCount);
 
-        cb.contactShadowParams[0] = useStableDirectionalShadowProjection ? 0.0f : 1.0f;
-        cb.contactShadowParams[1] = 0.75f;
-        cb.contactShadowParams[2] = 0.0025f;
-        cb.contactShadowParams[3] = 12.0f;
+        cb.contactShadowParams[0] =
+            (useStableDirectionalShadowProjection || !m_contactShadowEnabled) ? 0.0f : 1.0f;
+        cb.contactShadowParams[1] = 0.75f;   // march length, world metres
+        // Occluder thickness, world metres. This used to be 0.0025 in reverse-Z NDC depth,
+        // which is ~20cm of world separation one metre from the camera and ~20m at ten --
+        // the shader's test was unusable up close and dead in the distance. It is compared
+        // in linear depth now (see ComputeContactShadowAlongRay), so the unit is metres:
+        // 5cm is the scale of the small-object contacts this effect exists to catch, and
+        // matches the effective window Filament's screenSpaceContactShadow lands on for a
+        // ray of this length (~9cm at 45 degrees to the view).
+        cb.contactShadowParams[2] = 0.05f;
+        cb.contactShadowParams[3] = 12.0f;   // march steps
 
         cb.reflectionParams[0] = reflectionMode;
         cb.reflectionParams[1] = reflectionStrength;
@@ -572,6 +650,57 @@ namespace SasamiRenderer
         cb.vsmParams[2] = 0.00002f; // min variance
         cb.vsmParams[3] = 1.0f;     // blur enabled (updated by ExecuteShadowPass caller)
 
+        // Cel shading controls. Written unconditionally: the CB is uploaded whole, so leaving
+        // these unset would feed the toon branch whatever happened to be in the buffer.
+        // Defaults chosen to read as anime cel shading out of the box -- three bands is the
+        // classic light/mid/shadow split.
+        cb.toonParams[0]  = m_toonBandCount;
+        cb.toonParams[1]  = m_toonBandSoftness;
+        cb.toonParams[2]  = m_toonSpecularThreshold;
+        cb.toonParams[3]  = m_toonSpecularSoftness;
+        cb.toonParams2[0] = m_toonRimStrength;
+        cb.toonParams2[1] = m_toonRimPower;
+        cb.toonParams2[2] = m_toonSpecularIntensity;
+        cb.toonParams2[3] = m_toonShadowFloor;
+        cb.toonParams3[0] = m_toonAmbientScale;
+        cb.toonParams3[1] = m_toonDepthRimWidth;
+        cb.toonParams3[2] = m_toonDepthRimThreshold;
+        cb.toonParams3[3] = m_toonDepthRimStrength;
+        cb.toonOutline[0] = m_toonOutlineWidth;
+        cb.toonOutline[1] = m_toonOutlineColor[0];
+        cb.toonOutline[2] = m_toonOutlineColor[1];
+        cb.toonOutline[3] = m_toonOutlineColor[2];
+        for (int i = 0; i < 3; ++i) {
+            cb.toonFaceForward[i] = m_toonFace.forward[i];
+            cb.toonFaceRight[i] = m_toonFace.right[i];
+        }
+        cb.toonFaceForward[3] = m_toonFace.softness;
+        cb.toonFaceRight[3] = m_toonFace.enabled ? 1.0f : 0.0f;
+        cb.toonHairShift[0] = m_toonHair.primaryShift;
+        cb.toonHairShift[1] = m_toonHair.secondaryShift;
+        cb.toonHairShift[2] = m_toonHair.primaryWidth;
+        cb.toonHairShift[3] = m_toonHair.secondaryWidth;
+        cb.toonHairStrength[0] = m_toonHair.primaryStrength;
+        cb.toonHairStrength[1] = m_toonHair.secondaryStrength;
+        cb.toonHairStrength[2] = m_toonHair.softness;
+        cb.toonHairStrength[3] = m_toonHair.enabled ? 1.0f : 0.0f;
+        for (int i = 0; i < 3; ++i) {
+            cb.toonHairUp[i] = m_toonHair.up[i];
+        }
+        cb.toonHairUp[3] = 0.0f;
+        cb.toonHairShadow[0] = m_toonHairShadow.length;
+        cb.toonHairShadow[1] = m_toonHairShadow.thickness;
+        cb.toonHairShadow[2] = m_toonHairShadow.strength;
+        cb.toonHairShadow[3] = m_toonHairShadow.enabled ? 1.0f : 0.0f;
+        for (int i = 0; i < 3; ++i) {
+            cb.toonHeadSphere[i] = m_toonHeadNormal.center[i];
+        }
+        cb.toonHeadSphere[3] = m_toonHeadNormal.radius;
+        cb.toonHeadNormal[0] = m_toonHeadNormal.blend;
+        cb.toonHeadNormal[1] = 0.0f;
+        cb.toonHeadNormal[2] = 0.0f;
+        cb.toonHeadNormal[3] = m_toonHeadNormal.enabled ? 1.0f : 0.0f;
+
         // 定数バッファのアップロードバッファに書き込む（永続 Map 済み）
         std::memcpy(frame.lightCBPtr, &cb, sizeof(cb));
     }
@@ -611,7 +740,8 @@ namespace SasamiRenderer
                                         uint32_t renderHeight,
                                         const DrawShadowCallback& drawCallback,
                                         const DrawShadowCallback& drawSkinnedCallback,
-                                        bool vsmBlurEnabled)
+                                        bool vsmBlurEnabled,
+                                        const DrawShadowCallback& drawClusterCallback)
     {
         Resource* lightCB = frame.GetLightCBResource();
         if (!cmdList || !lightCB || !lightCB->IsValid()) {
@@ -648,7 +778,8 @@ namespace SasamiRenderer
                                           shadowMapHeight,
                                           drawCallback,
                                           drawSkinnedCallback,
-                                          vsmBlurEnabled)) {
+                                          vsmBlurEnabled,
+                                          drawClusterCallback)) {
             return;
         }
 
@@ -687,7 +818,8 @@ namespace SasamiRenderer
                                                     uint32_t shadowMapHeight,
                                                     const DrawShadowCallback& drawCallback,
                                                     const DrawShadowCallback& drawSkinnedCallback,
-                                                    bool vsmBlurEnabled)
+                                                    bool vsmBlurEnabled,
+                                                    const DrawShadowCallback& drawClusterCallback)
     {
         Resource* lightCB = frame.GetLightCBResource();
 
@@ -731,7 +863,7 @@ namespace SasamiRenderer
         // --- ステップ5: 深度バッファをクリアして描画コールバックを呼ぶ ---
         auto dsv = m_shadowMapManager.GetDirectionalCascadeDsv(0);
         cmdList->OMSetRenderTargets(0, nullptr, FALSE, &dsv); // カラーターゲットなし（深度のみ）
-        cmdList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+        cmdList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0, 0, nullptr);
 
         ShadowPassContext shadowContext{};
         BuildShadowPassContext(shadowContext, cameraPos, cameraPV, shadowMapWidth, shadowMapHeight);
@@ -739,13 +871,29 @@ namespace SasamiRenderer
         // 定数バッファを b3 に設定
         cmdList->SetGraphicsRootConstantBufferView(3, lightCB->GetGPUVirtualAddress());
 
-        // スキンメッシュの影描画: 深度専用の SkinnedShadow PSO/ルートシグネチャに切り替えて描画し、
-        // 通常メッシュ用のバインド状態(ルートシグネチャ切替でリセットされる root 引数)を呼び出し後に復元する。
-        // VSM モードは色出力(モーメント)を書く専用 PSO が無いため未対応(呼び出し元では VSM 描画時に呼ばない)。
+        // ルートシグネチャ/PSO/ディスクリプタテーブル/プリミティブトポロジを、通常メッシュ用の
+        // 頂点シェーダー影描画状態に復元する。スキンメッシュ描画後(invokeSkinnedShadowDraw)と、
+        // クラスタ(メッシュシェーダー)描画後(drawClusterCallback)の両方から共用する。
         // useD16Dsv: スポット/ポイントライトの512x512シャドウマップ(DSVフォーマット D16_UNORM)向けに
         // 描画する場合は true を渡す。ディレクショナルカスケード(D32_FLOAT)と異なるDSVフォーマットのDSVへ
         // D32_FLOAT前提のPSOで描画すると GPU-Based Validation の "depth stencil format does not match" が
         // 発生するため、復元先のPSOをDSVフォーマットに合わせて切り替える。
+        const auto restoreDirectionalShadowState = [&](bool useD16Dsv) {
+            cmdList->SetGraphicsRootSignature(pipelineStateCache.GetRootSignature());
+            cmdList->SetPipelineState(useD16Dsv
+                ? (useTessellationPath ? pipelineStateCache.GetTessellationShadowD16PipelineState() : pipelineStateCache.GetShadowD16PipelineState())
+                : (useTessellationPath ? pipelineStateCache.GetTessellationShadowPipelineState() : pipelineStateCache.GetShadowPipelineState()));
+            cmdList->SetGraphicsRootDescriptorTable(1, m_shadowMapManager.GetShadowSrv());
+            cmdList->SetGraphicsRootDescriptorTable(4, frame.lightSrvTable);
+            cmdList->SetGraphicsRootConstantBufferView(3, lightCB->GetGPUVirtualAddress());
+            cmdList->IASetPrimitiveTopology(useTessellationPath
+                ? D3D_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST
+                : D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        };
+
+        // スキンメッシュの影描画: 深度専用の SkinnedShadow PSO/ルートシグネチャに切り替えて描画し、
+        // 通常メッシュ用のバインド状態(ルートシグネチャ切替でリセットされる root 引数)を呼び出し後に復元する。
+        // VSM モードは色出力(モーメント)を書く専用 PSO が無いため未対応(呼び出し元では VSM 描画時に呼ばない)。
         const auto invokeSkinnedShadowDraw = [&](const ShadowPassContext& ctx, bool useD16Dsv) {
             if (!drawSkinnedCallback) {
                 return;
@@ -759,31 +907,38 @@ namespace SasamiRenderer
             //  GPU Based Validation で uninitialized root argument エラーになる)
             cmdList->SetGraphicsRootConstantBufferView(3, lightCB->GetGPUVirtualAddress());
             cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-            drawSkinnedCallback(ctx);
+            ShadowPassContext skinnedCtx = ctx;
+            skinnedCtx.d16Target = useD16Dsv;
+            drawSkinnedCallback(skinnedCtx);
 
-            cmdList->SetGraphicsRootSignature(pipelineStateCache.GetRootSignature());
-            cmdList->SetPipelineState(useD16Dsv
-                ? (useTessellationPath ? pipelineStateCache.GetTessellationShadowD16PipelineState() : pipelineStateCache.GetShadowD16PipelineState())
-                : (useTessellationPath ? pipelineStateCache.GetTessellationShadowPipelineState() : pipelineStateCache.GetShadowPipelineState()));
-            cmdList->SetGraphicsRootDescriptorTable(1, m_shadowMapManager.GetShadowSrv());
-            cmdList->SetGraphicsRootDescriptorTable(4, frame.lightSrvTable);
-            cmdList->SetGraphicsRootConstantBufferView(3, lightCB->GetGPUVirtualAddress());
-            cmdList->IASetPrimitiveTopology(useTessellationPath
-                ? D3D_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST
-                : D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            restoreDirectionalShadowState(useD16Dsv);
         };
 
-        if (drawCallback) {
+        if (drawCallback || drawClusterCallback) {
             for (uint32_t cascadeIndex = 0; cascadeIndex < shadowContext.cascadeCount; ++cascadeIndex) {
                 ShadowPassContext cascadeContext = shadowContext;
                 cascadeContext.activeCascadeIndex = cascadeIndex;
+                cascadeContext.allowAlphaMaskPipeline = !useTessellationPath;
                 std::memcpy(cascadeContext.lightViewProjection,
                             shadowContext.cascadeLightViewProjection[cascadeIndex],
                             sizeof(cascadeContext.lightViewProjection));
                 auto cascadeDsv = m_shadowMapManager.GetDirectionalCascadeDsv(cascadeIndex);
                 cmdList->OMSetRenderTargets(0, nullptr, FALSE, &cascadeDsv);
-                cmdList->ClearDepthStencilView(cascadeDsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                drawCallback(cascadeContext);
+                cmdList->ClearDepthStencilView(cascadeDsv, D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0, 0, nullptr);
+                if (drawClusterCallback) {
+                    // The cluster callback sets the mesh-shader root signature/PSO itself; static
+                    // opaque items must not also go through drawCallback or they would be
+                    // rasterized twice.
+                    drawClusterCallback(cascadeContext);
+                    restoreDirectionalShadowState(false);
+                    if (drawCallback) {
+                        ShadowPassContext dynamicContext = cascadeContext;
+                        dynamicContext.dynamicVerticesOnly = true;
+                        drawCallback(dynamicContext);
+                    }
+                } else {
+                    drawCallback(cascadeContext);
+                }
                 invokeSkinnedShadowDraw(cascadeContext, false);
             }
             if (false) {
@@ -794,7 +949,7 @@ namespace SasamiRenderer
         // --- ステップ6: シャドウマップをシェーダー参照可能状態に戻す ---
         barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_shadowMapManager.GetShadowMap().Get(),
             D3D12_RESOURCE_STATE_DEPTH_WRITE,
-            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+            kShadowReadState);
         cmdList->ResourceBarrier(1, &barrier);
 
         // --- ステップ6b: VSM シャドウパス（Vsm / Vsm4 モード）---
@@ -805,14 +960,14 @@ namespace SasamiRenderer
             // vsmMap をレンダーターゲット状態に遷移
             {
                 auto vsmBarrier = CD3DX12_RESOURCE_BARRIER::Transition(m_shadowMapManager.GetVsmMap().Get(),
-                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                    kShadowReadState,
                     D3D12_RESOURCE_STATE_RENDER_TARGET);
                 cmdList->ResourceBarrier(1, &vsmBarrier);
             }
             // shadowMap を深度書き込み状態に遷移（再度）
             {
                 auto depthBarrier = CD3DX12_RESOURCE_BARRIER::Transition(m_shadowMapManager.GetShadowMap().Get(),
-                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                    kShadowReadState,
                     D3D12_RESOURCE_STATE_DEPTH_WRITE);
                 cmdList->ResourceBarrier(1, &depthBarrier);
             }
@@ -827,7 +982,9 @@ namespace SasamiRenderer
             cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
             if (drawCallback) {
-                static const float kClearColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+                // VSM stores (depth, depth^2). An untouched texel must read as the far plane,
+                // which reverse-Z puts at 0, so both moments clear to 0 rather than 1.
+                static const float kClearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
                 for (uint32_t ci = 0; ci < shadowContext.cascadeCount; ++ci) {
                     ShadowPassContext cascadeCtx = shadowContext;
                     cascadeCtx.activeCascadeIndex = ci;
@@ -838,7 +995,7 @@ namespace SasamiRenderer
                     auto cascadeDsv = m_shadowMapManager.GetDirectionalCascadeDsv(ci);
                     cmdList->OMSetRenderTargets(1, &vsmRtv, FALSE, &cascadeDsv);
                     cmdList->ClearRenderTargetView(vsmRtv, kClearColor, 0, nullptr);
-                    cmdList->ClearDepthStencilView(cascadeDsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                    cmdList->ClearDepthStencilView(cascadeDsv, D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0, 0, nullptr);
                     drawCallback(cascadeCtx);
                 }
             }
@@ -847,12 +1004,12 @@ namespace SasamiRenderer
             {
                 D3D12_RESOURCE_STATES vsmNextState = vsmBlurEnabled
                     ? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
-                    : D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+                    : kShadowReadState;
                 D3D12_RESOURCE_BARRIER postBarriers[2] = {
                     CD3DX12_RESOURCE_BARRIER::Transition(m_shadowMapManager.GetVsmMap().Get(),
                         D3D12_RESOURCE_STATE_RENDER_TARGET, vsmNextState),
                     CD3DX12_RESOURCE_BARRIER::Transition(m_shadowMapManager.GetShadowMap().Get(),
-                        D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
+                        D3D12_RESOURCE_STATE_DEPTH_WRITE, kShadowReadState),
                 };
                 cmdList->ResourceBarrier(2, postBarriers);
             }
@@ -920,7 +1077,7 @@ namespace SasamiRenderer
                     D3D12_RESOURCE_BARRIER finalBarriers[2] = {
                         CD3DX12_RESOURCE_BARRIER::Transition(m_shadowMapManager.GetVsmMap().Get(),
                             D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
+                            kShadowReadState),
                         CD3DX12_RESOURCE_BARRIER::Transition(m_shadowMapManager.GetVsmMapTemp().Get(),
                             D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                             D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
@@ -982,7 +1139,9 @@ namespace SasamiRenderer
             //  GPU Based Validation で uninitialized root argument エラーになる)
             cmdList->SetGraphicsRootConstantBufferView(3, lightCB->GetGPUVirtualAddress());
             cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-            drawSkinnedCallback(ctx);
+            ShadowPassContext skinnedCtx = ctx;
+            skinnedCtx.d16Target = useD16Dsv;
+            drawSkinnedCallback(skinnedCtx);
 
             cmdList->SetGraphicsRootSignature(pipelineStateCache.GetRootSignature());
             cmdList->SetPipelineState(useD16Dsv
@@ -1003,7 +1162,7 @@ namespace SasamiRenderer
             const size_t spotShadowLightCount = (std::min)(m_spotLights.size(), LightCBLayout::kMaxSpotShadows);
 
             auto spotBarrier = CD3DX12_RESOURCE_BARRIER::Transition(m_shadowMapManager.GetSpotShadowMap().Get(),
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                kShadowReadState,
                 D3D12_RESOURCE_STATE_DEPTH_WRITE);
             cmdList->ResourceBarrier(1, &spotBarrier);
 
@@ -1032,10 +1191,12 @@ namespace SasamiRenderer
                 Math::BuildSpotLightViewProjection(sl.yaw, sl.pitch, spotPos,
                                                    sl.outerAngle, 0.1f, sl.range,
                                                    spotContext.lightViewProjection);
+                spotContext.d16Target = true;
+                spotContext.allowAlphaMaskPipeline = !useTessellationPath;
 
                 auto spotDsv = m_shadowMapManager.GetSpotDsv(static_cast<uint32_t>(shadowIndex));
                 cmdList->OMSetRenderTargets(0, nullptr, FALSE, &spotDsv);
-                cmdList->ClearDepthStencilView(spotDsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                cmdList->ClearDepthStencilView(spotDsv, D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0, 0, nullptr);
 
                 if (drawCallback) {
                     drawCallback(spotContext);
@@ -1045,7 +1206,7 @@ namespace SasamiRenderer
 
             spotBarrier = CD3DX12_RESOURCE_BARRIER::Transition(m_shadowMapManager.GetSpotShadowMap().Get(),
                 D3D12_RESOURCE_STATE_DEPTH_WRITE,
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                kShadowReadState);
             cmdList->ResourceBarrier(1, &spotBarrier);
         }
 
@@ -1056,7 +1217,7 @@ namespace SasamiRenderer
             const size_t pointShadowLightCount = (std::min)(m_pointLights.size(), LightCBLayout::kMaxPointShadows);
 
             auto pointBarrierToWrite = CD3DX12_RESOURCE_BARRIER::Transition(m_shadowMapManager.GetPointShadowMap().Get(),
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                kShadowReadState,
                 D3D12_RESOURCE_STATE_DEPTH_WRITE);
             cmdList->ResourceBarrier(1, &pointBarrierToWrite);
 
@@ -1085,10 +1246,12 @@ namespace SasamiRenderer
                 for (uint32_t face = 0; face < ShadowMapManager::kPointShadowFaceCount; ++face) {
                     ShadowPassContext pointContext{};
                     Math::BuildCubeFaceViewProjection(pointPos, face, 0.1f, pl.range, pointContext.lightViewProjection);
+                    pointContext.d16Target = true;
+                    pointContext.allowAlphaMaskPipeline = !useTessellationPath;
 
                     auto pointFaceDsv = m_shadowMapManager.GetPointFaceDsv(static_cast<uint32_t>(shadowIndex), face);
                     cmdList->OMSetRenderTargets(0, nullptr, FALSE, &pointFaceDsv);
-                    cmdList->ClearDepthStencilView(pointFaceDsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                    cmdList->ClearDepthStencilView(pointFaceDsv, D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0, 0, nullptr);
 
                     if (drawCallback) {
                         drawCallback(pointContext);
@@ -1099,7 +1262,7 @@ namespace SasamiRenderer
 
             auto pointBarrierToRead = CD3DX12_RESOURCE_BARRIER::Transition(m_shadowMapManager.GetPointShadowMap().Get(),
                 D3D12_RESOURCE_STATE_DEPTH_WRITE,
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                kShadowReadState);
             cmdList->ResourceBarrier(1, &pointBarrierToRead);
         }
     }
@@ -1110,4 +1273,4 @@ namespace SasamiRenderer
     // ImGui UI から呼ばれる。
     // =========================================================================
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

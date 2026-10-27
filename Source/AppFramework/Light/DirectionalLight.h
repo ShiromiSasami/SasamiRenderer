@@ -3,7 +3,7 @@
 #include "Foundation/Math/Color.h"
 #include "Renderer/Scene/RenderLightProxy.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     class DirectionalLight
     {
@@ -25,6 +25,8 @@ namespace SasamiRenderer
         float slopeScaleBias = 2.0f;
         float normalBias = 0.015f;
         float farBiasScale = 1.35f;
+        // Screen-space contact shadows, multiplied into the directional visibility term.
+        bool  contactShadowEnabled = true;
 
         RenderDirectionalLight ToRenderLight() const
         {
@@ -48,6 +50,7 @@ namespace SasamiRenderer
             out.slopeScaleBias = slopeScaleBias;
             out.normalBias = normalBias;
             out.farBiasScale = farBiasScale;
+            out.contactShadowEnabled = contactShadowEnabled;
             return out;
         }
 
@@ -71,7 +74,9 @@ namespace SasamiRenderer
             out.slopeScaleBias = in.slopeScaleBias;
             out.normalBias = in.normalBias;
             out.farBiasScale = in.farBiasScale;
+            out.contactShadowEnabled = in.contactShadowEnabled;
             return out;
         }
     };
 }
+namespace SasamiEngine { using namespace App; }

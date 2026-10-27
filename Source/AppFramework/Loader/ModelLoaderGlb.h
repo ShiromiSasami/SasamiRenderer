@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     // Parses a binary glTF (.glb) container: 12-byte header followed by a
     // mandatory JSON chunk and an optional BIN chunk (glTF 2.0 spec,
@@ -11,3 +11,4 @@ namespace SasamiRenderer
     // (buffers with no "uri" in the JSON then refer to this embedded chunk).
     bool ParseGlbContainer(const std::vector<uint8_t>& fileBytes, std::string& outJson, std::vector<uint8_t>& outBin);
 }
+namespace SasamiEngine { using namespace App; }

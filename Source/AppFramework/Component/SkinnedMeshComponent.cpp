@@ -1,5 +1,6 @@
 #include "Component/SkinnedMeshComponent.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <utility>
@@ -9,7 +10,7 @@
 #include "Foundation/Math/MathUtil.h"
 #include "Loader/ModelLoader.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     bool SkinnedMeshComponent::LoadModel(const std::string& assetPath, ModelFormat format)
     {
@@ -50,6 +51,9 @@ namespace SasamiRenderer
             if (i < modelData.normalTexturePaths.size()) {
                 source.normalTexture = LoadCpuTextureFromPath(modelData.normalTexturePaths[i]);
             }
+            if (i < modelData.emissiveTexturePaths.size()) {
+                source.emissiveTexture = LoadCpuTextureFromPath(modelData.emissiveTexturePaths[i]);
+            }
             if (i < modelData.materials.size()) {
                 source.material = modelData.materials[i];
             }
@@ -74,6 +78,7 @@ namespace SasamiRenderer
             proxy.albedoTexture = source.albedoTexture;
             proxy.occlusionTexture = source.occlusionTexture;
             proxy.normalTexture = source.normalTexture;
+            proxy.emissiveTexture = source.emissiveTexture;
             proxy.material = source.material;
             proxy.transparent = source.transparent;
             for (int i = 0; i < 16; ++i) {
@@ -127,5 +132,21 @@ namespace SasamiRenderer
         m_animationController = AnimationController{};
         m_debugAssetPath.clear();
         Math::Identity4x4(m_model);
+    }
+
+    bool SkinnedMeshComponent::ComputeLocalBounds(float outMin[3], float outMax[3]) const
+    {
+        bool any = false;
+        for (const auto& src : m_meshes) {
+            for (const auto& vertex : src.mesh.vertices) {
+                for (int axis = 0; axis < 3; ++axis) {
+                    const float value = vertex.position[axis];
+                    outMin[axis] = any ? (std::min)(outMin[axis], value) : value;
+                    outMax[axis] = any ? (std::max)(outMax[axis], value) : value;
+                }
+                any = true;
+            }
+        }
+        return any;
     }
 }

@@ -14,9 +14,42 @@
     <ClInclude Include="Samples\PBRApp\RenderingApp.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Samples\PBRApp\RenderingAppProbeGrid.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Samples\PBRApp\RenderingAppSessionFiles.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Samples\PBRApp\RenderingApp.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Samples\PBRApp\RenderingAppGiProbeCache.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Samples\PBRApp\RenderingAppInput.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Samples\PBRApp\RenderingAppProbeGrid.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Samples\PBRApp\RenderingAppScene.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Samples\PBRApp\RenderingAppSessionState.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Samples\PBRApp\RenderingAppSettingsFile.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Samples\PBRApp\RenderingAppUI.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Samples\PBRApp\RenderingAppUILighting.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Samples\PBRApp\RenderingAppUIRendering.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

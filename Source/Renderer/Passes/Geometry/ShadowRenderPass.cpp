@@ -3,7 +3,7 @@
 #include "Foundation/Tools/DebugOutput.h"
 #include "Renderer/Scene/Skybox.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     void ShadowRenderPass::BuildRequirements(RenderPassRequirementBuilder& builder) const
     {
@@ -56,7 +56,8 @@ namespace SasamiRenderer
                 policy.renderHeight,
                 services.executeSoftwareDirectionalShadow,
                 services.drawShadowItems,
-                services.drawSkinnedShadowItems);
+                services.drawSkinnedShadowItems,
+                policy.useMeshShader ? services.drawClusterShadowItems : LightSystem::DrawShadowCallback{});
         return true;
     }
 
@@ -82,7 +83,8 @@ namespace SasamiRenderer
                                    uint32_t renderHeight,
                                    const std::function<bool(const LightSystem::ShadowPassContext&)>& softwareShadowCallback,
                                    const DrawCallback& drawCallback,
-                                   const DrawCallback& drawSkinnedCallback) const
+                                   const DrawCallback& drawSkinnedCallback,
+                                   const DrawCallback& drawClusterCallback) const
     {
         if (useSoftwareRayTracedDirectionalShadow) {
             lightSystem.UpdateFrameLighting(frameLight,
@@ -156,6 +158,7 @@ namespace SasamiRenderer
                                       renderHeight,
                                       drawCallback,
                                       drawSkinnedCallback,
-                                      vsmBlurEnabled);
+                                      vsmBlurEnabled,
+                                      drawClusterCallback);
     }
 }

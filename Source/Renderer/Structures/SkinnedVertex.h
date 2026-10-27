@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // 68-byte skinned vertex: Vertex base (48) + bone indices (4) + bone weights (16)
     struct SkinnedVertex
@@ -14,3 +14,7 @@ namespace SasamiRenderer
         float   boneWeights[4];  // offset 52, 16 bytes — must sum to 1.0
     };                           // total: 68 bytes
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

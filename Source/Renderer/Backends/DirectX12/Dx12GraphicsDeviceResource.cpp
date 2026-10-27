@@ -9,13 +9,14 @@
 #include <debugapi.h>
 #include <d3d12sdklayers.h>
 #include <cstdio>
+#include <algorithm>
 #include <cstring>
 #include <utility>
 
 #include "Foundation/Tools/DebugOutput.h"
 
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
 #if RHI_DIRECTX12
 
@@ -71,9 +72,14 @@ namespace SasamiRenderer
     RhiTextureHandle Dx12GraphicsDevice::CreateRhiTexture2DFromRgba8(uint32_t width,
                                                                      uint32_t height,
                                                                      const void* pixels,
-                                                                     uint32_t rowPitchBytes)
+                                                                     uint32_t rowPitchBytes,
+                                                                     RhiFormat format)
     {
         if (!m_device || width == 0 || height == 0 || !pixels || rowPitchBytes < width * 4u) {
+            return {};
+        }
+        if (format != RhiFormat::R8G8B8A8UNorm && format != RhiFormat::R8G8B8A8UNormSrgb) {
+            DebugLog("Dx12GraphicsDevice::CreateRhiTexture2DFromRgba8: unsupported format, only R8G8B8A8UNorm/Srgb are accepted.\n");
             return {};
         }
 
@@ -83,7 +89,7 @@ namespace SasamiRenderer
         textureDesc.Height = height;
         textureDesc.DepthOrArraySize = 1;
         textureDesc.MipLevels = 1;
-        textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        textureDesc.Format = ToDxgiFormat(format);
         textureDesc.SampleDesc.Count = 1;
         textureDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
         textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
@@ -133,6 +139,210 @@ namespace SasamiRenderer
         ResourceBarrier barrier = CD3DX12_RESOURCE_BARRIER::Transition(texture.Get(),
                                                                        D3D12_RESOURCE_STATE_COPY_DEST,
                                                                        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        commandList.ResourceBarrier(1, &barrier);
+        hr = commandList.Close();
+        if (FAILED(hr)) {
+            return {};
+        }
+
+        ID3D12CommandList* lists[] = { commandList.Get() };
+        m_commandQueue.ExecuteCommandLists(1, lists);
+        WaitForGPU();
+
+        return StoreRhiResource(std::move(texture));
+    }
+
+    RhiTextureHandle Dx12GraphicsDevice::CreateRhiTexture3DFromData(uint32_t width,
+                                                                    uint32_t height,
+                                                                    uint32_t depth,
+                                                                    const void* texels,
+                                                                    uint32_t rowPitchBytes,
+                                                                    uint32_t slicePitchBytes,
+                                                                    RhiFormat format)
+    {
+        const uint32_t texelBytes = format == RhiFormat::R32Float ? 4u : (format == RhiFormat::R16Float ? 2u : 0u);
+        if (texelBytes == 0) {
+            DebugLog("Dx12GraphicsDevice::CreateRhiTexture3DFromData: unsupported format, only R32Float/R16Float are accepted.\n");
+            return {};
+        }
+        if (!m_device || width == 0 || height == 0 || depth == 0 || !texels || rowPitchBytes < width * texelBytes ||
+            static_cast<uint64_t>(slicePitchBytes) < static_cast<uint64_t>(rowPitchBytes) * height) {
+            return {};
+        }
+
+        D3D12_RESOURCE_DESC textureDesc{};
+        textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
+        textureDesc.Width = width;
+        textureDesc.Height = height;
+        textureDesc.DepthOrArraySize = static_cast<UINT16>(depth);
+        textureDesc.MipLevels = 1;
+        textureDesc.Format = ToDxgiFormat(format);
+        textureDesc.SampleDesc.Count = 1;
+        textureDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+        CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
+        Resource texture;
+        HRESULT hr = CreateCommittedResource(&defaultHeap,
+                                             D3D12_HEAP_FLAG_NONE,
+                                             &textureDesc,
+                                             D3D12_RESOURCE_STATE_COPY_DEST,
+                                             nullptr,
+                                             texture);
+        if (FAILED(hr)) {
+            return {};
+        }
+
+        const UINT64 uploadBufferSize = GetRequiredIntermediateSize(texture.Get(), 0, 1);
+        CD3DX12_HEAP_PROPERTIES uploadHeap(D3D12_HEAP_TYPE_UPLOAD);
+        CD3DX12_RESOURCE_DESC uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
+        Resource upload;
+        hr = CreateCommittedResource(&uploadHeap,
+                                     D3D12_HEAP_FLAG_NONE,
+                                     &uploadDesc,
+                                     D3D12_RESOURCE_STATE_GENERIC_READ,
+                                     nullptr,
+                                     upload);
+        if (FAILED(hr)) {
+            return {};
+        }
+
+        CommandAllocator allocator;
+        CommandList commandList;
+        hr = CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, allocator);
+        if (FAILED(hr)) {
+            return {};
+        }
+        hr = CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nullptr, commandList);
+        if (FAILED(hr)) {
+            return {};
+        }
+
+        D3D12_SUBRESOURCE_DATA textureData{};
+        textureData.pData = texels;
+        textureData.RowPitch = rowPitchBytes;
+        textureData.SlicePitch = slicePitchBytes;
+        UpdateSubresources(commandList.Get(), texture.Get(), upload.Get(), 0, 0, 1, &textureData);
+        ResourceBarrier barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            texture.Get(),
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        commandList.ResourceBarrier(1, &barrier);
+        hr = commandList.Close();
+        if (FAILED(hr)) {
+            return {};
+        }
+
+        ID3D12CommandList* lists[] = { commandList.Get() };
+        m_commandQueue.ExecuteCommandLists(1, lists);
+        WaitForGPU();
+
+        return StoreRhiResource(std::move(texture));
+    }
+
+    RhiTextureHandle Dx12GraphicsDevice::CreateRhiTexture2DFromData(uint32_t width,
+                                                                    uint32_t height,
+                                                                    uint32_t mipLevels,
+                                                                    const void* const* mipData,
+                                                                    const uint32_t* rowPitchBytes,
+                                                                    RhiFormat format)
+    {
+        // Rows per mip: texel rows for RGBA8, 4x4 block rows for BC.
+        uint32_t blockBytes = 0;
+        bool blockCompressed = true;
+        switch (format) {
+        case RhiFormat::R8G8B8A8UNorm:
+        case RhiFormat::R8G8B8A8UNormSrgb: blockBytes = 4; blockCompressed = false; break;
+        case RhiFormat::BC1UNorm:
+        case RhiFormat::BC1UNormSrgb:
+        case RhiFormat::BC4UNorm: blockBytes = 8; break;
+        case RhiFormat::BC3UNorm:
+        case RhiFormat::BC3UNormSrgb:
+        case RhiFormat::BC5UNorm:
+        case RhiFormat::BC7UNorm:
+        case RhiFormat::BC7UNormSrgb: blockBytes = 16; break;
+        default: break;
+        }
+        if (blockBytes == 0) {
+            DebugLog("Dx12GraphicsDevice::CreateRhiTexture2DFromData: unsupported format.\n");
+            return {};
+        }
+        if (!m_device || width == 0 || height == 0 || mipLevels == 0 || mipLevels > 16 || !mipData || !rowPitchBytes) {
+            return {};
+        }
+        // D3D12 requires the top mip of a BC texture to be a multiple of the block size.
+        if (blockCompressed && ((width % 4) != 0 || (height % 4) != 0)) {
+            DebugLog("Dx12GraphicsDevice::CreateRhiTexture2DFromData: BC top mip must be a multiple of 4.\n");
+            return {};
+        }
+
+        D3D12_SUBRESOURCE_DATA subresources[16]{};
+        for (uint32_t mip = 0; mip < mipLevels; ++mip) {
+            const uint32_t mipWidth = (std::max)(1u, width >> mip);
+            const uint32_t mipHeight = (std::max)(1u, height >> mip);
+            const uint32_t columns = blockCompressed ? (mipWidth + 3) / 4 : mipWidth;
+            const uint32_t rows = blockCompressed ? (mipHeight + 3) / 4 : mipHeight;
+            if (!mipData[mip] || rowPitchBytes[mip] < columns * blockBytes) {
+                return {};
+            }
+            subresources[mip].pData = mipData[mip];
+            subresources[mip].RowPitch = rowPitchBytes[mip];
+            subresources[mip].SlicePitch = static_cast<LONG_PTR>(rowPitchBytes[mip]) * rows;
+        }
+
+        D3D12_RESOURCE_DESC textureDesc{};
+        textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        textureDesc.Width = width;
+        textureDesc.Height = height;
+        textureDesc.DepthOrArraySize = 1;
+        textureDesc.MipLevels = static_cast<UINT16>(mipLevels);
+        textureDesc.Format = ToDxgiFormat(format);
+        textureDesc.SampleDesc.Count = 1;
+        textureDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+        CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
+        Resource texture;
+        HRESULT hr = CreateCommittedResource(&defaultHeap,
+                                             D3D12_HEAP_FLAG_NONE,
+                                             &textureDesc,
+                                             D3D12_RESOURCE_STATE_COPY_DEST,
+                                             nullptr,
+                                             texture);
+        if (FAILED(hr)) {
+            return {};
+        }
+
+        const UINT64 uploadBufferSize = GetRequiredIntermediateSize(texture.Get(), 0, mipLevels);
+        CD3DX12_HEAP_PROPERTIES uploadHeap(D3D12_HEAP_TYPE_UPLOAD);
+        CD3DX12_RESOURCE_DESC uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
+        Resource upload;
+        hr = CreateCommittedResource(&uploadHeap,
+                                     D3D12_HEAP_FLAG_NONE,
+                                     &uploadDesc,
+                                     D3D12_RESOURCE_STATE_GENERIC_READ,
+                                     nullptr,
+                                     upload);
+        if (FAILED(hr)) {
+            return {};
+        }
+
+        CommandAllocator allocator;
+        CommandList commandList;
+        hr = CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, allocator);
+        if (FAILED(hr)) {
+            return {};
+        }
+        hr = CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nullptr, commandList);
+        if (FAILED(hr)) {
+            return {};
+        }
+
+        UpdateSubresources(commandList.Get(), texture.Get(), upload.Get(), 0, 0, mipLevels, subresources);
+        ResourceBarrier barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            texture.Get(),
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         commandList.ResourceBarrier(1, &barrier);
         hr = commandList.Close();
         if (FAILED(hr)) {
@@ -451,4 +661,4 @@ namespace SasamiRenderer
 
 
 #endif
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

@@ -10,7 +10,7 @@
 #include "Foundation/Boot/MainThreadTaskPump.h"
 #include "Foundation/Jobs/JobCounter.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Foundation
 {
     // Dependency-ordered dispatcher for initialization tasks. Worker-affinity tasks run
     // on the JobSystem pool; main-thread-affinity tasks are handed to a MainThreadTaskPump
@@ -89,3 +89,12 @@ namespace SasamiRenderer
         std::deque<TaskRecord> m_tasks;
     };
 }
+
+// Lets the other layers name Foundation types unqualified. The directive sits on SasamiEngine rather
+// than on a layer, so anything nested under it -- SasamiEngine::Render, SasamiEngine::App -- finds these
+// names by enclosing-namespace lookup.
+//
+// The SasamiRenderer -> SasamiEngine::<layer> namespace migration it was written for is finished; what
+// is left is deciding whether the layers should qualify Foundation:: explicitly instead. That is not a
+// mechanical change (roughly 76 files name these types unqualified), so the directive stays until then.
+namespace SasamiEngine { using namespace Foundation; }

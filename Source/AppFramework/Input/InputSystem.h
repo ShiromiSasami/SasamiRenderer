@@ -5,7 +5,7 @@
 #include <boost/signals2.hpp>
 #include <windowsx.h>
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
 	using namespace boost::signals2;
 
@@ -45,6 +45,9 @@ namespace SasamiRenderer
         bool HandleMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
         void RegisterRawInput(HWND hWnd);
         void Update();
+        // False while another application is in the foreground. Raw input is registered with
+        // RIDEV_INPUTSINK, so it keeps arriving when unfocused; callers must not act on it then.
+        bool IsWindowFocused() const { return m_focused; }
         const GamepadState& GetGamepadState(int index = 0) const;
         bool IsGamepadConnected(int index = 0) const;
 
@@ -59,6 +62,7 @@ namespace SasamiRenderer
         void OnMouseMove(int x, int y, bool rotateButtonHeld);
         void OnMouseWheel(int delta);
         void UpdateGamepads();
+        void UpdateFocusState();
 
         KeyDownSignal    onKeyDown_;
         KeyUpSignal      onKeyUp_;
@@ -71,5 +75,8 @@ namespace SasamiRenderer
         bool m_rightButtonDown = false;
         bool m_rawRegistered = false;
         bool m_mouseButtons[3] = { false,false,false };
+        HWND m_hWnd = nullptr;
+        bool m_focused = false;
     };
 }
+namespace SasamiEngine { using namespace App; }

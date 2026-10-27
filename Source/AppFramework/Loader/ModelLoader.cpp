@@ -1,7 +1,10 @@
 #include "ModelLoader.h"
+#include "MeshTriangleStats.h"
+#include "MeshVertexCacheOptimizer.h"
 #include "ModelLoaderFbx.h"
 #include "StaticMeshCache.h"
 #include "ModelLoaderGlb.h"
+#include "ModelLoaderEmbeddedImages.h"
 #include "ModelLoaderGltfUtility.h"
 #include <cmath>
 #include <cstring>
@@ -13,7 +16,7 @@
 #include "Foundation/Math/MathUtil.h"
 #include <rapidjson/document.h>
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     // LoadOBJ → ModelLoaderOBJ.cpp
 
@@ -123,16 +126,12 @@ namespace SasamiRenderer
         std::vector<Accessor> accessors;
         ParseBuffersViewsAccessors(doc, basePath, isGlb, glbBinChunk, buffers, views, accessors);
 
-        // Images
-        if (doc.HasMember("images") && doc["images"].IsArray()) {
-            const auto& imgs = doc["images"];
-            outScene.images.resize(imgs.Size());
-            for (rapidjson::SizeType i = 0; i < imgs.Size(); ++i) {
-                const auto& im = imgs[i];
-                if (im.HasMember("uri")) {
-                    std::string uri = im["uri"].GetString();
-                    outScene.images[i].uri = (basePath / uri).string();
-                }
+        // Images (external uri or GLB-embedded bufferView)
+        {
+            const std::vector<std::string> imagePaths = ResolveGltfImagePaths(doc, std::filesystem::path(path), buffers, views);
+            outScene.images.resize(imagePaths.size());
+            for (size_t i = 0; i < imagePaths.size(); ++i) {
+                outScene.images[i].uri = imagePaths[i];
             }
         }
 
@@ -200,9 +199,7 @@ namespace SasamiRenderer
                         mat.normalTexture = norm["index"].GetInt();
                     }
                 }
-                if (m.HasMember("alphaMode") && m["alphaMode"].IsString()) {
-                    mat.alphaBlend = (std::string(m["alphaMode"].GetString()) == "BLEND");
-                }
+                ReadAlphaMode(m, mat.alphaBlend, mat.alphaMask, mat.alphaCutoff);
                 if (m.HasMember("doubleSided") && m["doubleSided"].IsBool()) {
                     mat.doubleSided = m["doubleSided"].GetBool();
                 }
@@ -379,10 +376,10 @@ namespace SasamiRenderer
 
     // Actual parsing for each supported format. LoadStaticModel below wraps this with
     // the on-disk cache; call that instead.
-    static bool LoadStaticModelUncached(const std::string& path,
-                                        StaticModelFormat format,
-                                        float uniformScale,
-                                        std::vector<LoadedStaticMesh>& outMeshes)
+    bool LoadStaticModelUncached(const std::string& path,
+                                 StaticModelFormat format,
+                                 float uniformScale,
+                                 std::vector<LoadedStaticMesh>& outMeshes)
     {
         outMeshes.clear();
 
@@ -459,7 +456,11 @@ namespace SasamiRenderer
                 out.material.attenuationDistance = material.attenuationDistance;
                 out.material.doubleSided = material.doubleSided;
                 if (material.alphaBlend) {
+                    out.material.alphaMode = AlphaMode::Blend;
                     out.material.transmission = 1.0f - material.baseColorFactor[3];
+                } else if (material.alphaMask) {
+                    out.material.alphaMode = AlphaMode::Mask;
+                    out.material.alphaCutoff = material.alphaCutoff;
                 }
                 out.material.transmission = std::max(out.material.transmission, material.transmissionFactor);
 
@@ -487,6 +488,14 @@ namespace SasamiRenderer
                     }
                 }
 
+                const int emissiveIndex = material.emissiveTexture;
+                if (emissiveIndex >= 0 && emissiveIndex < static_cast<int>(scene.textures.size())) {
+                    const int imageIndex = scene.textures[emissiveIndex].imageIndex;
+                    if (imageIndex >= 0 && imageIndex < static_cast<int>(scene.images.size())) {
+                        out.emissiveTexturePath = scene.images[imageIndex].uri;
+                    }
+                }
+
                 const int metallicRoughnessIndex = material.metallicRoughnessTexture;
                 if (metallicRoughnessIndex >= 0 && metallicRoughnessIndex < static_cast<int>(scene.textures.size())) {
                     const int imageIndex = scene.textures[metallicRoughnessIndex].imageIndex;
@@ -499,6 +508,31 @@ namespace SasamiRenderer
         }
 
         return !outMeshes.empty();
+    }
+
+    // No-op unless SASAMI_VERTEX_CACHE_OPT=1. Applied on both the cache-hit and the parse path so
+    // the two runs of an A/B differ only in the environment variable.
+    static void OptimizeLoadedMeshes(std::vector<LoadedStaticMesh>& meshes)
+    {
+        if (!IsVertexCacheOptimizationEnabled()) {
+            return;
+        }
+        for (LoadedStaticMesh& loaded : meshes) {
+            OptimizeMeshForVertexCache(loaded.mesh);
+        }
+    }
+
+    // Diagnostic only; see MeshTriangleStats.h. localTransform[0] carries the uniform scale for
+    // the loaders that defer it, and is 1 for the ones that bake it into the vertices, so it is
+    // the right factor either way.
+    static void AccumulateLoadedTriangleStats(const std::vector<LoadedStaticMesh>& meshes)
+    {
+        if (!IsTriangleStatsEnabled()) {
+            return;
+        }
+        for (const LoadedStaticMesh& loaded : meshes) {
+            AccumulateTriangleAreas(loaded.mesh, loaded.localTransform[0]);
+        }
     }
 
     bool LoadStaticModel(const std::string& path,
@@ -515,6 +549,8 @@ namespace SasamiRenderer
         if (StaticMeshCache::IsUpToDate(cachePath, path, uniformScale) &&
             StaticMeshCache::Load(cachePath, outMeshes) &&
             !outMeshes.empty()) {
+            OptimizeLoadedMeshes(outMeshes);
+            AccumulateLoadedTriangleStats(outMeshes);
             return true;
         }
 
@@ -524,6 +560,12 @@ namespace SasamiRenderer
         }
 
         StaticMeshCache::Save(cachePath, path, uniformScale, outMeshes); // best-effort
+        // Deliberately after Save, so the cache keeps the unoptimized geometry. Otherwise the
+        // first run would bake the reordering into the cache and every later run would be
+        // "optimized" regardless of SASAMI_VERTEX_CACHE_OPT, which would make the A/B meaningless.
+        // If this turns out to be worth keeping, move it before Save to pay the cost once.
+        OptimizeLoadedMeshes(outMeshes);
+        AccumulateLoadedTriangleStats(outMeshes);
         return true;
     }
 }

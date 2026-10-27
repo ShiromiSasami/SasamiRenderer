@@ -2,15 +2,32 @@
 
 // =============================================================================
 // DeferredLightingRenderPass.h
-// 繝ｩ繧ｹ繧ｿ繝ｩ繧､繧ｺ繝代う繝励Λ繧､繝ｳ縺ｮ繝ｩ繧､繝・ぅ繝ｳ繧ｰ繝代せ繧定｡ｨ縺吶Ξ繝ｳ繝繝ｼ繧ｰ繝ｩ繝輔ヮ繝ｼ繝峨・//
-// 縲仙ｽｹ蜑ｲ縲・//  - GBuffer 縺ｮ豕慕ｷ壹・豺ｱ蠎ｦ繝ｻ繧ｷ繝｣繝峨え繝槭ャ繝励ｒ隱ｭ縺ｿ霎ｼ繧
-//  - PBR 繝ｩ繧､繝・ぅ繝ｳ繧ｰ・医ョ繧｣繝ｬ繧ｯ繧ｷ繝ｧ繝翫Ν繝ｻ繝昴う繝ｳ繝医・繧ｹ繝昴ャ繝医・IBL・峨ｒ險育ｮ励＠縺ｦ SceneColor 縺ｫ譖ｸ縺・//  - 繝昴せ繝医・繝ｭ繧ｻ繧ｹ蜑阪・譛邨ゅす繧ｧ繝ｼ繝・ぅ繝ｳ繧ｰ邨先棡繧貞・蜉帙☆繧・//
-// 縲舌Μ繧ｽ繝ｼ繧ｹ萓晏ｭ倥・//  Read:  "ShadowMap"・医す繝｣繝峨え繝槭ャ繝玲ｷｱ蠎ｦ SRV・・//  Read:  "SceneDepth"・・Buffer 豺ｱ蠎ｦ・・//  Write: "SceneColor"・医Λ繧､繝・ぅ繝ｳ繧ｰ邨先棡蜃ｺ蜉帛・・・//
-// 縲舌す繧ｧ繝ｼ繝繝ｼ縲・//  - 讓呎ｺ悶ヱ繧ｹ: PBR_PS.hlsl / BasicShader.hlsl・・SO 縺ｫ萓晏ｭ假ｼ・//  - 繝・ャ繧ｻ繝ｬ繝ｼ繧ｷ繝ｧ繝ｳ繝代せ: 蟆ら畑縺ｮ PSO 繧剃ｽｿ逕ｨ
+// ラスタライズパイプラインのライティングパスを表すレンダーグラフノード。
 //
-// 縲舌Ν繝ｼ繝医す繧ｰ繝阪メ繝｣縺ｮ繝・ぅ繧ｹ繧ｯ繝ｪ繝励ち繝・・繝悶Ν蜑ｲ繧雁ｽ薙※縲・//  b3: LightCB・医Λ繧､繝・ぅ繝ｳ繧ｰ螳壽焚繝舌ャ繝輔ぃ・・//  t1: ShadowMap SRV
-//  t4: Point/SpotLight StructuredBuffer・医Λ繧､繝医ユ繝ｼ繝悶Ν・・//  t5: IBL 繧ｭ繝･繝ｼ繝悶・繝・・ SRV 繝・・繝悶Ν
-//  t6: Runtime AO 繝・け繧ｹ繝√Ε SRV・・SAO/RTAO 縺ｪ縺ｩ・・//  t7: Reflection 繝・け繧ｹ繝√Ε SRV
+// ⚠️ このコメントは書き下ろしである。元は日本語のコメントが入っていたが文字エンコーディングの
+//    事故で壊れており（git HEAD の時点で既に破損）、逆変換でも一部の文字が復元できなかった。
+//    そのため「復元」ではなく、2026-09-25 時点のコードを読んで実際の動作を記述し直したものである。
+//    復元できた断片には既に存在しない PBR_PS.hlsl への参照も含まれており、内容自体も古かった。
+//
+// 【役割】
+//  - GBuffer（アルベド / 法線 / マテリアル / エミッシブ / スペキュラワークフロー）と深度・
+//    各種シャドウマップを読み、PBR ライティングを計算して SceneColor に書く
+//  - ディレクショナル / ポイント / スポットの直接光、IBL、遮蔽、反射を合成する
+//
+// 【グラフ上の依存】（Setup の宣言そのまま）
+//  Read:  ShadowMap / SceneDepth / GBufferAlbedo / GBufferNormal / GBufferMaterial /
+//         GBufferEmissive / GBufferSpecularWorkflow / SSAOBlur / SSRReflection /
+//         SoftwareReflection
+//  Write: SceneColor
+//  注: スポット/ポイント/VSM のシャドウマップは LightSystem/ShadowMapManager が所有していて
+//      レンダーグラフに import されていないため、ここでは宣言できず暗黙の依存になっている
+//      （既知の課題として追跡中）。
+//
+// 【ディスクリプタテーブル】ルートパラメータ番号は Execute の SetGraphicsDescriptorTable に
+//  直接書かれている（4=ディレクショナル影 / 6=ライトテーブル / 7=IBL / 8=スクリーンスペースAO /
+//  9=反射 / 10=スポット影 / 11=VSM / 17=ポイント影 / 18=IBLスペキュラ）。
+//  HLSL 側のレジスタ番号とは別物なので、シェーダのバインディングは
+//  Shaders/Raster/Lighting/Deferred/DeferredLighting_PS.hlsl の宣言を直接参照すること。
 // =============================================================================
 
 #include "Renderer/RHI/GraphicsDevice.h"
@@ -20,7 +37,7 @@
 
 #include <functional>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // =========================================================================
     // DeferredLightingRenderPass
@@ -46,3 +63,7 @@ namespace SasamiRenderer
         // writes SceneColor.
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

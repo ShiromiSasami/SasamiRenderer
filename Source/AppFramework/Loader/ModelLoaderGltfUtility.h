@@ -8,7 +8,7 @@
 
 #include <rapidjson/document.h>
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     namespace ModelLoaderGltfUtility
     {
@@ -52,6 +52,10 @@ namespace SasamiRenderer
 
         bool ReadVec(const rapidjson::Value& arr, float* out, int n);
 
+        // Reads a glTF material's "alphaMode" / "alphaCutoff" (spec 3.9.6). OPAQUE or a missing
+        // value leaves both flags false; alphaCutoff defaults to 0.5 and is only meaningful for MASK.
+        void ReadAlphaMode(const rapidjson::Value& material, bool& outBlend, bool& outMask, float& outCutoff);
+
         const uint8_t* GetAccessorPtr(const std::vector<uint8_t>& buffer,
                                        const BufferView& view,
                                        const Accessor& acc,
@@ -65,3 +69,4 @@ namespace SasamiRenderer
                           std::vector<uint32_t>& out);
     }
 }
+namespace SasamiEngine { using namespace App; }

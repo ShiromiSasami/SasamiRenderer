@@ -16,7 +16,7 @@
 
 #pragma comment(lib, "d3dcompiler.lib")
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     using Microsoft::WRL::ComPtr;
 
@@ -243,4 +243,4 @@ namespace SasamiRenderer
         return true;
     }
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

@@ -5,7 +5,7 @@
 #include "Renderer/Resources/ShaderBlobCache.h"
 #include "d3dx12.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // Common per-PSO defaults shared by every graphics PSO desc in this cache
     // (SampleMask/PrimitiveTopologyType/SampleDesc.Count are identical everywhere;
@@ -51,7 +51,9 @@ namespace SasamiRenderer
     // interpolates depths rather than occlusion, which is not PCF at all.
     // Clamp addressing keeps the edge taps of the PCF kernel on the same shadow-map slice
     // (cube face for point lights) instead of folding them around to the opposite side.
-    // LESS_EQUAL matches the existing "lit when storedDepth >= fragmentDepth" convention.
+    // GREATER_EQUAL matches the reverse-Z convention (near=1.0, far=0.0): a fragment is lit
+    // when storedDepth >= fragmentDepth. This sampler is shared by directional, spot, and
+    // point shadow lookups, so all three follow the same reverse-Z comparison.
     inline D3D12_STATIC_SAMPLER_DESC MakeShadowComparisonSampler(
         UINT shaderRegister = 1, UINT registerSpace = 0,
         D3D12_SHADER_VISIBILITY visibility = D3D12_SHADER_VISIBILITY_PIXEL)
@@ -61,7 +63,7 @@ namespace SasamiRenderer
         sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+        sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
         sampler.MaxLOD = D3D12_FLOAT32_MAX;
         sampler.ShaderRegister = shaderRegister;
         sampler.RegisterSpace = registerSpace;
@@ -92,6 +94,8 @@ namespace SasamiRenderer
         bool Initialize(GraphicsDevice& device);
         inline PipelineState& GetPipelineState() { return m_pipelineState; }
         inline PipelineState& GetGBufferPipelineState() { return m_gbufferPipelineState; }
+        inline PipelineState& GetToonOutlinePipelineState() { return m_toonOutlinePipelineState; }
+        inline PipelineState& GetWireframePipelineState() { return m_wireframePipelineState; }
         inline PipelineState& GetDeferredLightingPipelineState() { return m_deferredLightingPipelineState; }
         inline PipelineState& GetGBufferDebugPipelineState() { return m_gbufferDebugPipelineState; }
         // Currently unused; reserved for future sorted forward transparency.
@@ -103,6 +107,9 @@ namespace SasamiRenderer
         // D16_UNORM DSV 版(スポット/ポイントライトの512x512シャドウマップ用)。DSVFormat 以外は GetShadowPipelineState() と同一。
         inline PipelineState& GetShadowD16PipelineState() { return m_shadowD16PipelineState; }
         inline PipelineState& GetShadowVsmPipelineState() { return m_shadowVsmPipelineState; }
+        // glTF alphaMode MASK casters: full G-Buffer VS + ShadowAlphaMask_PS (alpha test). D16 = spot/point maps.
+        inline PipelineState& GetShadowAlphaMaskPipelineState() { return m_shadowAlphaMaskPipelineState; }
+        inline PipelineState& GetShadowAlphaMaskD16PipelineState() { return m_shadowAlphaMaskD16PipelineState; }
         inline PipelineState& GetShadowVsmBlurHPipelineState() { return m_vsmBlurHPso; }
         inline PipelineState& GetShadowVsmBlurVPipelineState() { return m_vsmBlurVPso; }
         inline RootSignature& GetShadowVsmBlurRootSignature() { return m_vsmBlurRootSignature; }
@@ -114,7 +121,6 @@ namespace SasamiRenderer
         // D16_UNORM DSV 版(スポット/ポイントライトの512x512シャドウマップ用)。DSVFormat 以外は GetTessellationShadowPipelineState() と同一。
         inline PipelineState& GetTessellationShadowD16PipelineState() { return m_tessShadowD16PipelineState; }
         inline PipelineState& GetTessellationDebugPipelineState() { return m_tessDebugPipelineState; }
-        inline PipelineState& GetMeshletDebugPipelineState() { return m_meshletDebugPipelineState; }
         // Backward compatibility: default skybox pipeline is HDR path.
         inline PipelineState& GetSkyboxPipelineState() { return m_skyboxHdrPipelineState; }
         inline PipelineState& GetSkyboxHdrPipelineState() { return m_skyboxHdrPipelineState; }
@@ -127,7 +133,21 @@ namespace SasamiRenderer
         inline PipelineState& GetSwrtReflectionCompositePipelineState() { return m_swrtReflectionCompositePipelineState; }
         inline PipelineState& GetScreenSpaceReflectionPipelineState() { return m_screenSpaceReflectionPipelineState; }
         inline PipelineState& GetToneMapPipelineState() { return m_toneMapPipelineState; }
+        // Same ToneMap_PS.hlsl, bound only when the swap chain is actually running HDR10
+        // (Renderer::m_hdrOutputActive): its RTVFormats[0] is DXGI_FORMAT_R10G10B10A2_UNORM
+        // instead of R8G8B8A8_UNORM, matching the HDR10 swap chain's backbuffer format -- a
+        // graphics PSO's declared RTV formats must exactly match the RTV actually bound at Draw.
+        inline PipelineState& GetToneMapHdr10PipelineState() { return m_toneMapHdr10PipelineState; }
         inline PipelineState& GetFxaaPipelineState() { return m_fxaaPipelineState; }
+        inline PipelineState& GetBloomDownsamplePipelineState() { return m_bloomDownsamplePipelineState; }
+        inline PipelineState& GetBloomUpsamplePipelineState() { return m_bloomUpsamplePipelineState; }
+        inline PipelineState& GetLightShaftPipelineState() { return m_lightShaftPipelineState; }
+        inline PipelineState& GetLensFlarePipelineState() { return m_lensFlarePipelineState; }
+        inline PipelineState& GetLensFlareRayTracedPipelineState() { return m_lensFlareRayTracedPipelineState; }
+        inline PipelineState& GetFxaaHdr10PipelineState() { return m_fxaaHdr10PipelineState; }
+        inline PipelineState& GetLightShaftHdr10PipelineState() { return m_lightShaftHdr10PipelineState; }
+        inline PipelineState& GetLensFlareHdr10PipelineState() { return m_lensFlareHdr10PipelineState; }
+        inline PipelineState& GetLensFlareRayTracedHdr10PipelineState() { return m_lensFlareRayTracedHdr10PipelineState; }
         inline RootSignature& GetRootSignature() { return m_rootSignature; }
         inline RootSignature& GetDeferredLightingRootSignature() { return m_deferredLightingRootSignature; }
         inline RootSignature& GetRayMarchRootSignature()  { return m_rayMarchRootSignature;  }
@@ -139,7 +159,20 @@ namespace SasamiRenderer
         // Mesh shader pipeline (AS + MS + PS). Available only on DX12 Ultimate hardware.
         // Returns a null PipelineState if mesh shaders are not supported.
         inline PipelineState& GetMeshShaderPipelineState()  { return m_meshShaderPipelineState; }
+        inline PipelineState& GetMeshShaderShadowPipelineState()  { return m_meshShaderShadowPipelineState; }
         inline RootSignature& GetMeshShaderRootSignature()  { return m_meshShaderRootSignature; }
+
+        // Bindless root signature + depth-only mesh-shader PSO for the indirect (GPU-driven)
+        // cluster shadow dispatch. No AS: the visible cluster list is produced by a separate
+        // compute cull pass. Returns a null PipelineState if mesh shaders are not supported.
+        inline RootSignature& GetClusterIndirectRootSignature()  { return m_clusterIndirectRootSignature; }
+        inline PipelineState& GetClusterIndirectShadowPipelineState()  { return m_clusterIndirectShadowPipelineState; }
+
+        // Bindless root signature + GBuffer mesh-shader PSO (MS + PS) for the indirect main-view
+        // cluster dispatch. Differs from the shadow one by a PIXEL-visible material-table SRV and
+        // a static sampler. Returns a null PipelineState if mesh shaders are not supported.
+        inline RootSignature& GetClusterIndirectGBufferRootSignature()  { return m_clusterIndirectGBufferRootSignature; }
+        inline PipelineState& GetClusterIndirectGBufferPipelineState()  { return m_clusterIndirectGBufferPipelineState; }
 
         // Skinned mesh pipelines (GPU skinning with bone matrix CB at b3 / root param [14])
         inline PipelineState& GetSkinnedPipelineState()            { return m_skinnedPipelineState; }
@@ -151,6 +184,8 @@ namespace SasamiRenderer
         inline PipelineState& GetSkinnedShadowPipelineState()      { return m_skinnedShadowPipelineState; }
         // D16_UNORM DSV 版(スポット/ポイントライトの512x512シャドウマップ用)。DSVFormat 以外は GetSkinnedShadowPipelineState() と同一。
         inline PipelineState& GetSkinnedShadowD16PipelineState()   { return m_skinnedShadowD16PipelineState; }
+        inline PipelineState& GetSkinnedShadowAlphaMaskPipelineState()    { return m_skinnedShadowAlphaMaskPipelineState; }
+        inline PipelineState& GetSkinnedShadowAlphaMaskD16PipelineState() { return m_skinnedShadowAlphaMaskD16PipelineState; }
         inline RootSignature& GetSkinnedRootSignature()            { return m_skinnedRootSignature; }
 
         // Convert D3D12 wrapper objects to backend-opaque RHI handles.
@@ -172,7 +207,7 @@ namespace SasamiRenderer
         // single InitializeSkinnedPipelines() call made from within Initialize().
         struct SkinnedPipelineInputs
         {
-            const D3D12_ROOT_PARAMETER (&rootParams)[17];
+            const D3D12_ROOT_PARAMETER (&rootParams)[19];
             const D3D12_STATIC_SAMPLER_DESC (&staticSamplers)[2];
             const std::string& vertexProfile;
             const D3D12_GRAPHICS_PIPELINE_STATE_DESC& psoDesc;
@@ -180,16 +215,20 @@ namespace SasamiRenderer
             const D3D12_BLEND_DESC& blendDesc;
             const D3D12_BLEND_DESC& transparentBlend;
             const D3D12_BLEND_DESC& oitBlend;
+            const ComPtr<ID3DBlob>& forwardColorOnlyPS;
             const ComPtr<ID3DBlob>& transparentOitPS;
             const ComPtr<ID3DBlob>& transparentBackfaceDistancePS;
             const D3D12_RASTERIZER_DESC& backfaceDistanceRast;
             const D3D12_RASTERIZER_DESC& shadowRast;
             const D3D12_RASTERIZER_DESC& pointSpotShadowRast;
+            const ComPtr<ID3DBlob>& shadowAlphaMaskPS;
         };
         bool InitializeSkinnedPipelines(GraphicsDevice& device, const SkinnedPipelineInputs& inputs);
 
         PipelineState m_pipelineState;
         PipelineState m_gbufferPipelineState;
+        PipelineState m_toonOutlinePipelineState;
+        PipelineState m_wireframePipelineState;
         PipelineState m_deferredLightingPipelineState;
         PipelineState m_gbufferDebugPipelineState;
         PipelineState m_transparentPipelineState;
@@ -199,6 +238,8 @@ namespace SasamiRenderer
         PipelineState m_shadowPipelineState;
         PipelineState m_shadowD16PipelineState;
         PipelineState m_shadowVsmPipelineState;
+        PipelineState m_shadowAlphaMaskPipelineState;
+        PipelineState m_shadowAlphaMaskD16PipelineState;
         PipelineState m_vsmBlurHPso;
         PipelineState m_vsmBlurVPso;
         RootSignature m_vsmBlurRootSignature;
@@ -209,7 +250,6 @@ namespace SasamiRenderer
         PipelineState m_tessShadowPipelineState;
         PipelineState m_tessShadowD16PipelineState;
         PipelineState m_tessDebugPipelineState;
-        PipelineState m_meshletDebugPipelineState;
         PipelineState m_skyboxHdrPipelineState;
         PipelineState m_skyboxLdrPipelineState;
         PipelineState m_ssaoPipelineState;
@@ -220,7 +260,17 @@ namespace SasamiRenderer
         PipelineState m_swrtReflectionCompositePipelineState;
         PipelineState m_screenSpaceReflectionPipelineState;
         PipelineState m_toneMapPipelineState;
+        PipelineState m_toneMapHdr10PipelineState;
         PipelineState m_fxaaPipelineState;
+        PipelineState m_bloomDownsamplePipelineState;
+        PipelineState m_bloomUpsamplePipelineState;
+        PipelineState m_lightShaftPipelineState;
+        PipelineState m_lensFlarePipelineState;
+        PipelineState m_lensFlareRayTracedPipelineState;
+        PipelineState m_fxaaHdr10PipelineState;
+        PipelineState m_lightShaftHdr10PipelineState;
+        PipelineState m_lensFlareHdr10PipelineState;
+        PipelineState m_lensFlareRayTracedHdr10PipelineState;
         RootSignature m_rootSignature;
         RootSignature m_deferredLightingRootSignature;
         RootSignature m_rayMarchRootSignature;
@@ -229,7 +279,12 @@ namespace SasamiRenderer
         RootSignature m_ssaoBlurRootSignature;
         RootSignature m_screenSpaceReflectionRootSignature;
         PipelineState m_meshShaderPipelineState;
+        PipelineState m_meshShaderShadowPipelineState;
         RootSignature m_meshShaderRootSignature;
+        RootSignature m_clusterIndirectRootSignature;
+        PipelineState m_clusterIndirectShadowPipelineState;
+        RootSignature m_clusterIndirectGBufferRootSignature;
+        PipelineState m_clusterIndirectGBufferPipelineState;
         PipelineState m_skinnedPipelineState;
         PipelineState m_skinnedGBufferPipelineState;
         PipelineState m_skinnedTransparentPipelineState;
@@ -237,6 +292,8 @@ namespace SasamiRenderer
         PipelineState m_skinnedTransparentBackfaceDistancePipelineState;
         PipelineState m_skinnedShadowPipelineState;
         PipelineState m_skinnedShadowD16PipelineState;
+        PipelineState m_skinnedShadowAlphaMaskPipelineState;
+        PipelineState m_skinnedShadowAlphaMaskD16PipelineState;
         RootSignature m_skinnedRootSignature;
 
         // Memoizes shader blobs across the main array loop and the sub-init
@@ -244,3 +301,7 @@ namespace SasamiRenderer
         ShaderBlobCache m_shaderBlobCache;
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

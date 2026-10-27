@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     enum class DirectionalShadowMode : uint32_t
     {
@@ -37,6 +37,9 @@ namespace SasamiRenderer
         float slopeScaleBias = 2.0f;
         float normalBias = 0.015f;
         float farBiasScale = 1.35f;
+        // Screen-space contact shadows are multiplied into the directional visibility term.
+        // Exposed so the two can be separated when diagnosing shadow artefacts.
+        bool  contactShadowEnabled = true;
     };
 
     struct RenderPointLight
@@ -59,3 +62,7 @@ namespace SasamiRenderer
         float outerAngle = 0.436332f; // 25 deg
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

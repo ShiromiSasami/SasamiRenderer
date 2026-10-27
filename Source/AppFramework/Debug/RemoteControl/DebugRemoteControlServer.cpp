@@ -2,7 +2,7 @@
 
 #include <utility>
 
-namespace SasamiRenderer::Debug
+namespace SasamiEngine::App::Debug
 {
     DebugRemoteControlServer::~DebugRemoteControlServer()
     {

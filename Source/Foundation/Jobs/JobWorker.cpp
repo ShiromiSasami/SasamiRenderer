@@ -4,7 +4,7 @@
 
 #include <windows.h>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Foundation
 {
     void JobWorker::Start(uint32_t workerIndex, uint32_t workerCount, JobWorker* siblings,
                            std::counting_semaphore<>* jobsAvailable)

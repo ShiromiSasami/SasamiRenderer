@@ -1,6 +1,6 @@
 #include "Renderer/RayTracing/GpuSoftwareRayTracerResourceUtility.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace GpuSoftwareRayTracerResourceUtility
     {

@@ -8,7 +8,7 @@
 #include <iterator>
 #include <string>
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     namespace
     {
@@ -182,7 +182,7 @@ namespace SasamiRenderer
         std::string message = "StartupCoordinator: ";
         message += (what ? what : "boot failed.");
         message += "\n";
-        DebugLogDialog(message.c_str(), L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+        DebugLogDialog(message.c_str(), L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
         m_failed = true;
     }
 

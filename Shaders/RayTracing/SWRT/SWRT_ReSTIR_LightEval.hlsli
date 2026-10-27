@@ -17,7 +17,7 @@ float EvalPhat(uint i, float3 pos, float3 N)
     if (i < g_pointLightCount)
     {
         GpuPointLightRT pl = g_pointLights[i];
-        return PhatPoint(pos, N, pl.pos, pl.colorIntensity, pl.range);
+        return PhatPoint(pos, N, pl.pos, pl.colorIntensity, pl.range, g_punctualLightFalloff);
     }
     uint si = i - g_pointLightCount;
     GpuSpotLightRT sl = g_spotLights[si];
@@ -28,7 +28,7 @@ float EvalPhat(uint i, float3 pos, float3 N)
     float  cosA = dot(-L, normalize(sl.dir));
     if (cosA < sl.cosOuter) return 0.0f;
     float spotA = smoothstep(sl.cosOuter, sl.cosInner, cosA);
-    return PhatPoint(pos, N, sl.pos, sl.colorIntensity * spotA, sl.range);
+    return PhatPoint(pos, N, sl.pos, sl.colorIntensity * spotA, sl.range, g_punctualLightFalloff);
 }
 
 #endif // SASAMI_SWRT_RESTIR_LIGHT_EVAL_HLSLI

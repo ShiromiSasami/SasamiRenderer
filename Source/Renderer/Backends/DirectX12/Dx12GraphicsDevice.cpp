@@ -14,7 +14,7 @@
 
 #include "Foundation/Tools/DebugOutput.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
 #if RHI_DIRECTX12
     namespace
@@ -39,6 +39,31 @@ namespace SasamiRenderer
             bool IsValid() const { return m_valid; }
             RhiQueueType QueueType() const { return m_queueType; }
             CommandList& GetCommandList() { return m_commandList; }
+
+            void UavBarrier(const RhiResourceHandle* resources, uint32_t count) override
+            {
+                if (!m_valid) {
+                    return;
+                }
+                if (!resources || count == 0) {
+                    const ResourceBarrier barrier = CD3DX12_RESOURCE_BARRIER::UAV(nullptr);
+                    m_commandList.ResourceBarrier(1, &barrier);
+                    return;
+                }
+
+                std::vector<ResourceBarrier> barriers;
+                barriers.reserve(count);
+                for (uint32_t i = 0; i < count; ++i) {
+                    Resource* resource = m_device.GetD3D12CompatibilityResource(resources[i]);
+                    if (!resource) {
+                        continue;
+                    }
+                    barriers.push_back(CD3DX12_RESOURCE_BARRIER::UAV(resource->Get()));
+                }
+                if (!barriers.empty()) {
+                    m_commandList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+                }
+            }
 
             void TransitionResources(const RhiResourceTransitionDesc* transitions, uint32_t count) override
             {
@@ -150,6 +175,26 @@ namespace SasamiRenderer
                                                    desc.startInstance);
             }
 
+            void DrawIndexedIndirect(const RhiDrawIndexedIndirectDesc& desc) override
+            {
+                if (!m_valid) return;
+                ID3D12CommandSignature* signature = m_device.GetDx12DrawIndexedCommandSignature();
+                Resource* args = m_device.GetD3D12CompatibilityResource(desc.argsBuffer);
+                if (!signature || !args || !args->IsValid() || desc.maxDrawCount == 0) {
+                    return;
+                }
+                Resource* count = desc.countBuffer.IsValid() ? m_device.GetD3D12CompatibilityResource(desc.countBuffer) : nullptr;
+#if defined(_DEBUG)
+                DebugIncrementDrawCount();
+#endif
+                m_commandList.Get()->ExecuteIndirect(signature,
+                                                     desc.maxDrawCount,
+                                                     args->Get(),
+                                                     desc.argsOffsetInBytes,
+                                                     (count && count->IsValid()) ? count->Get() : nullptr,
+                                                     desc.countOffsetInBytes);
+            }
+
             void Dispatch(const RhiDispatchDesc& desc) override
             {
                 if (!m_valid) {
@@ -213,6 +258,12 @@ namespace SasamiRenderer
             {
                 if (!m_valid) return;
                 m_commandList.SetComputeRootShaderResourceView(slot, address);
+            }
+
+            void SetComputeUnorderedAccessView(uint32_t slot, RhiGpuAddress address) override
+            {
+                if (!m_valid) return;
+                m_commandList.Get()->SetComputeRootUnorderedAccessView(slot, address);
             }
 
             void SetRenderTargets(uint32_t numRtvs, const RhiCpuDescriptorHandle* rtvs, const RhiCpuDescriptorHandle* dsv) override
@@ -404,6 +455,9 @@ namespace SasamiRenderer
         pso.RasterizerState.CullMode = ToDx12CullMode(desc.raster.cullMode);
         pso.RasterizerState.FrontCounterClockwise = desc.raster.frontCounterClockwise;
         pso.RasterizerState.DepthClipEnable = desc.raster.depthClipEnabled;
+        pso.RasterizerState.DepthBias = desc.raster.depthBias;
+        pso.RasterizerState.DepthBiasClamp = desc.raster.depthBiasClamp;
+        pso.RasterizerState.SlopeScaledDepthBias = desc.raster.slopeScaledDepthBias;
         pso.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
         if (desc.blend.alphaBlendEnabled) {
             D3D12_RENDER_TARGET_BLEND_DESC& rt0 = pso.BlendState.RenderTarget[0];
@@ -513,8 +567,18 @@ namespace SasamiRenderer
         if (desc.Flags == D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) {
             allocation.gpu.ptr = heap.GetGPUDescriptorHandleForHeapStart().ptr;
         }
+        allocation.heap.id = reinterpret_cast<uint64_t>(heap.Get());
         m_rhiDescriptorHeaps.push_back(std::move(heap));
         return allocation;
+    }
+
+    RhiGpuAddress Dx12GraphicsDevice::GetRhiBufferGpuAddress(RhiBufferHandle handle)
+    {
+        Resource* resource = FindRhiResource(handle);
+        if (!resource || !resource->IsValid()) {
+            return 0;
+        }
+        return static_cast<RhiGpuAddress>(resource->GetGPUVirtualAddress());
     }
 
     bool Dx12GraphicsDevice::CreateRhiShaderResourceView(RhiResourceHandle resourceHandle,
@@ -767,6 +831,25 @@ namespace SasamiRenderer
         return FindRhiResource(handle);
     }
 
+    ID3D12CommandSignature* Dx12GraphicsDevice::GetDx12DrawIndexedCommandSignature()
+    {
+        if (m_drawIndexedCommandSignature || !m_device) {
+            return m_drawIndexedCommandSignature.Get();
+        }
+        // A signature with only a DRAW_INDEXED argument needs no root signature (D3D12 spec,
+        // "Indirect Drawing": pRootSignature may be null when no root arguments change).
+        D3D12_INDIRECT_ARGUMENT_DESC argument{};
+        argument.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
+        D3D12_COMMAND_SIGNATURE_DESC desc{};
+        desc.ByteStride = sizeof(D3D12_DRAW_INDEXED_ARGUMENTS);
+        desc.NumArgumentDescs = 1;
+        desc.pArgumentDescs = &argument;
+        if (FAILED(m_device->CreateCommandSignature(&desc, nullptr, IID_PPV_ARGS(&m_drawIndexedCommandSignature)))) {
+            m_drawIndexedCommandSignature.Reset();
+        }
+        return m_drawIndexedCommandSignature.Get();
+    }
+
     PipelineState* Dx12GraphicsDevice::GetD3D12CompatibilityPipelineState(RhiPipelineHandle handle)
     {
         return FindRhiPipeline(handle);
@@ -774,7 +857,31 @@ namespace SasamiRenderer
 
     HRESULT Dx12GraphicsDevice::CreateDescriptorHeap(const DescriptorHeapDesc& desc, DescriptorHeap& out)
     {
-        return m_device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&out.m_heap));
+        const HRESULT hr = m_device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&out.m_heap));
+        if (SUCCEEDED(hr) && out.m_heap) {
+            // The debug layer's heap-mismatch message ("the descriptor heap containing handle X is
+            // different from currently set descriptor heap Y") names both heaps, but with 25
+            // creation sites and no names it reads as 'Unnamed ID3D12DescriptorHeap Object' twice
+            // and says nothing about which pass is at fault. Numbering every heap the way
+            // CreateCommittedResource numbers resources makes that message self-diagnosing, and
+            // the trace line below maps the number back to a creation site by type and size.
+            static std::atomic<uint64_t> sNextRhiHeapDebugId{ 1 };
+            const uint64_t debugId = sNextRhiHeapDebugId.fetch_add(1);
+            wchar_t nameBuf[32];
+            swprintf_s(nameBuf, L"RhiHeap_%08llu", static_cast<unsigned long long>(debugId));
+            out.m_heap->SetName(nameBuf);
+
+            char logBuf[192];
+            snprintf(logBuf, sizeof(logBuf),
+                     "[RhiHeapTrace] created id=%llu addr=%p type=%d numDescriptors=%u flags=0x%X\n",
+                     static_cast<unsigned long long>(debugId),
+                     static_cast<void*>(out.m_heap.Get()),
+                     static_cast<int>(desc.Type),
+                     static_cast<unsigned int>(desc.NumDescriptors),
+                     static_cast<unsigned int>(desc.Flags));
+            DebugLog(logBuf);
+        }
+        return hr;
     }
 
     HRESULT Dx12GraphicsDevice::CreateCommittedResource(const HeapProperties* heapProps,

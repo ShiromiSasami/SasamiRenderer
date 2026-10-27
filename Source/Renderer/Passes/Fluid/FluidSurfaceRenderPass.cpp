@@ -1,4 +1,6 @@
 #define NOMINMAX
+#include "Renderer/Scene/LightSystem.h"
+#include "Foundation/Math/MathUtil.h"
 #include "Renderer/Passes/Fluid/FluidSurfaceRenderPass.h"
 
 #include "Renderer/RenderGraph/RenderGraph.h"
@@ -8,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace
     {
@@ -24,9 +26,18 @@ namespace SasamiRenderer
         {
             std::vector<GridVertex> verts;
             verts.reserve(static_cast<size_t>(res) * res);
+            // Normalized [0,1] across the fluid region, not an integer cell index. The mesh
+            // resolution is fixed while the simulation grid is sized from the scene bounds, so a
+            // cell index made the two disagree: with a 128x128 mesh over a 49-cell grid the vertex
+            // shader clamped indices 49..127 to the last cell and collapsed them onto one world
+            // position, leaving six sevenths of the mesh as degenerate triangles piled at the
+            // edge. FluidSurface_VS scales these coordinates by the live grid size instead, so any
+            // mesh resolution works with any grid resolution and nothing has to be rebuilt when
+            // the grid changes (rebuilding is not safe from the const Execute path anyway).
+            const float invMax = (res > 1u) ? (1.0f / static_cast<float>(res - 1u)) : 0.0f;
             for (uint32_t z = 0; z < res; ++z) {
                 for (uint32_t x = 0; x < res; ++x) {
-                    verts.push_back({ static_cast<float>(x), static_cast<float>(z) });
+                    verts.push_back({ static_cast<float>(x) * invMax, static_cast<float>(z) * invMax });
                 }
             }
             return verts;
@@ -115,8 +126,36 @@ namespace SasamiRenderer
             cameraPosPtr ? cameraPosPtr[2] : 0.0f,
             0.0f,
         };
-        const float extra1[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-        const float extra2[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        // The water used to shade against a light direction hardcoded in FluidSurface_PS, so the
+        // surface never agreed with the sun the rest of the scene was lit by. extra1/extra2 were
+        // both unused, so the real directional light rides along in the camera CB rather than
+        // adding the whole LightCB (and a fourth root binding) to this pass for three values.
+        float sunDirection[3] = { 0.0f, -1.0f, 0.0f };
+        float sunColor[3] = { 1.0f, 1.0f, 1.0f };
+        float sunIntensity = 1.0f;
+        if (inputs.lighting.lightSystem != nullptr) {
+            const RenderDirectionalLight light = inputs.lighting.lightSystem->GetDirectionalLightSettings();
+            Math::DirectionFromYawPitch(light.yaw, light.pitch, sunDirection);
+            sunColor[0] = light.color[0];
+            sunColor[1] = light.color[1];
+            sunColor[2] = light.color[2];
+            sunIntensity = light.intensity;
+        }
+        const float extra1[4] = { sunDirection[0], sunDirection[1], sunDirection[2], sunIntensity };
+        const float extra2[4] = { sunColor[0], sunColor[1], sunColor[2], 0.0f };
+
+        // Refraction is only possible when the backdrop snapshot exists; extra3.x tells the shader
+        // which of the two compositing paths to take.
+        // zw carry the viewport size so the pixel shader can turn SV_Position into a UV; the fluid
+        // CB has no screen dimensions of its own.
+        const bool hasBackdrop = inputs.transmissionSceneColorSrv.ptr != 0;
+        const float viewportWidth = (inputs.execution.viewport != nullptr)
+            ? static_cast<float>(inputs.execution.viewport->Width) : 1.0f;
+        const float viewportHeight = (inputs.execution.viewport != nullptr)
+            ? static_cast<float>(inputs.execution.viewport->Height) : 1.0f;
+        const float extra3[4] = {
+            hasBackdrop ? 1.0f : 0.0f, m_refractionStrength, viewportWidth, viewportHeight,
+        };
 
         const RhiGpuAddress cameraCbGpu =
             inputs.execution.frameCoordinator->PushCameraCB(*inputs.execution.frame,
@@ -124,7 +163,8 @@ namespace SasamiRenderer
                                                               identity,
                                                               extra0,
                                                               extra1,
-                                                              extra2);
+                                                              extra2,
+                                                              extra3);
         if (cameraCbGpu == 0) {
             DebugLog("FluidSurfaceRenderPass::Execute: PushCameraCB returned 0.\n");
             return false;
@@ -140,6 +180,14 @@ namespace SasamiRenderer
         const RhiGpuAddress heightGpuVA = static_cast<RhiGpuAddress>(m_fluidSim->GetCurrentHeightGpuVA());
         if (heightGpuVA == 0) return true;
         enc->SetGraphicsShaderResourceView(2, heightGpuVA);
+
+        // --- [3] Backdrop for refraction (t1) ---
+        // FluidBackdropCopyRenderPass snapshots SceneColor just before this pass. If it did not
+        // run, the descriptor is null and the shader falls back to the old alpha-blended look
+        // rather than sampling garbage.
+        if (hasBackdrop) {
+            enc->SetGraphicsDescriptorTable(3, { inputs.transmissionSceneColorSrv.ptr });
+        }
 
         // --- Vertex/index buffers + indexed draw ---
         enc->SetVertexBufferBindings(0, 1, &m_gridVbBinding);
@@ -176,7 +224,7 @@ namespace SasamiRenderer
 
     bool FluidSurfaceRenderPass::CreatePipeline(IRHIDevice& device)
     {
-        RhiBindingRangeDesc bindings[3]{};
+        RhiBindingRangeDesc bindings[4]{};
         bindings[0].type = RhiBindingType::ConstantBuffer;
         bindings[0].visibility = RhiShaderStageFlags::All;
         bindings[0].baseRegister = 0; // b0 - camera CB
@@ -192,9 +240,27 @@ namespace SasamiRenderer
         bindings[2].baseRegister = 0; // t0 - height/velocity buffer
         bindings[2].inlineRootDescriptor = true;
 
+        // t1 - the scene behind the water, for refraction. This one cannot be an inline root
+        // descriptor the way the three above are: an inline root SRV addresses a buffer, and a
+        // Texture2D has to come through a descriptor table.
+        bindings[3].type = RhiBindingType::ShaderResource;
+        bindings[3].visibility = RhiShaderStageFlags::Pixel;
+        bindings[3].baseRegister = 1;
+        bindings[3].descriptorCount = 1;
+
+        // s0 - clamped bilinear for the backdrop. Clamping matters: a refraction offset near the
+        // screen edge would otherwise wrap and pull the opposite side of the image into the water.
+        RhiStaticSamplerDesc backdropSampler{};
+        backdropSampler.visibility = RhiShaderStageFlags::Pixel;
+        backdropSampler.shaderRegister = 0;
+        backdropSampler.linearFilter = true;
+        backdropSampler.clamp = true;
+
         RhiPipelineLayoutDesc layoutDesc{};
         layoutDesc.bindings = bindings;
         layoutDesc.bindingCount = static_cast<uint32_t>(std::size(bindings));
+        layoutDesc.staticSamplers = &backdropSampler;
+        layoutDesc.staticSamplerCount = 1u;
         layoutDesc.allowInputAssembler = true;
         m_pipelineLayout = device.CreateRhiPipelineLayout(layoutDesc);
         if (!m_pipelineLayout.IsValid()) {
@@ -249,7 +315,12 @@ namespace SasamiRenderer
         pipelineDesc.raster.cullMode = RhiCullMode::Back;
         pipelineDesc.depthStencil.depthTestEnabled = true;
         pipelineDesc.depthStencil.depthWriteEnabled = true;
-        pipelineDesc.depthStencil.depthCompare = RhiCompareOp::Less;
+        // Reverse-Z: near is 1.0, so a nearer fragment has the LARGER depth and the test has to be
+        // GreaterEqual. With Less the water lost the depth test against the floor beneath it --
+        // coplanar it z-fought into stripes, and raising it above the floor made it vanish
+        // entirely. RhiDepthStencilStateDesc already defaults to GreaterEqual; this pass was
+        // overriding it with a standard-Z comparison.
+        pipelineDesc.depthStencil.depthCompare = RhiCompareOp::GreaterEqual;
         pipelineDesc.depthStencil.stencilEnabled = false;
         pipelineDesc.colorFormats = &colorFormat;
         pipelineDesc.colorFormatCount = 1;
@@ -328,4 +399,4 @@ namespace SasamiRenderer
         return true;
     }
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

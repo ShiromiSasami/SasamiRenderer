@@ -6,7 +6,7 @@
 #include "Renderer/Structures/Vertex.h"
 #include "Renderer/Structures/SkinnedVertex.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // Data-only mesh. Holds primitives (indices) and vertices.
     struct Mesh
@@ -70,3 +70,7 @@ namespace SasamiRenderer
         uint32_t IndexCount()  const { return static_cast<uint32_t>(indices.size()); }
     };
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

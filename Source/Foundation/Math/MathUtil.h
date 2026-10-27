@@ -4,7 +4,7 @@
 #include <cmath>
 #include "Foundation/Math/Vector3.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Foundation
 {
     namespace Math
     {
@@ -284,6 +284,42 @@ namespace SasamiRenderer
             Normalize(outDirection);
         }
 
+        // Folds pitch back into [-PI/2, PI/2], the only range over which
+        // DirectionFromYawPitch is injective. Past +-PI/2 the cos(pitch) sign flip negates
+        // x and z, so the direction stops climbing and instead swings 180 degrees in yaw --
+        // a mirror of the valid range rather than a continuation of it. A sun dragged
+        // "up" past 90 degrees therefore walks back down to the horizon.
+        //
+        // The direction is preserved exactly: sin(PI - p) == sin(p) keeps y, and
+        // cos(PI - p) == -cos(p) is cancelled by the sign flip that yaw + PI gives
+        // sin(yaw) and cos(yaw), so x and z are unchanged too. Normalizing is therefore
+        // a pure change of representation and never moves the light.
+        inline void NormalizeYawPitch(float& yaw, float& pitch)
+        {
+            constexpr float kPi = 3.1415926535f;
+            constexpr float kTwoPi = kPi * 2.0f;
+            constexpr float kHalfPi = kPi * 0.5f;
+
+            // Wrap into (-PI, PI] so the mirror test below only has the two cases.
+            const auto wrap = [](float angle) {
+                angle = std::fmod(angle + kPi, kTwoPi);
+                if (angle <= 0.0f) {
+                    angle += kTwoPi;
+                }
+                return angle - kPi;
+            };
+
+            pitch = wrap(pitch);
+            if (pitch > kHalfPi) {
+                pitch = kPi - pitch;
+                yaw += kPi;
+            } else if (pitch < -kHalfPi) {
+                pitch = -kPi - pitch;
+                yaw += kPi;
+            }
+            yaw = wrap(yaw);
+        }
+
         inline void BuildDirectionalLightViewProjection(float yaw,
                                                         float pitch,
                                                         float distance,
@@ -336,7 +372,10 @@ namespace SasamiRenderer
             // Orthographic projection (row-major form).
             // x_ndc = 2*(x-l)/(r-l) - 1
             // y_ndc = 2*(y-b)/(t-b) - 1
-            // z_ndc = (z-n)/(f-n)
+            // z_ndc = (f-z)/(f-n)   (reversed depth: near maps to 1, far maps to 0)
+            // Reversing the depth mapping keeps the fixed-point-like spacing of NDC z aligned
+            // with the exponential spacing of float precision instead of opposing it, so the
+            // available depth precision is spent where the shadow map actually needs it.
             const float l = -orthoHalf;
             const float r = orthoHalf;
             const float b = -orthoHalf;
@@ -346,8 +385,8 @@ namespace SasamiRenderer
             const float proj[16] = {
                 2/(r-l), 0,       0,        0,
                 0,       2/(t-b), 0,        0,
-                0,       0,      1/(f-n),   0,
-                -(r+l)/(r-l), -(t+b)/(t-b), -n/(f-n), 1,
+                0,       0,     -1/(f-n),   0,
+                -(r+l)/(r-l), -(t+b)/(t-b), f/(f-n), 1,
             };
 
             float wv[16];
@@ -358,7 +397,8 @@ namespace SasamiRenderer
         }
 
         // Row-major perspective VP matrix for a spot light shadow camera.
-        // Convention: same as BuildDirectionalLightViewProjection (row-vector, LH, 0-1 depth).
+        // Convention: same as BuildDirectionalLightViewProjection (row-vector, LH, reversed
+        // depth: near maps to 1, far maps to 0).
         // @param yaw, pitch   spot light orientation (same convention as DirectionFromYawPitch)
         // @param pos          spot light world-space position (float[3])
         // @param halfAngle    outer cone half-angle in radians (determines shadow FOV)
@@ -411,21 +451,25 @@ namespace SasamiRenderer
                 tx,       ty,    tz,     1.0f,
             };
 
-            // Perspective projection (LH, 0-1 depth, square frustum, row-major).
+            // Perspective projection (LH, reversed depth: near maps to 1, far maps to 0,
+            // square frustum, row-major). Reversing the depth mapping keeps the hyperbolic
+            // 1/z falloff of NDC depth aligned with the exponential spacing of float
+            // precision instead of opposing it, spending the extra precision at the far plane.
             const float invTan = (halfAngle > 0.0f) ? (1.0f / std::tan(halfAngle)) : 1.0f;
             const float n = nearZ, f = farZ;
             const float proj[16] = {
-                invTan, 0.0f,   0.0f,          0.0f,
-                0.0f,   invTan, 0.0f,          0.0f,
-                0.0f,   0.0f,   f / (f - n),   1.0f,
-                0.0f,   0.0f,  -n*f / (f - n), 0.0f,
+                invTan, 0.0f,   0.0f,         0.0f,
+                0.0f,   invTan, 0.0f,         0.0f,
+                0.0f,   0.0f,   n / (n - f),  1.0f,
+                0.0f,   0.0f,   f*n / (f - n), 0.0f,
             };
 
             Mul4x4(view, proj, outVP);
         }
 
         // Row-major perspective VP matrix for one face of a point light cube shadow map.
-        // Convention: same row-vector/LH/0-1-depth convention as BuildSpotLightViewProjection.
+        // Convention: same row-vector/LH/reversed-depth convention as BuildSpotLightViewProjection
+        // (near maps to 1, far maps to 0).
         // Face index order matches the D3D cubemap array-slice convention: 0:+X, 1:-X, 2:+Y, 3:-Y, 4:+Z, 5:-Z.
         // Each face uses a fixed axis-aligned forward/up pair, so (unlike the spot-light case) no
         // singularity-avoidance branch is needed.
@@ -485,14 +529,17 @@ namespace SasamiRenderer
                 tx,       ty,    tz,     1.0f,
             };
 
-            // Perspective projection (LH, 0-1 depth, square 90-degree frustum, row-major).
+            // Perspective projection (LH, reversed depth: near maps to 1, far maps to 0,
+            // square 90-degree frustum, row-major). Reversing the depth mapping keeps the
+            // hyperbolic 1/z falloff of NDC depth aligned with the exponential spacing of
+            // float precision instead of opposing it, spending the extra precision at the far plane.
             const float invTan = 1.0f; // tan(45 deg) == 1, i.e. 90 degree FOV to cover one cube face.
             const float n = nearZ, f = farZ;
             const float proj[16] = {
-                invTan, 0.0f,   0.0f,          0.0f,
-                0.0f,   invTan, 0.0f,          0.0f,
-                0.0f,   0.0f,   f / (f - n),   1.0f,
-                0.0f,   0.0f,  -n*f / (f - n), 0.0f,
+                invTan, 0.0f,   0.0f,         0.0f,
+                0.0f,   invTan, 0.0f,         0.0f,
+                0.0f,   0.0f,   n / (n - f),  1.0f,
+                0.0f,   0.0f,   f*n / (f - n), 0.0f,
             };
 
             Mul4x4(view, proj, outVP);
@@ -542,3 +589,12 @@ namespace SasamiRenderer
         }
     }
 }
+
+// Lets the other layers name Foundation types unqualified. The directive sits on SasamiEngine rather
+// than on a layer, so anything nested under it -- SasamiEngine::Render, SasamiEngine::App -- finds these
+// names by enclosing-namespace lookup.
+//
+// The SasamiRenderer -> SasamiEngine::<layer> namespace migration it was written for is finished; what
+// is left is deciding whether the layers should qualify Foundation:: explicitly instead. That is not a
+// mechanical change (roughly 76 files name these types unqualified), so the directive stays until then.
+namespace SasamiEngine { using namespace Foundation; }

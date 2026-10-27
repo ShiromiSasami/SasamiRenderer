@@ -10,7 +10,7 @@
 // C++ 側の LightCBData.h（LightCBLayout::LightCBData）と
 // バイト単位で一致している必要がある。
 //
-// 全てのライティングシェーダー（PBR_PS.hlsl, BasicShader.hlsl, SWRT_*, DXR など）
+// 全てのライティングシェーダー（CookTorranceGGX_PS.hlsl, DeferredLighting_PS.hlsl, BasicShader.hlsl, SWRT_*, DXR など）
 // がこのヘッダーをインクルードして照明データにアクセスする。
 // =============================================================================
 
@@ -63,7 +63,7 @@ cbuffer LightCB : register(b1)
 
     // デバッグ表示モード。
     // x: 0=通常ライティング, 1=アルベド, 2=法線, 3=粗さ, 4=メタリック, 5=AO, 6=シャドウ
-    float4 u_debugParams; // x: gbuffer debug view mode, y: direct-light micro-shadowing strength (Chan 2018), z/w: unused
+    float4 u_debugParams; // x: gbuffer debug view mode, y: direct-light micro-shadowing strength (Chan 2018), z: punctual light falloff mode (RendererEnums::PunctualLightFalloff, PUNCTUAL_FALLOFF_*), w: unused
 
     // シャドウマップのテクセルサイズ（PCF サンプリングオフセット計算用）。
     // x: 1.0 / シャドウマップ幅
@@ -72,7 +72,7 @@ cbuffer LightCB : register(b1)
     float4 u_shadowCascadeSplits;
     float4 u_shadowCascadeTexelSize[DIRECTIONAL_SHADOW_CASCADE_COUNT];
     float4 u_shadowCascadeParams; // x: shadow distance, y: blend fraction, z: normal bias, w: cascade count
-    float4 u_contactShadowParams; // x: enable, y: march distance, z: depth thickness, w: step count
+    float4 u_contactShadowParams; // x: enable, y: march distance (world m), z: occluder thickness (world m), w: step count
 
     // リフレクションテクスチャのパラメータ。
     // x: リフレクション有効フラグ
@@ -83,7 +83,7 @@ cbuffer LightCB : register(b1)
 
     // 拡散照明用の球面調和係数（9 本）。
     // xyz に係数値を格納（w は未使用）。
-    // PBR_PS.hlsl の EvaluateDiffuseIrradianceFromSh() で参照される。
+    // PBR_IBL.hlsli の EvaluateDiffuseIrradianceFromSh() で参照される。
     float4 u_diffuseSh[DIFFUSE_SH_COEFFICIENT_COUNT];
 
     // スポットライト #0 のシャドウ用ビュープロジェクション行列。
@@ -95,7 +95,11 @@ cbuffer LightCB : register(b1)
 
     // ポイントライト #0 のキューブシャドウマップ用ビュープロジェクション行列（6面）。
     // 面インデックスの規約: 0:+X, 1:-X, 2:+Y, 3:-Y, 4:+Z, 5:-Z。
-    row_major float4x4 u_pointLightVP[MAX_POINT_SHADOWS][6];
+    // [shadowIndex][face] ではなく [shadowIndex * 6 + face] と1次元で持つ。cbuffer 内の
+    // 2次元行列配列に対して DXC の SPIR-V 出力が MatrixStride 装飾を落とし、不正なモジュールを
+    // 生成するため（"must be explicitly laid out with MatrixStride decorations"）。1次元なら通る。
+    // C++ 側の LightCBData::pointLightVP[kMaxPointShadows][6][16] とバイト配置は同一。
+    row_major float4x4 u_pointLightVP[MAX_POINT_SHADOWS * 6];
 
     // ポイントシャドウのパラメータ。
     // x: 深度バイアス, y: ニアプレーン, z: 有効フラグ(1=有効), w: マップサイズ
@@ -107,6 +111,38 @@ cbuffer LightCB : register(b1)
     // z: 最小バリアンス
     // w: ブラー有効フラグ (1=有効)
     float4 u_vsmParams;
+
+    // Cel shading controls. Global, not per-material -- see LightCBData.h.
+    // x: band count, y: band edge softness, z: specular threshold, w: specular softness
+    float4 u_toonParams;
+    // x: rim strength, y: rim power, z: specular intensity, w: shadow floor (darkest band)
+    float4 u_toonParams2;
+    // x: ambient scale applied to indirect diffuse on Toon surfaces,
+    // y: depth-rim width (px at 1 m, 0 disables), z: depth-rim threshold (m), w: depth-rim strength
+    float4 u_toonParams3;
+
+    // Inverted-hull outline. x: width in world units (0 disables), yzw: line colour.
+    float4 u_toonOutline;
+
+    // SDF face shadow. Forward xyz: face forward (world), w: edge softness.
+    // Right xyz: face right (world; negated to mirror the map), w: 1 = enabled.
+    float4 u_toonFaceForward;
+    float4 u_toonFaceRight;
+
+    // Toon hair angel ring (LightSystem::ToonHairSettings).
+    // Shift: x/y primary/secondary tangent shift, z/w primary/secondary band width.
+    // Strength: x primary (light colour), y secondary (albedo tint), z edge softness, w 1 = enabled.
+    // Up xyz: head up in world space (strand direction before projection).
+    float4 u_toonHairShift;
+    float4 u_toonHairStrength;
+    float4 u_toonHairUp;
+    // Front-hair screen-space shadow (LightSystem::ToonHairShadowSettings):
+    // x march length (m), y occluder thickness (m), z strength 0..1, w 1 = enabled.
+    float4 u_toonHairShadow;
+    // Head sphere normals (LightSystem::ToonHeadNormalSettings):
+    // sphere xyz head centre (world), w radius (m); normal x blend 0..1, w 1 = enabled.
+    float4 u_toonHeadSphere;
+    float4 u_toonHeadNormal;
 }
 
 #endif

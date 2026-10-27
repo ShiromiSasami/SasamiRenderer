@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace ResourceUploadUtility
     {
@@ -15,21 +15,31 @@ namespace SasamiRenderer
                                 Resource& outResource,
                                 void** outMappedPtr);
 
+        // format selects how the sampler interprets the bytes, not their layout: base-colour
+        // textures pass R8G8B8A8_UNORM_SRGB so the hardware decodes to linear on read, while
+        // normal, metallic-roughness and occlusion maps keep the UNORM default because their
+        // values are linear measurements. Both formats are 32bpp with the same footprint, so the
+        // upload path below is unaffected by the choice. A resource created here is fully typed,
+        // so whatever is passed must also be used for the shader resource view.
         bool CreateTexture2DFromRgba8(IRHIDevice& device,
                                       CommandList* cmdList,
                                       const std::uint8_t* pixels,
                                       UINT width,
                                       UINT height,
                                       Resource& outTexture,
-                                      Resource& outUpload);
+                                      Resource& outUpload,
+                                      DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM);
 
-        // Upload an RGBA8 texture together with its full mip chain (R8G8B8A8_UNORM).
-        // The chain is produced by TextureMipChainBuilder::BuildRgba8.
+        // Upload an RGBA8 texture together with its full mip chain. The chain is produced by
+        // TextureMipChainBuilder::BuildRgba8, whose srgbColor argument must agree with the
+        // format passed here -- an sRGB view over a chain box-filtered in stored space
+        // reintroduces the very error the decode was added to remove.
         bool CreateTexture2DFromRgba8WithMips(IRHIDevice& device,
                                               CommandList* cmdList,
                                               const TextureMipChain& chain,
                                               Resource& outTexture,
-                                              Resource& outUpload);
+                                              Resource& outUpload,
+                                              DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM);
 
         // Upload RGBA8 face data as a cubemap texture (R8G8B8A8_UNORM). Used for fallback (1x1) textures.
         bool CreateTextureCubeFromRgba8Faces(IRHIDevice& device,
@@ -63,3 +73,7 @@ namespace SasamiRenderer
                                           Resource* preCreated = nullptr);
     }
 }
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

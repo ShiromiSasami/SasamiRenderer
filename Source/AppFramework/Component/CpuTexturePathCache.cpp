@@ -7,7 +7,7 @@
 #include "Loader/AssetLoader.h"
 #include "Loader/DdsTextureLoader.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     struct CpuTexturePathCache::Slot
     {

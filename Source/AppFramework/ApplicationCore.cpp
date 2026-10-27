@@ -3,13 +3,34 @@
 #include "AppFramework/Debug/RemoteControl/DebugNamedPipeTransport.h"
 #include "AppFramework/Debug/RemoteControl/DebugSceneCommands.h"
 #include "AppFramework/Debug/RemoteControl/DebugCaptureCommands.h"
+#include "AppFramework/Debug/RemoteControl/DebugAppCommands.h"
 #include "AppFramework/Debug/RemoteControl/DebugRenderCommands.h"
+#include "AppFramework/Debug/RemoteControl/DebugLightCommands.h"
+#include "AppFramework/Debug/RemoteControl/DebugVoxelCommands.h"
+#include "AppFramework/Debug/RemoteControl/DebugCrowdCommands.h"
+#include "AppFramework/Debug/RemoteControl/DebugParticleCharacterCommands.h"
+#include "AppFramework/Debug/RemoteControl/DebugAnimCommands.h"
+#include "AppFramework/Debug/RemoteControl/DebugToonCommands.h"
+#include "AppFramework/Debug/RemoteControl/DebugFluidCommands.h"
+#include "AppFramework/Debug/RemoteControl/DebugSmokeMeshCommands.h"
+#include "AppFramework/Debug/RemoteControl/DebugCullingCommands.h"
+#include "AppFramework/Debug/RemoteControl/DebugEditorCommands.h"
+#include "AppFramework/Debug/VoxelOccupancyViewer.h"
+#include "AppFramework/Debug/FrameRecorder.h"
+#include "AppFramework/Debug/VoxelStreamOverlay.h"
+#include "AppFramework/Debug/ParticleCharacterOverlay.h"
+#include "AppFramework/Debug/SmokeSurfaceOverlay.h"
+#include "AppFramework/Editor/EditorWindows.h"
+#include "AppFramework/Debug/WindEffectsOverlay.h"
+#include "AppFramework/Debug/WindFlowOverlay.h"
+#include "Renderer/Voxel/SceneVoxelization.h"
 #include "ApplicationResourcePaths.h"
 #include <windows.h>
 #include <windowsx.h>
 #include <algorithm>
 #include <array>
 #include <climits>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <stdexcept>
@@ -27,13 +48,15 @@
 #include "Foundation/Jobs/JobSystem.h"
 #include "Input/InputSystem.h"
 #include "Loader/AssetLoader.h"
+#include "Loader/StaticMeshCache.h"
 #include "Loader/AsyncAssetLoadService.h"
 #include "Object/Camera.h"
 #include "Renderer/Runtime/Renderer.h"
 #include "UI/BootProgressWindow.h"
 #include "UI/ImGuiCoordinator.h"
+#include "UI/Backend/IUIRenderBackend.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     namespace
     {
@@ -79,8 +102,24 @@ namespace SasamiRenderer
         JobSystem::RunSelfTest();
 #endif
         m_assetLoadService = std::make_unique<AsyncAssetLoadService>();
+        m_sceneVoxelization = std::make_unique<Render::Voxel::SceneVoxelization>();
+        m_voxelViewer = std::make_unique<Debug::VoxelOccupancyViewer>();
+        m_windFlowOverlay = std::make_unique<Debug::WindFlowOverlay>();
+        m_windEffectsOverlay = std::make_unique<Debug::WindEffectsOverlay>();
+        m_frameRecorder = std::make_unique<Debug::FrameRecorder>();
+        m_voxelStreamOverlay = std::make_unique<Debug::VoxelStreamOverlay>();
+        m_particleCharacterOverlay = std::make_unique<Debug::ParticleCharacterOverlay>();
+        m_smokeSurfaceOverlay = std::make_unique<Debug::SmokeSurfaceOverlay>();
+        m_editorWindows = std::make_unique<EditorWindows>();
         InitializeDebugRemoteControl();
         ScopedPerfTimer perfTimer("ApplicationCore::ApplicationCore");
+    }
+
+    Debug::DebugCommandRegistry* ApplicationCore::GetDebugCommandRegistry()
+    {
+        // Null rather than a dangling reference when remote control is off, so callers are
+        // forced to handle the (normal) case where SASAMI_DEBUG_REMOTE was never set.
+        return m_debugRemoteControl ? &m_debugRemoteControl->Registry() : nullptr;
     }
 
     // Opt-in via SASAMI_DEBUG_REMOTE=1, matching the existing SASAMI_* toggles. Off by
@@ -99,6 +138,17 @@ namespace SasamiRenderer
         Debug::RegisterSceneCommands(server->Registry(), *this);
         Debug::RegisterCaptureCommands(server->Registry(), *this);
         Debug::RegisterRenderCommands(server->Registry(), *this);
+        Debug::RegisterLightCommands(server->Registry(), *this);
+        Debug::RegisterVoxelCommands(server->Registry(), *this);
+        Debug::RegisterCrowdCommands(server->Registry(), *this);
+        Debug::RegisterParticleCharacterCommands(server->Registry(), *this);
+        Debug::RegisterAnimCommands(server->Registry(), *this);
+        Debug::RegisterToonCommands(server->Registry(), *this);
+        Debug::RegisterFluidCommands(server->Registry(), *this);
+        Debug::RegisterSmokeMeshCommands(server->Registry(), *this);
+        Debug::RegisterCullingCommands(server->Registry(), *this);
+        Debug::RegisterEditorCommands(server->Registry(), *this);
+        Debug::RegisterAppCommands(server->Registry(), *this);
         if (!server->Start(std::make_unique<Debug::DebugNamedPipeTransport>())) {
             return;
         }
@@ -117,6 +167,12 @@ namespace SasamiRenderer
         OnDestroy();
         if (m_assetLoadService) {
             m_assetLoadService->Shutdown();
+        }
+        if (m_voxelStreamOverlay) {
+            m_voxelStreamOverlay->Stop();
+        }
+        if (m_particleCharacterOverlay) {
+            m_particleCharacterOverlay->Stop();
         }
         JobSystem::Shutdown();
         Profiler::Shutdown();
@@ -173,8 +229,15 @@ namespace SasamiRenderer
         SyncLightObjectsToRenderer(*m_renderer);
         m_renderer->UpdateCameraCB(&cameraProxy);
         const ULONGLONG t2 = GetTickCount64();
+        // Draw data must be finalized before the backend's own frame runs -- see the comment on
+        // ImGuiCoordinator::EndFrame.
+        ImGuiCoordinator::Instance().EndFrame();
         m_renderer->Render([](CommandList& cmdList, CpuDescriptorHandle rtvHandle) {
-            ImGuiCoordinator::Instance().Render(cmdList.Get(), rtvHandle);
+            Render::RhiOverlayFrameContext context{};
+            context.api = Render::RhiBackendApi::DirectX12;
+            context.commandBuffer = cmdList.Get();
+            context.renderTarget = &rtvHandle;
+            ImGuiCoordinator::Instance().RenderDrawData(context);
         });
         const ULONGLONG t3 = GetTickCount64();
         if (t3 - t0 > 1000) {
@@ -369,6 +432,38 @@ namespace SasamiRenderer
 
     // Object management and ECS sync ↁEApplicationObjectManagement.cpp
 
+    bool ApplicationCore::InitializeUIOverlay()
+    {
+        if (!m_renderer->SupportsUIOverlay()) {
+            return ImGuiCoordinator::Instance().InitializePlatformOnly(m_hwnd);
+        }
+
+        UI::UIRenderBackendInitDesc desc{};
+        if (m_renderer->SupportsD3D12OverlayRendering()) {
+            desc.d3d12Device = m_renderer->GetNativeDevice();
+            desc.d3d12CommandQueue = m_renderer->GetNativeCommandQueue();
+            desc.rtvFormat = static_cast<uint32_t>(m_renderer->GetBackBufferFormat());
+            desc.dsvFormat = static_cast<uint32_t>(m_renderer->GetDepthFormat());
+            desc.framesInFlight = m_renderer->GetBackBufferCount();
+        } else {
+            m_renderer->GetOverlayDeviceContext(desc.native);
+        }
+
+        if (!ImGuiCoordinator::Instance().Initialize(m_hwnd, desc)) {
+            return false;
+        }
+        m_renderer->SetFrameOverlay(ImGuiCoordinator::Instance().GetFrameOverlay());
+        // ImGuiCoordinator::Shutdown drops every overlay, so this re-registers on each renderer init.
+        ImGuiCoordinator::Instance().RegisterOverlay([this]() { m_voxelViewer->Draw(*this); });
+        ImGuiCoordinator::Instance().RegisterOverlay([this]() { m_windFlowOverlay->Draw(*this); });
+        // After the wind overlay: it reads that overlay's frame dt.
+        ImGuiCoordinator::Instance().RegisterOverlay([this]() { m_windEffectsOverlay->Draw(*this); });
+        ImGuiCoordinator::Instance().RegisterOverlay([this]() { m_voxelStreamOverlay->Draw(*this); });
+        ImGuiCoordinator::Instance().RegisterOverlay([this]() { m_particleCharacterOverlay->Draw(*this); });
+        ImGuiCoordinator::Instance().RegisterOverlay([this]() { m_editorWindows->Draw(*this); });
+        return true;
+    }
+
     bool ApplicationCore::InitializeRenderer()
     {
         ScopedPerfTimer perfTimer("ApplicationCore::InitializeRenderer");
@@ -392,17 +487,13 @@ namespace SasamiRenderer
                 return false;
             }
 
-            const bool dx12Overlay = m_renderer->SupportsD3D12OverlayRendering();
-            const bool imguiInitialized = dx12Overlay
-                ? ImGuiCoordinator::Instance().Initialize(m_hwnd,
-                                                          m_renderer->GetNativeDevice(),
-                                                          m_renderer->GetNativeCommandQueue(),
-                                                          m_renderer->GetBackBufferFormat(),
-                                                          m_renderer->GetDepthFormat(),
-                                                          static_cast<int>(m_renderer->GetBackBufferCount()))
-                : ImGuiCoordinator::Instance().InitializePlatformOnly(m_hwnd);
-            if (!imguiInitialized) {
-                DebugLogDialog("ImGuiCoordinator initialization failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            // Virtual-geometry cluster DAGs are cached next to the static mesh cache; the
+            // renderer does not know the executable directory, so the app hands it over.
+            m_renderer->GetSceneSubmitter().SetClusterDagCacheDirectory(
+                StaticMeshCache::GetCacheDirectory() / "dag");
+
+            if (!InitializeUIOverlay()) {
+                DebugLogDialog("ImGuiCoordinator initialization failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
                 m_renderer.reset();
                 return false;
             }
@@ -438,6 +529,10 @@ namespace SasamiRenderer
                 m_renderer.reset();
                 return false;
             }
+            // Same hand-over as InitializeRenderer: the progressive boot path creates the
+            // renderer here, so the cluster DAG cache directory must be set here too.
+            m_renderer->GetSceneSubmitter().SetClusterDagCacheDirectory(
+                StaticMeshCache::GetCacheDirectory() / "dag");
             return true;
         } catch (const std::exception& ex) {
             ReportException(L"ApplicationCore::BootCreateRendererCore", ex, true);
@@ -470,17 +565,8 @@ namespace SasamiRenderer
                 return false;
             }
 
-            const bool dx12Overlay = m_renderer->SupportsD3D12OverlayRendering();
-            const bool imguiInitialized = dx12Overlay
-                ? ImGuiCoordinator::Instance().Initialize(m_hwnd,
-                                                          m_renderer->GetNativeDevice(),
-                                                          m_renderer->GetNativeCommandQueue(),
-                                                          m_renderer->GetBackBufferFormat(),
-                                                          m_renderer->GetDepthFormat(),
-                                                          static_cast<int>(m_renderer->GetBackBufferCount()))
-                : ImGuiCoordinator::Instance().InitializePlatformOnly(m_hwnd);
-            if (!imguiInitialized) {
-                DebugLogDialog("ImGuiCoordinator initialization failed.\n", L"SasamiRenderer Initialize Error", MB_OK | MB_ICONERROR);
+            if (!InitializeUIOverlay()) {
+                DebugLogDialog("ImGuiCoordinator initialization failed.\n", L"Sasami Engine Initialize Error", MB_OK | MB_ICONERROR);
                 m_renderer.reset();
                 return false;
             }
@@ -525,11 +611,20 @@ namespace SasamiRenderer
             return;
         }
 
-        if (m_renderer->SupportsD3D12OverlayRendering()) {
+        if (m_renderer->SupportsUIOverlay()) {
             ImGuiCoordinator::Instance().NewFrame();
             BootProgressWindow::Draw(status, true);
+            ImGuiCoordinator::Instance().EndFrame();
+            // The callback below is the D3D12 path. Backends that own their whole frame ignore it
+            // and draw the same ImGui data through the overlay they already hold (see
+            // RendererBootFrame.cpp); the title-bar text stays as a fallback for backends with no
+            // overlay support at all.
             m_renderer->RenderBootFrame([](CommandList& cmdList, CpuDescriptorHandle rtvHandle) {
-                ImGuiCoordinator::Instance().Render(cmdList.Get(), rtvHandle);
+                Render::RhiOverlayFrameContext context{};
+                context.api = Render::RhiBackendApi::DirectX12;
+                context.commandBuffer = cmdList.Get();
+                context.renderTarget = &rtvHandle;
+                ImGuiCoordinator::Instance().RenderDrawData(context);
             });
         }
         // No overlay support: nothing to render here, the title-bar text covers progress.
@@ -546,19 +641,20 @@ namespace SasamiRenderer
     {
         if (m_renderer) {
             m_renderer->WaitForGPU();
+            // Detach the overlay before it is destroyed so the renderer never holds a dangling
+            // IRhiFrameOverlay*.
+            m_renderer->SetFrameOverlay(nullptr);
         }
         ImGuiCoordinator::Instance().Shutdown();
+        // The voxelizer holds GPU resources created on this device; drop them (and the result)
+        // before the device goes away.
+        m_sceneVoxelization = std::make_unique<Render::Voxel::SceneVoxelization>();
         m_renderer.reset();
     }
 
-    bool ApplicationCore::RequestScreenshot(const std::string& path, std::string& outResolvedPath)
+    bool ApplicationCore::ResolveCapturePath(const std::string& path, std::string& outResolvedPath, std::wstring& outWidePath)
     {
-        if (!m_renderer || path.empty()) {
-            return false;
-        }
-        // Refuse to queue a second capture while one is in flight so the poll protocol
-        // stays unambiguous -- there is only ever one outstanding request/result pair.
-        if (m_renderer->HasPendingScreenshotRequest()) {
+        if (path.empty()) {
             return false;
         }
 
@@ -574,8 +670,51 @@ namespace SasamiRenderer
         }
 
         outResolvedPath = fsPath.string();
-        m_renderer->RequestScreenshot(fsPath.wstring());
+        outWidePath = fsPath.wstring();
         return true;
+    }
+
+    bool ApplicationCore::RequestScreenshot(const std::string& path, std::string& outResolvedPath)
+    {
+        if (!m_renderer || path.empty()) {
+            return false;
+        }
+        // Refuse to queue a second capture while one is in flight so the poll protocol
+        // stays unambiguous -- there is only ever one outstanding request/result pair.
+        if (m_renderer->HasPendingScreenshotRequest()) {
+            return false;
+        }
+
+        std::wstring widePath;
+        if (!ResolveCapturePath(path, outResolvedPath, widePath)) {
+            return false;
+        }
+
+        m_renderer->RequestScreenshot(widePath);
+        return true;
+    }
+
+    std::string ApplicationCore::RequestTargetDump(const std::string& name, const std::string& path)
+    {
+        if (!m_renderer) {
+            return "no renderer";
+        }
+        if (path.empty()) {
+            return "empty path";
+        }
+        // Refuse to queue a second capture while one is in flight so the poll protocol
+        // stays unambiguous -- there is only ever one outstanding request/result pair.
+        if (m_renderer->HasPendingScreenshotRequest()) {
+            return "capture already in progress";
+        }
+
+        std::string resolvedPath;
+        std::wstring widePath;
+        if (!ResolveCapturePath(path, resolvedPath, widePath)) {
+            return "could not resolve path";
+        }
+
+        return m_renderer->RequestTargetDump(name, widePath);
     }
 
     bool ApplicationCore::PollScreenshotResult(std::string& outMessage)
@@ -598,7 +737,7 @@ namespace SasamiRenderer
             WNDCLASS wc = {};
             wc.lpfnWndProc = WindowProccessStatic;
             wc.hInstance = GetModuleHandle(nullptr);
-            wc.lpszClassName = L"Sasami Renderer App Window";
+            wc.lpszClassName = L"Sasami Engine App Window";
             wc.hIcon = windowIcon.icon;
             wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
             if (RegisterClass(&wc) == 0) {
@@ -630,6 +769,13 @@ namespace SasamiRenderer
             const DWORD headlessLength = GetEnvironmentVariableA("SASAMI_HEADLESS", headless, sizeof(headless));
             const bool headlessMode = (headlessLength > 0 && headless[0] == '1');
             ShowWindow(m_hwnd, headlessMode ? SW_HIDE : SW_SHOW);
+
+            // SASAMI_FIXED_DT=<seconds> starts in deterministic-time mode, so a golden capture is
+            // reproducible from the very first scene frame rather than from when the pipe connects.
+            char fixedDt[32]{};
+            if (GetEnvironmentVariableA("SASAMI_FIXED_DT", fixedDt, sizeof(fixedDt)) > 0) {
+                SetFixedDeltaTime(static_cast<float>(std::atof(fixedDt)));
+            }
             m_startup = std::make_unique<StartupCoordinator>(*this);
         } catch (const std::exception& ex) {
             ReportException(L"ApplicationCore::Run initialization", ex, true);
@@ -677,10 +823,14 @@ namespace SasamiRenderer
                     ULONGLONG currentTime = GetTickCount64();
                     float deltaTime = static_cast<float>(currentTime - lastTime) * 0.001f;
                     lastTime = currentTime;
+                    if (m_fixedDeltaTime > 0.0f) {
+                        deltaTime = m_fixedDeltaTime;
+                    }
 
                     OnUpdate(deltaTime);
                     const ULONGLONG afterUpdate = GetTickCount64();
                     OnRender();
+                    ++m_sceneFrameCount;
                     const ULONGLONG afterRender = GetTickCount64();
                     if (afterRender - currentTime > 1000) {
                         char watchdog[160];
@@ -749,6 +899,11 @@ namespace SasamiRenderer
         return (msg.message == WM_QUIT) ? static_cast<int>(msg.wParam) : 0;
     }
 
+    bool ApplicationCore::IsBootRunning() const
+    {
+        return m_startup && m_startup->Phase() == BootPhase::Running;
+    }
+
     void ApplicationCore::OnInit() {
         // Legacy synchronous entry point: Run() no longer calls this directly (see
         // StartupCoordinator), but it is kept for any caller that still wants the
@@ -777,7 +932,7 @@ namespace SasamiRenderer
         if (m_assetLoadService && m_assetLoadService->PumpCompletions()) {
             InvalidateRenderObjects();
         }
-        if (!m_renderer || m_renderer->SupportsD3D12OverlayRendering()) {
+        if (!m_renderer || m_renderer->SupportsUIOverlay()) {
             ImGuiCoordinator::Instance().NewFrame();
             if (m_startup && m_startup->Phase() == BootPhase::SceneReady) {
                 BootProgressWindow::Draw(m_startup->GetBootStatusSnapshot(), false);
@@ -793,6 +948,11 @@ namespace SasamiRenderer
             // Main thread only: the handlers touch the scene and camera.
             m_debugRemoteControl->DrainPendingCommands();
         }
+        // After the commands, so debug.record start/stop take effect on this frame.
+        m_frameRecorder->Tick(*this);
+        m_voxelStreamOverlay->Tick(*this);
+        m_particleCharacterOverlay->Tick(deltaTime);
+        m_smokeSurfaceOverlay->Tick(*this);
         UpdateMainCameraProxy();
     }
 

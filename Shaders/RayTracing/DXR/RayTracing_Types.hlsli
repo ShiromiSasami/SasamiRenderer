@@ -69,7 +69,7 @@ struct FrameConstants
     uint maxBounceCount;
     float dynamicResolutionScale;
     float aoMicroShadowStrength;
-    float padding;
+    uint punctualLightFalloff; // RendererEnums::PunctualLightFalloff
     float4 cameraPosition;
     row_major float4x4 inverseViewProjection;
     float4 directionalLightDirection;

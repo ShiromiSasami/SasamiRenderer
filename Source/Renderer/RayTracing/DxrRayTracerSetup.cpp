@@ -29,7 +29,7 @@
 #include "Renderer/Utilities/ResourceUploadUtility.h"
 #include "d3dx12.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     using Microsoft::WRL::ComPtr;
 
@@ -148,6 +148,7 @@ namespace SasamiRenderer
                                                  kMaxRayTracingBounceCount);
         outConstants.dynamicResolutionScale = frameDesc.dynamicResolutionScale;
         outConstants.aoMicroShadowStrength = std::clamp(frameDesc.aoDirectLightingStrength, 0.0f, 1.0f);
+        outConstants.punctualLightFalloff = std::min(frameDesc.punctualLightFalloff, 2u);
         outConstants.cameraPosition[0] = frameDesc.cameraPosition[0];
         outConstants.cameraPosition[1] = frameDesc.cameraPosition[1];
         outConstants.cameraPosition[2] = frameDesc.cameraPosition[2];
@@ -284,4 +285,4 @@ namespace SasamiRenderer
     }
 
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

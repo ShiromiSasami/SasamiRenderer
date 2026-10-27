@@ -8,7 +8,7 @@
 #include <cstring>
 #include <vector>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     inline bool HasExtension(const std::vector<VkExtensionProperties>& extensions, const char* name)
     {
@@ -34,6 +34,7 @@ namespace SasamiRenderer
         switch (format) {
         case RhiFormat::R8UNorm: return VK_FORMAT_R8_UNORM;
         case RhiFormat::R8G8B8A8UNorm: return VK_FORMAT_R8G8B8A8_UNORM;
+        case RhiFormat::R8G8B8A8UNormSrgb: return VK_FORMAT_R8G8B8A8_SRGB;
         case RhiFormat::B8G8R8A8UNorm: return VK_FORMAT_B8G8R8A8_UNORM;
         case RhiFormat::R16G16B16A16Float: return VK_FORMAT_R16G16B16A16_SFLOAT;
         case RhiFormat::R32G32B32Float: return VK_FORMAT_R32G32B32_SFLOAT;
@@ -177,6 +178,13 @@ namespace SasamiRenderer
         }
     }
 
+    // RhiResourceState::Common answers the conservative MEMORY_READ / ALL_COMMANDS below, and the
+    // command encoder used to answer 0 / TOP_OF_PIPE instead. Both are defensible, because Common
+    // means two different things the RHI cannot tell apart: "just created, nothing has touched it"
+    // (where 0 / TOP_OF_PIPE is correct and free) and "state the graph could not classify" (where
+    // it is a missing dependency -- the barrier waits on nothing and orders nothing after it).
+    // These feed both the src and dst halves of vkCmdPipelineBarrier, so the wrong answer there is
+    // a silent synchronisation hole. The conservative pair is at worst a needless stall.
     inline VkAccessFlags ToVkAccessFlags(RhiResourceState state)
     {
         switch (state) {
@@ -188,6 +196,7 @@ namespace SasamiRenderer
         case RhiResourceState::CopySource: return VK_ACCESS_TRANSFER_READ_BIT;
         case RhiResourceState::CopyDest: return VK_ACCESS_TRANSFER_WRITE_BIT;
         case RhiResourceState::Present: return VK_ACCESS_MEMORY_READ_BIT;
+        case RhiResourceState::IndirectArgument: return VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
         case RhiResourceState::Common:
         default: return VK_ACCESS_MEMORY_READ_BIT;
         }
@@ -207,6 +216,7 @@ namespace SasamiRenderer
         case RhiResourceState::CopyDest:
             return VK_PIPELINE_STAGE_TRANSFER_BIT;
         case RhiResourceState::Present: return VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        case RhiResourceState::IndirectArgument: return VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
         case RhiResourceState::Common:
         default: return VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
         }
@@ -254,6 +264,65 @@ namespace SasamiRenderer
         default: return VK_COMPARE_OP_ALWAYS;
         }
     }
+    // Shared by the native mesh path, the skinned mesh path and RenderMeshFrame, which is
+    // why these cannot live in any one of those translation units.
+    //
+    // `model` used to carry a pre-fused model*viewProjection matrix, but viewProjection is
+    // frame-constant (identical for every draw), so it has been moved into
+    // VulkanNativeMeshFrameConstants (a per-frame UBO) and this field now holds the plain,
+    // genuinely per-draw model matrix instead. The struct's size -- and therefore its fit within
+    // Vulkan's guaranteed 128-byte push constant minimum -- is unchanged; only the field's meaning
+    // is repurposed.
+    struct VulkanNativeMeshPushConstants
+    {
+        float model[16];
+        float baseColor[4];
+        float emissiveRoughness[4]; // xyz = emissive, w = roughness
+        float materialParams[4];    // x = metallic, yzw = unused
+    };
+
+    static_assert(sizeof(VulkanNativeMeshPushConstants) <= 128,
+                  "Native Vulkan mesh push constants must stay within the guaranteed 128-byte minimum.");
+
+    // Per-frame constants for the native mesh path: identical for every draw call in a frame, so
+    // they are written once into a small UBO rather than duplicated per-draw. shadowParams mirrors
+    // Dx11ShadowMap's layout exactly: x=depthBias, y=normalBias, z=texelWorld,
+    // w=resolutionOrZero (0 => shadows disabled, matching NativeShadow.hlsli's SampleShadow
+    // early-out on shadowParams.w == 0).
+    struct VulkanNativeMeshFrameConstants
+    {
+        float viewProjection[16];
+        float lightViewProjection[16];
+        float shadowParams[4];
+        // Runtime (screen-space) AO: x = 1 when a refreshed AO texture is bound this frame (0 means
+        // the white dummy is bound and runtimeAo degrades to 1.0, i.e. materialAo only), y/z = the
+        // inverse render resolution used to turn SV_POSITION into the AO texture's UV, w = tonemap
+        // exposure (RenderSettings::exposure).
+        // Lives here rather than in the push constant for the usual reason: that struct is already
+        // at Vulkan's guaranteed 128-byte minimum. The DirectX 11 equivalents are
+        // u_featureFlags.z and u_featureFlags2.zw.
+        float aoParams[4];
+        float lightDirIntensity[4]; // xyz = light travel direction, w = intensity
+        float lightColor[4];        // rgb = colour, w = 1 when the ambient cube is bound
+        float cameraPosFlags[4];    // xyz = camera world position, w = 1 when IBL ambient is enabled
+    };
+
+    inline VkVertexInputAttributeDescription MakeNativeMeshAttribute(uint32_t location,
+                                                              VkFormat format,
+                                                              uint32_t offset)
+    {
+        VkVertexInputAttributeDescription attribute{};
+        attribute.location = location;
+        attribute.binding = 0;
+        attribute.format = format;
+        attribute.offset = offset;
+        return attribute;
+    }
+
 }
 
 #endif
+
+// Same reason as the Foundation headers: the directive sits on
+// SasamiEngine so that anything nested under it finds these names by enclosing-namespace lookup.
+namespace SasamiEngine { using namespace Render; }

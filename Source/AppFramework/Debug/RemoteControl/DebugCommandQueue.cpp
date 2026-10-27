@@ -1,6 +1,6 @@
 #include "Debug/RemoteControl/DebugCommandQueue.h"
 
-namespace SasamiRenderer::Debug
+namespace SasamiEngine::App::Debug
 {
     std::string DebugCommandQueue::Submit(std::string requestLine, std::chrono::milliseconds timeout)
     {

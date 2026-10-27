@@ -64,8 +64,10 @@ PSOutput PSMain(PSInput input)
 
     // Reconstruct world-space ray direction from screen UV.
     float2 ndcXY = float2(input.uv.x * 2.0f - 1.0f, 1.0f - input.uv.y * 2.0f);
-    float4 nearH = mul(float4(ndcXY, 0.0f, 1.0f), u_invVP);
-    float4 farH  = mul(float4(ndcXY, 1.0f, 1.0f), u_invVP);
+    // Reverse-Z: near = 1.0, far = 0.0, so the NDC z literals used to reconstruct
+    // the near/far world points are swapped relative to the forward-Z convention.
+    float4 nearH = mul(float4(ndcXY, 1.0f, 1.0f), u_invVP);
+    float4 farH  = mul(float4(ndcXY, 0.0f, 1.0f), u_invVP);
     if (abs(nearH.w) < 1e-7f || abs(farH.w) < 1e-7f)
     {
         PSOutput o; o.color = float4(0,0,0,0); return o;
@@ -115,7 +117,7 @@ PSOutput PSMain(PSInput input)
         if (d <= 0.0f) continue;
 
         // Extinction coefficient (density ﾃ・absorption coefficient).
-        float  sigma = d * 0.015f;            // tuned for km-scale march
+        float  sigma = CloudExtinction(d);    // 1/m, shared with the sun march
         float  sampleT = exp(-sigma * stepSize);
         float  sampleTau = 1.0f - sampleT;
 

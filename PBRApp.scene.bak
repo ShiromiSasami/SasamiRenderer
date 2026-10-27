@@ -1,0 +1,54 @@
+# SasamiRenderer Scene v1
+
+[directional_light]
+yaw = -2.4
+pitch = 0.75
+distance = 50
+ortho_half = 0.1
+near_z = 0.01
+far_z = 95.509
+intensity = 2.97
+r = 1
+g = 1
+b = 1
+shadow_mode = 1
+shadow_distance = 250
+cascade_exponent = 3.662
+cascade_blend = 0.1
+depth_range_mode = 0
+depth_bias = 2210.53
+slope_scale_bias = 2
+normal_bias = 0.09
+far_bias_scale = 3.786
+contact_shadow = 1
+
+[camera]
+position_x = 0
+position_y = 0
+position_z = 0
+target_x = 0
+target_y = 0
+target_z = 0
+yaw = 0
+pitch = 0
+distance = 2.5
+near_clip = 0.05
+far_clip = 500
+move_speed = 1
+
+[static_model]
+path = Models/VRoidAvatarSampleD/AvatarSample_D.glb
+format = gltf
+uniform_scale = 1
+x = 0
+y = 0
+z = 0
+
+[static_model]
+path = \\wsl.localhost\Ubuntu\tmp\claude-1000\-mnt-d-Git-SasamiRenderer\83898b2f-a9a4-47b7-a70b-878b2e38e911\scratchpad\floor.obj
+format = obj
+uniform_scale = 1
+x = 0
+y = 0
+z = 0
+

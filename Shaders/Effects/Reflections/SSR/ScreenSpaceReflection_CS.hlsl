@@ -20,15 +20,29 @@ SamplerState LinearClamp : register(s0);
 
 #include "Shared/Common/WorldPosReconstruction.hlsli"
 
-float2 ProjectToUv(float3 worldPos, out float ndcDepth, out bool valid)
+// Linear view depth (clip-space w) of a depth-buffer sample. For ndc = clip / w,
+// mul(ndc, invPV).w == 1 / clip.w, so no world-space reconstruction is needed.
+float SceneViewDepth(float2 uv, float depth)
 {
-    float4 clip = mul(float4(worldPos, 1.0f), u_cameraPV);
-    valid = clip.w > 1e-5f;
-    float3 ndc = clip.xyz / max(clip.w, 1e-6f);
-    ndcDepth = ndc.z;
-    valid = valid && ndcDepth > 0.0f && ndcDepth < 1.0f &&
-            all(ndc.xy >= -1.0f) && all(ndc.xy <= 1.0f);
-    return ndc.xy * float2(0.5f, -0.5f) + 0.5f;
+    float4 ndc = float4(uv.x * 2.0f - 1.0f, (1.0f - uv.y) * 2.0f - 1.0f, depth, 1.0f);
+    float invW = mul(ndc, u_cameraInvPV).w;
+    return 1.0f / max(invW, 1e-9f);
+}
+
+// Interleaved gradient noise (Jimenez 2014, "Next Generation Post Processing in Call of Duty: Advanced Warfare").
+float InterleavedGradientNoise(float2 p)
+{
+    return frac(52.9829189f * frac(dot(p, float2(0.06711056f, 0.00583715f))));
+}
+
+// Undoes the xy permutation applied for the DDA major axis.
+float2 UnpermutePixelPos(float2 p, bool permuted)
+{
+    float2 result = p;
+    if (permuted) {
+        result = p.yx;
+    }
+    return result;
 }
 
 float EdgeFade(float2 uv)
@@ -39,6 +53,9 @@ float EdgeFade(float2 uv)
 
 bool IsValidDepth(float depth)
 {
+    // Reverse-Z: near = 1.0, far = 0.0. depth <= 1e-5f rejects the cleared far/background
+    // plane and depth >= 0.99999f rejects the degenerate near-plane clip; the numeric
+    // bounds are unchanged from the forward-Z form since both extremes are still excluded.
     return depth > 1e-5f && depth < 0.99999f;
 }
 
@@ -93,67 +110,105 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     bool hit = false;
     float2 hitUv = 0.0f;
     float hitConfidence = 0.0f;
-    float prevT = 0.0f;
-    float currT = 0.0f;
 
-    [loop]
-    for (uint stepIndex = 1u; stepIndex <= stepCount; ++stepIndex) {
-        float normalizedStep = (float)stepIndex / (float)stepCount;
-        currT = maxDistance * normalizedStep * normalizedStep;
-        float3 samplePos = rayOrigin + rayDir * currT;
-        float sampleNdcDepth = 0.0f;
-        bool validProjection = false;
-        float2 sampleUv = ProjectToUv(samplePos, sampleNdcDepth, validProjection);
-        if (!validProjection) {
-            break;
+    // Screen-space DDA march with a view-depth thickness test, after McGuire & Mara 2014,
+    // "Efficient GPU Screen-Space Ray Tracing", JCGT 3(4). 1 / w is affine in screen space,
+    // so it is interpolated linearly along the projected line (perspective-correct depth).
+    const float NEAR_W_EPSILON = 1e-3f;
+    float4 clip0 = mul(float4(rayOrigin, 1.0f), u_cameraPV);
+    float4 clip1 = mul(float4(rayOrigin + rayDir * maxDistance, 1.0f), u_cameraPV);
+    if (clip0.w > NEAR_W_EPSILON) {
+        if (clip1.w < NEAR_W_EPSILON) {
+            // Keep the segment in front of the camera.
+            float nearT = (clip0.w - NEAR_W_EPSILON) / (clip0.w - clip1.w);
+            clip1 = lerp(clip0, clip1, nearT);
         }
 
-        uint2 samplePixel = uint2(min(floor(sampleUv * u_screenSize.xy), u_screenSize.xy - 1.0f));
-        float sceneDepth = DepthTex.Load(int3(samplePixel, 0));
-        if (!IsValidDepth(sceneDepth)) {
-            prevT = currT;
-            continue;
+        float k0 = 1.0f / clip0.w;
+        float k1 = 1.0f / clip1.w;
+        float2 p0 = (clip0.xy * k0 * float2(0.5f, -0.5f) + 0.5f) * u_screenSize.xy;
+        float2 p1 = (clip1.xy * k1 * float2(0.5f, -0.5f) + 0.5f) * u_screenSize.xy;
+        float2 lineDelta = p1 - p0;
+        float dk = k1 - k0;
+
+        // Clip the screen-space segment to the viewport rectangle.
+        float clipFraction = 1.0f;
+        if (lineDelta.x > 1e-6f) {
+            clipFraction = min(clipFraction, (u_screenSize.x - p0.x) / lineDelta.x);
+        } else if (lineDelta.x < -1e-6f) {
+            clipFraction = min(clipFraction, -p0.x / lineDelta.x);
+        }
+        if (lineDelta.y > 1e-6f) {
+            clipFraction = min(clipFraction, (u_screenSize.y - p0.y) / lineDelta.y);
+        } else if (lineDelta.y < -1e-6f) {
+            clipFraction = min(clipFraction, -p0.y / lineDelta.y);
+        }
+        clipFraction = max(clipFraction, 0.0f);
+        lineDelta *= clipFraction;
+        dk *= clipFraction;
+
+        // DDA along the major axis: permute xy so x is always the long axis.
+        bool permuted = abs(lineDelta.y) > abs(lineDelta.x);
+        if (permuted) {
+            p0 = p0.yx;
+            lineDelta = lineDelta.yx;
         }
 
-        float3 sceneWorldPos = ReconstructWorldPos(sampleUv, sceneDepth);
-        float sceneT = dot(sceneWorldPos - rayOrigin, rayDir);
-        float rayDelta = currT - sceneT;
-        float adaptiveThickness = thickness * (1.0f + normalizedStep * 2.0f);
-        if (sceneT > 0.0f && rayDelta >= -adaptiveThickness * 0.25f && rayDelta <= adaptiveThickness) {
-            float lowT = prevT;
-            float highT = currT;
-            hitUv = sampleUv;
+        float totalPixels = abs(lineDelta.x);
+        if (totalPixels >= 1.0f) {
+            float pixelStep = max(1.0f, totalPixels / (float)stepCount);
+            float totalSteps = totalPixels / pixelStep;
+            uint iterations = min(stepCount, (uint)ceil(totalSteps));
+            float jitter = InterleavedGradientNoise(float2(pixel));
+
+            float prevParam = 0.0f;
             [loop]
-            for (uint refine = 0u; refine < refineSteps; ++refine) {
-                float midT = 0.5f * (lowT + highT);
-                float3 midPos = rayOrigin + rayDir * midT;
-                float midNdcDepth = 0.0f;
-                bool midValid = false;
-                float2 midUv = ProjectToUv(midPos, midNdcDepth, midValid);
-                if (!midValid) {
-                    highT = midT;
+            for (uint stepIndex = 1u; stepIndex <= iterations; ++stepIndex) {
+                float currParam = min((float)stepIndex + jitter, totalSteps) / totalSteps;
+                float2 samplePos = UnpermutePixelPos(p0 + lineDelta * currParam, permuted);
+                uint2 samplePixel = uint2(clamp(floor(samplePos), float2(0.0f, 0.0f), u_screenSize.xy - 1.0f));
+                float2 sampleUv = (float2(samplePixel) + 0.5f) * u_screenSize.zw;
+                float sceneDepth = DepthTex.Load(int3(samplePixel, 0));
+                if (!IsValidDepth(sceneDepth)) {
+                    prevParam = currParam;
                     continue;
                 }
-                uint2 midPixel = uint2(min(floor(midUv * u_screenSize.xy), u_screenSize.xy - 1.0f));
-                float midSceneDepth = DepthTex.Load(int3(midPixel, 0));
-                if (!IsValidDepth(midSceneDepth)) {
-                    lowT = midT;
-                    continue;
+
+                float sceneW = SceneViewDepth(sampleUv, sceneDepth);
+                float prevRayW = 1.0f / (k0 + dk * prevParam);
+                float currRayW = 1.0f / (k0 + dk * currParam);
+                float rayMinW = min(prevRayW, currRayW);
+                float rayMaxW = max(prevRayW, currRayW);
+                if (rayMaxW >= sceneW && rayMinW <= sceneW + thickness) {
+                    float lowParam = prevParam;
+                    float highParam = currParam;
+                    hitUv = sampleUv;
+                    [loop]
+                    for (uint refine = 0u; refine < refineSteps; ++refine) {
+                        float midParam = 0.5f * (lowParam + highParam);
+                        float2 midPos = UnpermutePixelPos(p0 + lineDelta * midParam, permuted);
+                        uint2 midPixel = uint2(clamp(floor(midPos), float2(0.0f, 0.0f), u_screenSize.xy - 1.0f));
+                        float2 midUv = (float2(midPixel) + 0.5f) * u_screenSize.zw;
+                        float midSceneDepth = DepthTex.Load(int3(midPixel, 0));
+                        if (!IsValidDepth(midSceneDepth)) {
+                            lowParam = midParam;
+                            continue;
+                        }
+                        float midRayW = 1.0f / (k0 + dk * midParam);
+                        if (midRayW >= SceneViewDepth(midUv, midSceneDepth)) {
+                            highParam = midParam;
+                            hitUv = midUv;
+                        } else {
+                            lowParam = midParam;
+                        }
+                    }
+                    hit = true;
+                    hitConfidence = EdgeFade(hitUv) * (1.0f - smoothstep(0.45f, u_traceParams0.w, roughness));
+                    break;
                 }
-                float3 midSceneWorldPos = ReconstructWorldPos(midUv, midSceneDepth);
-                float midSceneT = dot(midSceneWorldPos - rayOrigin, rayDir);
-                if (midT >= midSceneT) {
-                    highT = midT;
-                    hitUv = midUv;
-                } else {
-                    lowT = midT;
-                }
+                prevParam = currParam;
             }
-            hit = true;
-            hitConfidence = EdgeFade(hitUv) * (1.0f - smoothstep(0.45f, u_traceParams0.w, roughness));
-            break;
         }
-        prevT = currT;
     }
 
     if (!hit || hitConfidence <= 0.0f) {

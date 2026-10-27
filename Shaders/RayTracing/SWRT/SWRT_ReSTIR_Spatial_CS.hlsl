@@ -44,6 +44,7 @@ cbuffer ReSTIRFrameConstants : register(b0)
     uint   g_spotLightCount;
     uint   g_cbPad0;
     uint   g_cbPad1;
+    uint   g_punctualLightFalloff; // RendererEnums::PunctualLightFalloff (offset 256)
 };
 
 Texture2D<float4> g_gbuffer     : register(t6);  // secondary normal.xyz + hit distance
@@ -121,8 +122,8 @@ void CS_ReSTIR_Spatial(uint3 id : SV_DispatchThreadID)
         // Random neighbour in disk of roughness-adaptive radius
         float angle  = Rand01(rngState) * 6.28318530718f;
         float radius = Rand01(rngState) * effectiveRadius;
-        int2  offset = int2(int(radius * cos(angle) + 0.5f),
-                            int(radius * sin(angle) + 0.5f));
+        int2  offset = int2(round(float2(cos(angle), sin(angle)) * radius));
+        if (offset.x == 0 && offset.y == 0) continue;  // skip the centre pixel
         int2  nPixel = int2(id.xy) + offset;
 
         if (nPixel.x < 0 || nPixel.x >= int(g_renderWidth) ||

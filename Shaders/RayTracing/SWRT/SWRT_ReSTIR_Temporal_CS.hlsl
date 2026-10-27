@@ -38,6 +38,7 @@ cbuffer ReSTIRFrameConstants : register(b0)
     uint   g_spotLightCount;
     uint   g_cbPad0;
     uint   g_cbPad1;
+    uint   g_punctualLightFalloff; // RendererEnums::PunctualLightFalloff (offset 256)
 };
 
 Texture2D<float4> g_gbuffer     : register(t6);
@@ -71,6 +72,49 @@ void CS_ReSTIR_Temporal(uint3 id : SV_DispatchThreadID)
     }
 
     float3 N = normalize(gbuf.xyz);
+
+    // Temporal reuse (Bitterli et al. 2020, Alg. 4; Wyman et al. 2023).
+    // Reproject the current secondary hit with the previous view-projection.
+    // The previous secondary hit position is not bound, so the history pixel is
+    // validated against prevGBuffer (normal + hit distance) only.
+    if (g_frameIndex > 0u)
+    {
+        float4 clip = mul(float4(hitPos.xyz, 1.0f), g_prevVP);
+        if (clip.w > 1e-6f)
+        {
+            float2 ndc    = clip.xy / clip.w;
+            float2 prevUV = ndc * float2(0.5f, -0.5f) + 0.5f;
+            if (all(prevUV >= 0.0f) && all(prevUV < 1.0f))
+            {
+                int2   prevPx    = int2(prevUV * float2(g_renderWidth, g_renderHeight));
+                float4 prevGbuf  = g_prevGBuffer[uint2(prevPx)];
+                bool   prevValid = prevGbuf.w >= 0.0f;
+
+                // Geometric validation: relative depth (10%) and normal (cos 0.9).
+                float depthDiff = abs(prevGbuf.w - gbuf.w) / max(abs(gbuf.w), 1e-4f);
+                prevValid = prevValid && (depthDiff <= 0.1f);
+                prevValid = prevValid && (dot(normalize(prevGbuf.xyz), N) >= 0.9f);
+
+                if (prevValid)
+                {
+                    uint      prevIdx = uint(prevPx.y) * g_reservoirWidth + uint(prevPx.x);
+                    Reservoir prev    = g_prevTemporal[prevIdx];
+
+                    if (prev.M > 0u && prev.lightIndex != 0xFFFFFFFFu &&
+                        isfinite(prev.W) && prev.W > 0.0f)
+                    {
+                        // M-cap: history confidence limited to 20x current (Bitterli 2020, Sec. 6).
+                        prev.M = min(prev.M, 20u * r.M);
+
+                        uint  rngState = ReSTIRSeed(id.xy, g_frameIndex, 1u);
+                        float pHatPrev = EvalPhat(prev.lightIndex, hitPos.xyz, N);
+                        CombineReservoir(r, prev, pHatPrev, Rand01(rngState));
+                    }
+                }
+            }
+        }
+    }
+
     float p_hat_y = EvalPhat(r.lightIndex, hitPos.xyz, N);
     FinalizeReservoir(r, p_hat_y);
     g_reservoirOut[pixIdx] = r;

@@ -53,8 +53,13 @@ void CS_AO(uint3 id : SV_DispatchThreadID)
         min(uint(float(id.y) * float(g_gbufferHeight) / float(g_renderHeight)), g_gbufferHeight - 1u));
 
     float4 gbufNormal = g_gbufferNormal.Load(int3(gbufPx, 0));
-    float ndcDepth = gbufNormal.w;
-    if (ndcDepth <= 0.0f)
+    // GBufferNormal.w is the LINEAR camera distance written by OpaqueGBuffer_PS.hlsl
+    // (length(worldPos - cameraPos)), not an NDC depth. It used to be named ndcDepth and fed
+    // straight into g_invVP as if it were one, which put the reconstructed position wherever a
+    // metres-scale value lands in a [0,1] depth slot. Every other SWRT pass reconstructs with
+    // cameraPos + rayDir * linearDepth; this one now matches.
+    float linearDepth = gbufNormal.w;
+    if (linearDepth <= 0.0f)
     {
         g_output[id.xy] = float4(1.0f, 1.0f, 1.0f, 1.0f);
         return;
@@ -64,8 +69,11 @@ void CS_AO(uint3 id : SV_DispatchThreadID)
 
     float ndcX =  ((float(gbufPx.x) + 0.5f) / float(g_gbufferWidth))  * 2.0f - 1.0f;
     float ndcY = -((float(gbufPx.y) + 0.5f) / float(g_gbufferHeight)) * 2.0f + 1.0f;
-    float4 posH = mul(float4(ndcX, ndcY, ndcDepth, 1.0f), g_invVP);
-    float3 worldPos = posH.xyz / max(posH.w, 1e-6f);
+    // Reverse-Z: the far plane is NDC z = 0, so this unprojects a far-plane point and the
+    // camera-to-point vector gives the view ray.
+    float4 viewRayH = mul(float4(ndcX, ndcY, 0.0f, 1.0f), g_invVP);
+    float3 rayDir   = normalize(viewRayH.xyz / viewRayH.w - g_cameraPos);
+    float3 worldPos = g_cameraPos + rayDir * linearDepth;
 
     if (g_tlasNodes[0].leftChild == 0 && g_tlasNodes[0].rightOrCount == 0)
     {
@@ -75,7 +83,6 @@ void CS_AO(uint3 id : SV_DispatchThreadID)
 
     uint sampleCount = max(1u, g_sampleCount);
     float occluded = 0.0f;
-    const float originBias = max(g_tMin, 1e-4f);
 
     [loop]
     for (uint s = 0u; s < sampleCount; ++s)
@@ -89,9 +96,9 @@ void CS_AO(uint3 id : SV_DispatchThreadID)
         Xi = frac(Xi + jitter);
 
         float3 sampleDir = TangentToWorld(CosineSampleHemisphere(Xi), N);
-        bool blocked = TraceAnyHit(worldPos + N * originBias,
+        bool blocked = TraceAnyHit(OffsetRay(worldPos, N),
                                    sampleDir,
-                                   originBias,
+                                   g_tMin,
                                    g_radius);
         occluded += blocked ? 1.0f : 0.0f;
     }

@@ -40,7 +40,7 @@
 
 using Microsoft::WRL::ComPtr;
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     // -------------------------------------------------------------------------
     // Internal helpers (anonymous namespace)
@@ -262,8 +262,8 @@ namespace SasamiRenderer
             return false;
         }
 
-        // ---- ReSTIR constants buffer: 7 slots of 256 bytes ----
-        constexpr UINT64 kRestirCbufTotal = 256u * kReSTIRCbufSlotCount;
+        // ---- ReSTIR constants buffer: kReSTIRCbufSlotCount slots of kReSTIRCbufSlotSize bytes ----
+        constexpr UINT64 kRestirCbufTotal = kReSTIRCbufSlotSize * kReSTIRCbufSlotCount;
         if (!ResourceUploadUtility::CreateUploadBuffer(device, kRestirCbufTotal,
                                                         m_restirConstantsBuffer,
                                                         reinterpret_cast<void**>(&m_restirConstantsMapped))) {
@@ -356,7 +356,7 @@ namespace SasamiRenderer
 
         if (!CreateUavTexture2D(device, w, h, DXGI_FORMAT_R16G16B16A16_FLOAT, kSrv, m_nrdDiffIn))          return false;
         if (!CreateUavTexture2D(device, w, h, DXGI_FORMAT_R16_FLOAT,          kSrv, m_nrdViewZ))            return false;
-        if (!CreateUavTexture2D(device, w, h, DXGI_FORMAT_R8G8B8A8_UNORM,     kSrv, m_nrdNormalRoughness))  return false;
+        if (!CreateUavTexture2D(device, w, h, DXGI_FORMAT_R10G10B10A2_UNORM,  kSrv, m_nrdNormalRoughness))  return false;
         if (!CreateUavTexture2D(device, w, h, DXGI_FORMAT_R16G16_FLOAT,       kSrv, m_nrdMotionVec))        return false;
         if (!CreateUavTexture2D(device, w, h, DXGI_FORMAT_R16G16B16A16_FLOAT, kSrv, m_nrdDiffOut))          return false;
 
@@ -374,14 +374,14 @@ namespace SasamiRenderer
 
         nrd::DenoiserDesc denoiserDescs[1] = {};
         denoiserDescs[0].identifier = 0u;
-        denoiserDescs[0].denoiser   = nrd::Denoiser::RELAX_DIFFUSE;
+        denoiserDescs[0].denoiser   = nrd::Denoiser::RELAX_SPECULAR;
 
         nrd::InstanceCreationDesc instanceDesc = {};
         instanceDesc.denoisers    = denoiserDescs;
         instanceDesc.denoisersNum = 1;
 
         nrd::IntegrationCreationDesc integrationDesc = {};
-        strncpy_s(integrationDesc.name, "RELAX_D", sizeof(integrationDesc.name) - 1);
+        strncpy_s(integrationDesc.name, "RELAX_S", sizeof(integrationDesc.name) - 1);
         integrationDesc.resourceWidth       = static_cast<uint16_t>(w);
         integrationDesc.resourceHeight      = static_cast<uint16_t>(h);
         integrationDesc.queuedFrameNum      = 3;
@@ -443,6 +443,7 @@ namespace SasamiRenderer
         out.ambientIntensity = 1.0f;
         out.cbPad0 = desc.gbufferWidth ? desc.gbufferWidth : desc.width;
         out.cbPad1 = desc.gbufferHeight ? desc.gbufferHeight : desc.height;
+        out.punctualLightFalloff = desc.frameDesc.punctualLightFalloff;
 
         const auto& dirLight = desc.frameDesc.directionalLight;
         {
@@ -816,4 +817,4 @@ namespace SasamiRenderer
     // =========================================================================
 
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render

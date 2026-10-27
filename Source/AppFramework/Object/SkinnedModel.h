@@ -5,7 +5,7 @@
 #include "Component/SkinnedMeshComponent.h"
 #include "Object/SObject.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     class SkinnedModel : public SObject
     {
@@ -39,3 +39,4 @@ namespace SasamiRenderer
         }
     };
 }
+namespace SasamiEngine { using namespace App; }

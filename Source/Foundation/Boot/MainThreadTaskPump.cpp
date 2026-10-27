@@ -2,7 +2,7 @@
 
 #include <chrono>
 
-namespace SasamiRenderer
+namespace SasamiEngine::Foundation
 {
     void MainThreadTaskPump::Enqueue(StepFn step, FinishedFn onFinished)
     {

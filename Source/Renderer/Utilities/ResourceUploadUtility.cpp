@@ -3,7 +3,7 @@
 #include "Foundation/Math/MathUtil.h"
 #include "d3dx12.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     namespace ResourceUploadUtility
     {
@@ -52,7 +52,8 @@ namespace SasamiRenderer
                                       UINT width,
                                       UINT height,
                                       Resource& outTexture,
-                                      Resource& outUpload)
+                                      Resource& outUpload,
+                                      DXGI_FORMAT format)
         {
             if (!pixels || width == 0 || height == 0 || !cmdList) {
                 return false;
@@ -64,7 +65,7 @@ namespace SasamiRenderer
             texDesc.Height = height;
             texDesc.DepthOrArraySize = 1;
             texDesc.MipLevels = 1;
-            texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+            texDesc.Format = format;
             texDesc.SampleDesc.Count = 1;
             texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
             texDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
@@ -110,7 +111,8 @@ namespace SasamiRenderer
                                               CommandList* cmdList,
                                               const TextureMipChain& chain,
                                               Resource& outTexture,
-                                              Resource& outUpload)
+                                              Resource& outUpload,
+                                              DXGI_FORMAT format)
         {
             if (!cmdList || !chain.IsValid() ||
                 chain.levels[0].width == 0 || chain.levels[0].height == 0) {
@@ -125,7 +127,7 @@ namespace SasamiRenderer
             texDesc.Height = chain.levels[0].height;
             texDesc.DepthOrArraySize = 1;
             texDesc.MipLevels = static_cast<UINT16>(chain.levels.size());
-            texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+            texDesc.Format = format;
             texDesc.SampleDesc.Count = 1;
             texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
             texDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
@@ -304,7 +306,7 @@ namespace SasamiRenderer
                     auto& dst = halfData[subresourceIndex];
                     dst.resize(src.size());
                     for (size_t i = 0; i < src.size(); ++i) {
-                        dst[i] = SasamiRenderer::Math::FloatToHalf(src[i]);
+                        dst[i] = SasamiEngine::Foundation::Math::FloatToHalf(src[i]);
                     }
 
                     subresourceDescs[subresourceIndex].pData = dst.data();
@@ -379,7 +381,7 @@ namespace SasamiRenderer
 
             std::vector<uint16_t> halfPixels(pixels.size());
             for (size_t i = 0; i < pixels.size(); ++i) {
-                halfPixels[i] = SasamiRenderer::Math::FloatToHalf(pixels[i]);
+                halfPixels[i] = SasamiEngine::Foundation::Math::FloatToHalf(pixels[i]);
             }
 
             D3D12_SUBRESOURCE_DATA subresource = {};

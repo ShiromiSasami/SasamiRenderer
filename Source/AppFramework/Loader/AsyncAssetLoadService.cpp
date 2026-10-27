@@ -6,7 +6,7 @@
 #include "Foundation/Tools/DebugOutput.h"
 #include "Loader/AssetLoader.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::App
 {
     namespace
     {

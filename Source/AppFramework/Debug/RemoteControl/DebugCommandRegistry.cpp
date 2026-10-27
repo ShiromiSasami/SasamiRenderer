@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace SasamiRenderer::Debug
+namespace SasamiEngine::App::Debug
 {
     namespace
     {

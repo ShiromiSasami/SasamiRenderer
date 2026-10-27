@@ -1,0 +1,1 @@
+Source: https://github.com/CedricGuillemet/ImGuizmo commit 105e4fde45e4e74aae8973d98750820ef7aca7e2 (2026-10-10), src/ImGuizmo.{h,cpp}, MIT

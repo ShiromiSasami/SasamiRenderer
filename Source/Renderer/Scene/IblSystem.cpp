@@ -13,7 +13,7 @@
 #include "Renderer/Utilities/ResourceUploadUtility.h"
 #include "d3dx12.h"
 
-namespace SasamiRenderer
+namespace SasamiEngine::Render
 {
     bool IblSystem::Initialize(IRHIDevice& device, const AllocateSrvRangeCallback& allocateSrvRange)
     {
@@ -404,4 +404,4 @@ namespace SasamiRenderer
         }
     }
 
-} // namespace SasamiRenderer
+} // namespace SasamiEngine::Render
